@@ -15,12 +15,16 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const s = supabase.getSession();
-      if (s?.access_token) {
-        const { data } = await supabase.from("user_profiles_view").select("*").eq("id", s.user.id).single();
-        const u = { ...s.user, profile: data || { role: "operator" } };
-        setUser(u);
-        if (u.profile.role === "operator" || u.profile.role === "sales") setLang("zh");
+      try {
+        const s = supabase.getSession();
+        if (s?.access_token && s?.user?.id) {
+          const { data } = await supabase.from("user_profiles_view").select("*").eq("id", s.user.id).single();
+          const u = { ...s.user, profile: data || { role: "operator" } };
+          setUser(u);
+          if (u.profile.role === "operator" || u.profile.role === "sales") setLang("zh");
+        }
+      } catch (e) {
+        console.error("Session init error:", e);
       }
       setLoading(false);
     })();

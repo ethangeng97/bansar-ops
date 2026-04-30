@@ -32,7 +32,7 @@ export default function App() {
 
   const login = async () => {
     setAuthError("");
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signIn(email, password);
     if (error) { setAuthError(error.message); return; }
     window.location.reload();
   };

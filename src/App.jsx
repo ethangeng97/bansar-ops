@@ -12,6 +12,7 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [openGroups, setOpenGroups] = useState({ shipping: true });
 
   useEffect(() => {
     (async () => {
@@ -94,7 +95,6 @@ export default function App() {
     ]},
   ];
 
-  const [openGroups, setOpenGroups] = useState({ shipping: true });
   const toggleGroup = (key) => setOpenGroups(p => ({ ...p, [key]: !p[key] }));
 
   return (

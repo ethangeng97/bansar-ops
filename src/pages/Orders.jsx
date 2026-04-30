@@ -123,13 +123,14 @@ export function OrdersPage({ user }) {
 }
 
 // =========================================================================
-// Order Detail — two-tab detail page
+// Order Detail — Page 1: order info, Page 2: charges
 // =========================================================================
 function OrderDetail({ order, role, user, onBack, onReload }) {
   const [tab, setTab] = useState("info");
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
+  const [cargoItems, setCargoItems] = useState([]);
 
   useEffect(() => {
     Promise.all([
@@ -139,7 +140,16 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
     ]).then(([s, c, p]) => {
       setRefData({ suppliers: (s.data || []).map(r => r.name), customers: (c.data || []).map(r => r.name), ports: (p.data || []).map(r => r.name) });
     });
-  }, []);
+    // Load container_items as cargo detail
+    if (order.po || order.customer_po) {
+      const q = order.po && order.customer_po
+        ? supabase.from("container_items").select("*").eq("po", order.po).eq("customer_po", String(order.customer_po))
+        : order.customer_po
+          ? supabase.from("container_items").select("*").eq("customer_po", String(order.customer_po))
+          : supabase.from("container_items").select("*").eq("po", order.po);
+      q.then(({ data }) => setCargoItems(data || []));
+    }
+  }, [order.id]);
 
   const startEdit = () => { setEditData({ ...order }); setEditing(true); };
   const cancelEdit = () => { setEditing(false); };
@@ -180,98 +190,146 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
 
   return (
     <div>
-      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 0", border: "none", background: "none", color: "#0ea5e9", fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 8 }}>← {t("Back")}</button>
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 0", border: "none", background: "none", color: "#0ea5e9", fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 8 }}>← 返回</button>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, fontFamily: "'DM Mono',monospace" }}>{order.order_no || order.po || "Order"}</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, fontFamily: "'DM Mono',monospace" }}>{order.order_no || order.po || "订单详情"}</h1>
           <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0" }}>{order.supplier || ""} · {order.customer || ""} · {order.carrier || ""}</p>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {Object.keys(STATUS_CONFIGS).map(k => order[k] ? <Badge key={k} value={order[k]} /> : null)}
-          {!editing && <Button small onClick={startEdit}>✎ {t("Edit")}</Button>}
-          {editing && <><Button small onClick={saveEdit}>✓ {t("Save")}</Button><Button small variant="secondary" onClick={cancelEdit}>✕ {t("Cancel")}</Button></>}
+          {!editing && <Button small onClick={startEdit}>✎ 编辑</Button>}
+          {editing && <><Button small onClick={saveEdit}>✓ 保存</Button><Button small variant="secondary" onClick={cancelEdit}>✕ 取消</Button></>}
         </div>
       </div>
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
-        {[["info", "📋 " + t("Order Detail")], ["charges", "💰 " + t("Charges")]].map(([k, label]) =>
+        {[["info", "📋 订单信息"], ["charges", "💰 费用 & 账单"]].map(([k, label]) =>
           <button key={k} onClick={() => setTab(k)} style={{ padding: "7px 16px", borderRadius: "8px 8px 0 0", border: "1px solid #e2e8f0", borderBottom: tab === k ? "2px solid #0ea5e9" : "1px solid #e2e8f0", background: tab === k ? "#fff" : "#f8fafc", color: tab === k ? "#0f172a" : "#94a3b8", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{label}</button>
         )}
       </div>
 
       {tab === "info" && (
         <>
-          {/* Part 1: Basic Info */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
-            <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #0ea5e9" : "1px solid #e2e8f0" }}>
-              <SectionHeader icon="📄" title={t("Basic Info")} accent="#0ea5e9" />
-              <EF label={t("Order No")} field="order_no" />
-              <EF label="PO#" field="po" />
-              <EF label="Customer PO#" field="customer_po" />
-              <EF label={t("Supplier")} field="supplier" options={refData.suppliers} />
-              <EF label={t("Customer")} field="customer" options={refData.customers} />
-              <EF label={t("Trade Terms")} field="incoterms" options={TRADE_TERMS} />
-            </div>
-            <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #6366f1" : "1px solid #e2e8f0" }}>
-              <SectionHeader icon="🚢" title={t("Shipping")} accent="#6366f1" />
-              <EF label={t("Carrier")} field="carrier" />
-              <EF label={t("Agent")} field="carrier_agent" />
-              <EF label={t("Vessel")} field="vessel" />
-              <EF label={t("Voyage")} field="voyage" />
-              <EF label={t("POL")} field="pol" options={refData.ports} />
-              <EF label={t("POD")} field="pod" options={refData.ports} />
-            </div>
-            <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #10b981" : "1px solid #e2e8f0" }}>
-              <SectionHeader icon="📅" title={t("Dates & Container")} accent="#10b981" />
-              <EF label="ETD" field="etd" type="date" />
-              <EF label="ETA" field="eta" type="date" />
-              <EF label={t("SI Cutoff")} field="si_cutoff" type="datetime-local" />
-              <EF label={t("CY Cutoff")} field="cy_cutoff" type="datetime-local" />
-              <EF label={t("Container Type")} field="qty_container" />
-              <EF label={t("Container No")} field="container_no" />
+          {/* Part 1: 基本信息 */}
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #0ea5e9" : "1px solid #e2e8f0", marginBottom: 14 }}>
+            <SectionHeader icon="📄" title="基本信息" accent="#0ea5e9" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px" }}>
+              <EF label="订单编号" field="order_no" />
+              <EF label="委托单位" field="supplier" options={refData.suppliers} />
+              <EF label="贸易条款" field="incoterms" options={TRADE_TERMS} />
+              <EF label="货物类型" field="cargo_type" options={CARGO_TYPES.map(c => c.label)} />
+              <EF label="PO#（业务编号）" field="po" />
+              <EF label="Customer PO#（客户业务编号）" field="customer_po" />
+              <EF label="客户" field="customer" options={refData.customers} />
+              <EF label="终端客户" field="end_customer" />
             </div>
           </div>
 
-          {/* Part 2: BL Info */}
+          {/* Part 2: 运输信息 */}
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #6366f1" : "1px solid #e2e8f0", marginBottom: 14 }}>
+            <SectionHeader icon="🚢" title="运输信息" accent="#6366f1" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px" }}>
+              <EF label="船公司 Carrier" field="carrier" />
+              <EF label="订舱代理 Agent" field="carrier_agent" />
+              <EF label="起运港 POL" field="pol" options={refData.ports} />
+              <EF label="卸货港 POD" field="pod" options={refData.ports} />
+              <EF label="目的港 Destination" field="destination" />
+              <EF label="箱量" field="qty_container" />
+              <EF label="箱型 Container Type" field="container_type" options={CONTAINER_TYPES} />
+              <EF label="箱类型 COC/SOC" field="container_owner" options={CONTAINER_OWNERS} />
+              <EF label="船名 Vessel" field="vessel" />
+              <EF label="航次 Voyage" field="voyage" />
+              <EF label="码头 Terminal" field="terminal" />
+              <div />
+              <EF label="ETD 预计开船" field="etd" type="date" />
+              <EF label="ATD 实际开船" field="atd" type="date" />
+              <EF label="ETA 预计到港" field="eta" type="date" />
+              <div />
+              <EF label="截单时间 SI Cutoff" field="si_cutoff" type="datetime-local" />
+              <EF label="截关时间 CY Cutoff" field="cy_cutoff" type="datetime-local" />
+            </div>
+          </div>
+
+          {/* Part 3: 提单信息 */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
             <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #f59e0b" : "1px solid #e2e8f0" }}>
-              <SectionHeader icon="📜" title={t("Bill of Lading")} accent="#f59e0b" />
-              <EF label={t("MBL No")} field="mbl_no" />
-              <EF label={t("Booking No")} field="booking_no" />
-              <EF label={t("BL Type")} field="bl_type" options={BL_TYPES} />
-              <EF label={t("Freight Terms")} field="freight_terms" options={FREIGHT_TERMS} />
-              <EF label={t("Transport Terms")} field="transport_terms" options={TRANSPORT_TERMS} />
+              <SectionHeader icon="📜" title="提单信息" accent="#f59e0b" />
+              <EF label="Booking No 订舱号" field="booking_no" />
+              <EF label="E-Booking No" field="e_booking_no" />
+              <EF label="MBL No 主提单号" field="mbl_no" />
+              <EF label="提单形式 BL Type" field="bl_type" options={BL_TYPES} />
+              <EF label="付款方式 Freight Terms" field="freight_terms" options={FREIGHT_TERMS} />
+              <EF label="运输条款 Transport Terms" field="transport_terms" options={TRANSPORT_TERMS} />
             </div>
             <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #8b5cf6" : "1px solid #e2e8f0" }}>
-              <SectionHeader icon="👤" title="Shipper / Consignee" accent="#8b5cf6" />
-              <EF label={t("Shipper")} field="shipper" />
-              <EF label={t("Consignee")} field="consignee" />
-              <EF label={t("Notify Party")} field="notify_party" />
+              <SectionHeader icon="👤" title="Shipper / Consignee / Notify" accent="#8b5cf6" />
+              <EF label="Shipper 发货人" field="shipper" />
+              <EF label="Consignee 收货人" field="consignee" />
+              <EF label="Notify Party 通知方" field="notify_party" />
             </div>
           </div>
 
-          {/* Part 3: Cargo */}
-          <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0", marginBottom: 14 }}>
-            <SectionHeader icon="📦" title={t("Cargo Details")} accent="#0ea5e9" />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px" }}>
-              <EF label={t("Description")} field="tuc" />
-              <EF label="SKU" field="sku" />
-              <EF label={t("Packages")} field="qty_packages" />
-              <EF label={t("Weight (kg)")} field="weight" />
-              <EF label={t("Volume")} field="volume" />
-              <EF label={t("Marks")} field="marks" />
-              <EF label="E-Booking" field="e_booking_no" />
-              <EF label={t("Seal No")} field="seal_no" />
+          {/* Part 4: 货物明细 — 多行表格 */}
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "2px solid #10b981", marginBottom: 14 }}>
+            <SectionHeader icon="📦" title="货物明细" accent="#10b981" />
+
+            {/* 原始数据（shipment 上的） */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px", marginBottom: 12, padding: 10, background: "#f8fafc", borderRadius: 8 }}>
+              <Field label="品名 Description" value={order.tuc} />
+              <Field label="SKU" value={order.sku} />
+              <Field label="件数 Packages" value={order.qty_packages} />
+              <Field label="毛重 Weight (KGS)" value={order.weight} />
+              <Field label="体积 Volume (CBM)" value={order.volume} />
+              <Field label="唛头 Marks" value={order.marks} />
             </div>
+
+            {/* 装柜明细（从 container_items） */}
+            {cargoItems.length > 0 && (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>装柜明细（实际数据）</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <thead><tr style={{ background: "#ecfdf5" }}>
+                      {["B/L", "HBL", "柜号 CNTR", "封号 Seal", "品名 Description", "唛头 Marks", "件数 QTY", "毛重 KGS", "体积 CBM"].map(h =>
+                        <th key={h} style={{ padding: "6px 6px", textAlign: "left", fontWeight: 600, color: "#065f46", fontSize: 10, borderBottom: "2px solid #a7f3d0", whiteSpace: "nowrap" }}>{h}</th>
+                      )}
+                    </tr></thead>
+                    <tbody>
+                      {cargoItems.map(it => (
+                        <tr key={it.id} style={{ borderBottom: "1px solid #d1fae5" }}>
+                          <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{order.mbl_no || order.booking_no || "—"}</td>
+                          <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{it.hbl || "—"}</td>
+                          <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#0369a1" }}>{it.container_no || "—"}</td>
+                          <td style={{ padding: "5px 6px", fontSize: 10 }}>{it.seal_no || "—"}</td>
+                          <td style={{ padding: "5px 6px", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.tuc || "—"}</td>
+                          <td style={{ padding: "5px 6px" }}>{it.marks || "—"}</td>
+                          <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.qty || "—"}</td>
+                          <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.weight || "—"}</td>
+                          <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.volume || "—"}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: "#ecfdf5", fontWeight: 700 }}>
+                        <td colSpan={6} style={{ padding: "6px", textAlign: "right", fontSize: 10, color: "#065f46" }}>合计</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{cargoItems.reduce((s, i) => s + (Number(i.qty) || 0), 0)}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{cargoItems.reduce((s, i) => s + (Number(i.weight) || 0), 0).toFixed(4)}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{cargoItems.reduce((s, i) => s + (Number(i.volume) || 0), 0).toFixed(4)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {cargoItems.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>暂无装柜明细 — 请在「柜子」模块中录入</div>}
           </div>
         </>
       )}
 
       {tab === "charges" && (
         <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0" }}>
-          <SectionHeader icon="💰" title={t("Charges")} accent="#f59e0b" />
+          <SectionHeader icon="💰" title="费用 & 账单" accent="#f59e0b" />
           <EmptyState>费用模块 — Phase 2 开发中</EmptyState>
         </div>
       )}

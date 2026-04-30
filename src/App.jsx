@@ -60,12 +60,12 @@ export default function App() {
 
   const role = user.profile?.role || "operator";
   const nav = [
-    { key: "orders",    icon: "📦", label: t("Orders") },
-    { key: "charges",   icon: "💰", label: t("Charges") },
-    { key: "billing",   icon: "📄", label: t("Billing") },
-    { key: "payments",  icon: "💳", label: t("Payments") },
-    { key: "documents", icon: "📑", label: t("Documents") },
-    { key: "settings",  icon: "⚙", label: t("Settings") },
+    { key: "orders",    icon: "📦", label: "订单" },
+    { key: "charges",   icon: "💰", label: "费用" },
+    { key: "billing",   icon: "📄", label: "账单" },
+    { key: "payments",  icon: "💳", label: "收付款" },
+    { key: "documents", icon: "📑", label: "文档" },
+    { key: "settings",  icon: "⚙", label: "设置" },
   ].filter(n => canAccessPage(role, n.key));
 
   return (

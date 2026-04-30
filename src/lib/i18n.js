@@ -1,4 +1,4 @@
-let _lang = "en";
+let _lang = "zh";
 export const setLang = (l) => { _lang = l; };
 export const getLang = () => _lang;
 

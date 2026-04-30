@@ -10,8 +10,15 @@ export function OrdersPage({ user }) {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
+  const [checkedIds, setCheckedIds] = useState(new Set());
   const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState({ qc_status: "All", space_status: "All", carrier: "All", customer: "All" });
+  const [filters, setFilters] = useState({
+    supplier: "", customer: "", carrier: "", vessel: "", voyage: "",
+    pol: "", pod: "", booking_no: "", mbl_no: "", container_no: "",
+    qc_status: "All", space_status: "All", bl_status: "All",
+    etd_from: "", etd_to: "",
+  });
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
 
@@ -22,17 +29,34 @@ export function OrdersPage({ user }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // Reference lists
+  const supplierList = useMemo(() => [...new Set(shipments.map(o => o.supplier).filter(Boolean))].sort(), [shipments]);
   const customerList = useMemo(() => [...new Set(shipments.map(o => o.customer).filter(Boolean))].sort(), [shipments]);
   const carrierList = useMemo(() => [...new Set(shipments.map(o => o.carrier).filter(Boolean))].sort(), [shipments]);
+  const vesselList = useMemo(() => [...new Set(shipments.map(o => o.vessel).filter(Boolean))].sort(), [shipments]);
+  const polList = useMemo(() => [...new Set(shipments.map(o => o.pol).filter(Boolean))].sort(), [shipments]);
+  const podList = useMemo(() => [...new Set(shipments.map(o => o.pod).filter(Boolean))].sort(), [shipments]);
 
+  // Filter logic
   const filtered = useMemo(() => shipments.filter(o => {
     if (filters.qc_status !== "All" && o.qc_status !== filters.qc_status) return false;
     if (filters.space_status !== "All" && o.space_status !== filters.space_status) return false;
-    if (filters.carrier !== "All" && o.carrier !== filters.carrier) return false;
-    if (filters.customer !== "All" && o.customer !== filters.customer) return false;
+    if (filters.bl_status !== "All" && o.bl_status !== filters.bl_status) return false;
+    if (filters.supplier && o.supplier !== filters.supplier) return false;
+    if (filters.customer && o.customer !== filters.customer) return false;
+    if (filters.carrier && o.carrier !== filters.carrier) return false;
+    if (filters.vessel && !(o.vessel || "").toLowerCase().includes(filters.vessel.toLowerCase())) return false;
+    if (filters.voyage && !(o.voyage || "").toLowerCase().includes(filters.voyage.toLowerCase())) return false;
+    if (filters.pol && o.pol !== filters.pol) return false;
+    if (filters.pod && o.pod !== filters.pod) return false;
+    if (filters.booking_no && !(o.booking_no || "").toLowerCase().includes(filters.booking_no.toLowerCase())) return false;
+    if (filters.mbl_no && !(o.mbl_no || "").toLowerCase().includes(filters.mbl_no.toLowerCase())) return false;
+    if (filters.container_no && !(o.container_no || "").toLowerCase().includes(filters.container_no.toLowerCase())) return false;
+    if (filters.etd_from && o.etd && o.etd < filters.etd_from) return false;
+    if (filters.etd_to && o.etd && o.etd > filters.etd_to) return false;
     if (search) {
       const q = search.toLowerCase();
-      const fields = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.supplier, o.order_no].filter(Boolean);
+      const fields = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.supplier, o.order_no, o.mbl_no].filter(Boolean);
       if (!fields.some(f => f.toLowerCase().includes(q))) return false;
     }
     return true;
@@ -42,6 +66,36 @@ export function OrdersPage({ user }) {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pagedRows = filtered.slice(page * pageSize, (page + 1) * pageSize);
 
+  // Stats
+  const stats = useMemo(() => {
+    const types = {};
+    let teu = 0;
+    filtered.forEach(o => {
+      const qt = o.qty_container || "";
+      const m = qt.match(/(\d+)x(\w+)/);
+      if (m) {
+        const cnt = parseInt(m[1]);
+        const typ = m[2];
+        types[typ] = (types[typ] || 0) + cnt;
+        if (typ === "20GP") teu += cnt;
+        else teu += cnt * 2;
+      }
+    });
+    const typeStr = Object.entries(types).map(([t, c]) => `${c}x${t}`).join(", ");
+    return { rows: filtered.length, teu, typeStr };
+  }, [filtered]);
+
+  // Checkbox
+  const toggleCheck = (id) => setCheckedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => { if (checkedIds.size === pagedRows.length) setCheckedIds(new Set()); else setCheckedIds(new Set(pagedRows.map(o => o.id))); };
+
+  const clearFilters = () => {
+    setFilters({ supplier: "", customer: "", carrier: "", vessel: "", voyage: "", pol: "", pod: "", booking_no: "", mbl_no: "", container_no: "", qc_status: "All", space_status: "All", bl_status: "All", etd_from: "", etd_to: "" });
+    setSearch("");
+  };
+
+  const activeCount = Object.values(filters).filter(v => v && v !== "All").length + (search ? 1 : 0);
+
   const selectedOrder = shipments.find(o => o.id === selectedId);
 
   if (loading) return <Spinner />;
@@ -50,65 +104,115 @@ export function OrdersPage({ user }) {
     return <OrderDetail order={selectedOrder} role={role} user={user} onBack={() => { setSelectedId(null); load(); }} onReload={load} />;
   }
 
+  const fs = { padding: "5px 8px", borderRadius: 5, border: "1px solid #e2e8f0", fontSize: 11.5, outline: "none", background: "#fff", boxSizing: "border-box", minWidth: 0 };
+  const fl = { fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 2 };
+
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 14 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>{t("Orders")} <span style={{ fontSize: 13, color: "#94a3b8", fontWeight: 400 }}>— {t("Sea Export")}</span></h1>
-          <p style={{ fontSize: 12, color: "#94a3b8", margin: "3px 0 0" }}>{filtered.length} {t("records")}</p>
+      {/* 1. 动作行 */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, padding: "8px 12px", background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>海运出口</h1>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Button onClick={() => setShowNew(true)}>+ {t("New Order")}</Button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <Button small variant="secondary" onClick={() => setShowFilters(p => !p)}>{showFilters ? "隐藏筛选" : "显示筛选"} {activeCount > 0 && `(${activeCount})`}</Button>
+          <Button small variant="secondary" onClick={clearFilters}>清除</Button>
+          <Button small onClick={() => setShowNew(true)}>+ 新建订单</Button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <Input placeholder={t("Search") + "..."} value={search} onChange={e => setSearch(e.target.value)} style={{ width: 220 }} />
-        <FilterDropdown label="QC" value={filters.qc_status} options={STATUS_CONFIGS.qc_status.options} onChange={v => setFilters(p => ({ ...p, qc_status: v }))} />
-        <FilterDropdown label="Space" value={filters.space_status} options={STATUS_CONFIGS.space_status.options} onChange={v => setFilters(p => ({ ...p, space_status: v }))} />
-        <FilterDropdown label="Carrier" value={filters.carrier} options={carrierList} onChange={v => setFilters(p => ({ ...p, carrier: v }))} />
-        <FilterDropdown label="Customer" value={filters.customer} options={customerList} onChange={v => setFilters(p => ({ ...p, customer: v }))} />
+      {/* 2. 筛选字段 */}
+      {showFilters && (
+        <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0", padding: "10px 12px", marginBottom: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px 10px" }}>
+            <div><div style={fl}>委托方</div><select value={filters.supplier} onChange={e => setFilters(p => ({ ...p, supplier: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{supplierList.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><div style={fl}>客户</div><select value={filters.customer} onChange={e => setFilters(p => ({ ...p, customer: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{customerList.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><div style={fl}>船公司</div><select value={filters.carrier} onChange={e => setFilters(p => ({ ...p, carrier: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{carrierList.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><div style={fl}>船名</div><input value={filters.vessel} onChange={e => setFilters(p => ({ ...p, vessel: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="船名..." /></div>
+            <div><div style={fl}>起运港</div><select value={filters.pol} onChange={e => setFilters(p => ({ ...p, pol: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{polList.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><div style={fl}>卸货港</div><select value={filters.pod} onChange={e => setFilters(p => ({ ...p, pod: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{podList.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><div style={fl}>MB/L No.</div><input value={filters.mbl_no} onChange={e => setFilters(p => ({ ...p, mbl_no: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="提单号..." /></div>
+            <div><div style={fl}>Booking No.</div><input value={filters.booking_no} onChange={e => setFilters(p => ({ ...p, booking_no: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="订舱号..." /></div>
+            <div><div style={fl}>柜号</div><input value={filters.container_no} onChange={e => setFilters(p => ({ ...p, container_no: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="柜号..." /></div>
+            <div><div style={fl}>ETD 从</div><input type="date" value={filters.etd_from} onChange={e => setFilters(p => ({ ...p, etd_from: e.target.value }))} style={{ ...fs, width: "100%" }} /></div>
+            <div><div style={fl}>ETD 至</div><input type="date" value={filters.etd_to} onChange={e => setFilters(p => ({ ...p, etd_to: e.target.value }))} style={{ ...fs, width: "100%" }} /></div>
+            <div><div style={fl}>搜索</div><input value={search} onChange={e => setSearch(e.target.value)} style={{ ...fs, width: "100%" }} placeholder="PO / Cust PO / 关键词..." /></div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. 数据统计 + 状态快捷 */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, padding: "6px 12px", background: "#f0f9ff", borderRadius: 8, border: "1px solid #bae6fd" }}>
+        <div style={{ fontSize: 12, color: "#0369a1", fontWeight: 600 }}>
+          行数: <strong>{stats.rows}</strong> &nbsp; TEU: <strong>{stats.teu}</strong> &nbsp; {stats.typeStr && <>箱型: <strong>{stats.typeStr}</strong></>}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          <FilterDropdown label="QC" value={filters.qc_status} options={[...STATUS_CONFIGS.qc_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, qc_status: v }))} />
+          <FilterDropdown label="放舱" value={filters.space_status} options={[...STATUS_CONFIGS.space_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, space_status: v }))} />
+          <FilterDropdown label="提单" value={filters.bl_status} options={[...STATUS_CONFIGS.bl_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, bl_status: v }))} />
+        </div>
       </div>
 
-      {/* Table */}
-      <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead><tr style={{ background: "#f8fafc" }}>
-            {[t("Order No"), "PO", "Cust PO", t("Supplier"), t("Customer"), t("Carrier"), t("Vessel"), "ETD", t("QC"), t("Space"), t("Status")].map(h =>
-              <th key={h} style={{ padding: "10px 8px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 10.5, borderBottom: "1px solid #e2e8f0" }}>{h}</th>
-            )}
-          </tr></thead>
-          <tbody>
-            {pagedRows.length === 0 && <tr><td colSpan={11} style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>{t("No data")}</td></tr>}
-            {pagedRows.map((o, i) => (
-              <tr key={o.id} onClick={() => setSelectedId(o.id)} style={{ cursor: "pointer", borderBottom: i < pagedRows.length - 1 ? "1px solid #f1f5f9" : "none" }}
-                onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <td style={{ padding: "8px", fontFamily: "'DM Mono',monospace", fontWeight: 600, color: "#0369a1" }}>{o.order_no || "—"}</td>
-                <td style={{ padding: "8px", fontFamily: "'DM Mono',monospace" }}>{o.po || "—"}</td>
-                <td style={{ padding: "8px", fontFamily: "'DM Mono',monospace" }}>{o.customer_po || "—"}</td>
-                <td style={{ padding: "8px" }}>{o.supplier || "—"}</td>
-                <td style={{ padding: "8px" }}>{o.customer || "—"}</td>
-                <td style={{ padding: "8px" }}>{o.carrier || "—"}</td>
-                <td style={{ padding: "8px", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.vessel || "—"}</td>
-                <td style={{ padding: "8px", fontFamily: "'DM Mono',monospace" }}>{o.etd || "—"}</td>
-                <td style={{ padding: "8px" }}>{o.qc_status ? <Badge value={o.qc_status} small /> : "—"}</td>
-                <td style={{ padding: "8px" }}>{o.space_status ? <Badge value={o.space_status} small /> : "—"}</td>
-                <td style={{ padding: "8px" }}>{o.bl_status ? <Badge value={o.bl_status} small /> : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Batch bar */}
+      {checkedIds.size > 0 && (
+        <div style={{ background: "#0f172a", borderRadius: 8, padding: "8px 14px", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ color: "#e2e8f0", fontSize: 12, fontWeight: 600 }}>已选 {checkedIds.size} 条</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Button small variant="secondary" onClick={() => setCheckedIds(new Set())}>取消</Button>
+          </div>
+        </div>
+      )}
+
+      {/* 4. 订单列表 */}
+      <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, minWidth: 1200 }}>
+            <thead><tr style={{ background: "#f8fafc" }}>
+              <th style={{ padding: "8px 6px", width: 30, borderBottom: "1px solid #e2e8f0" }}><input type="checkbox" checked={checkedIds.size === pagedRows.length && pagedRows.length > 0} onChange={toggleAll} /></th>
+              {["出运类型", "订单编号", "PO", "Cust PO", "委托方", "客户", "MB/L No.", "船名", "航次", "起运港", "卸货港", "箱型", "ETD", "QC", "放舱", "提单"].map(h =>
+                <th key={h} style={{ padding: "8px 6px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 10, borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{h}</th>
+              )}
+            </tr></thead>
+            <tbody>
+              {pagedRows.length === 0 && <tr><td colSpan={17} style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>暂无数据</td></tr>}
+              {pagedRows.map((o, i) => {
+                const bg = checkedIds.has(o.id) ? "#f0f9ff" : "transparent";
+                return (
+                <tr key={o.id} style={{ borderBottom: "1px solid #f1f5f9", cursor: "pointer", background: bg }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#f8fafc"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = bg; }}>
+                  <td style={{ padding: "6px", textAlign: "center" }} onClick={e => e.stopPropagation()}><input type="checkbox" checked={checkedIds.has(o.id)} onChange={() => toggleCheck(o.id)} /></td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.qty_container?.includes("Multi") ? "拼箱" : "整箱"}</td>
+                  <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#0369a1", fontWeight: 600 }} onClick={() => setSelectedId(o.id)}>{o.order_no || "—"}</td>
+                  <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.po || "—"}</td>
+                  <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.customer_po || "—"}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.supplier || "—"}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.customer || "—"}</td>
+                  <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.mbl_no || o.booking_no || "—"}</td>
+                  <td style={{ padding: "6px", fontSize: 10, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={() => setSelectedId(o.id)}>{o.vessel || "—"}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.voyage || "—"}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{(o.pol || "").split("(")[0].trim() || "—"}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{(o.pod || "").split("(")[0].trim() || "—"}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.qty_container || "—"}</td>
+                  <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.etd || "—"}</td>
+                  <td style={{ padding: "6px" }} onClick={() => setSelectedId(o.id)}>{o.qc_status ? <Badge value={o.qc_status} small /> : "—"}</td>
+                  <td style={{ padding: "6px" }} onClick={() => setSelectedId(o.id)}>{o.space_status ? <Badge value={o.space_status} small /> : "—"}</td>
+                  <td style={{ padding: "6px" }} onClick={() => setSelectedId(o.id)}>{o.bl_status ? <Badge value={o.bl_status} small /> : "—"}</td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, fontSize: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, fontSize: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ color: "#64748b" }}>{t("per page")}</span>
+          <span style={{ color: "#64748b" }}>每页</span>
           <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }} style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12, outline: "none" }}>
-            {[20, 50, 100, 200].map(n => <option key={n} value={n}>{n}</option>)}
+            {[20, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
-          <span style={{ color: "#94a3b8" }}>{filtered.length} {t("records")} · {page + 1}/{totalPages}</span>
+          <span style={{ color: "#94a3b8" }}>{filtered.length} 条 · 第 {page + 1}/{totalPages} 页</span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           {[["⟨⟨", 0, page === 0], ["⟨", page - 1, page === 0], ["⟩", page + 1, page >= totalPages - 1], ["⟩⟩", totalPages - 1, page >= totalPages - 1]].map(([label, target, disabled]) =>

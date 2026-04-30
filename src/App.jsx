@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase.js";
-import { DashboardPage } from "./pages/Dashboard.jsx";
 import { OrdersPage } from "./pages/Orders.jsx";
 import { canAccessPage } from "./lib/permissions.js";
 import { t, setLang } from "./lib/i18n.js";
@@ -9,7 +8,7 @@ import { Spinner } from "./components/ui.jsx";
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState("sea_export");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -108,12 +107,6 @@ export default function App() {
         </div>
 
         <nav style={{ flex: 1, padding: "8px 8px", overflowY: "auto" }}>
-          {/* Dashboard - top-level */}
-          <button onClick={() => setView("dashboard")}
-            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", borderRadius: 8, border: "none", marginBottom: 4, background: view === "dashboard" ? "#0ea5e9" : "transparent", color: view === "dashboard" ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
-            <span style={{ fontSize: 14 }}>📊</span> 工作台
-          </button>
-
           {navGroups.map(g => (
             <div key={g.key} style={{ marginBottom: 4 }}>
               <button onClick={() => toggleGroup(g.key)}
@@ -146,7 +139,6 @@ export default function App() {
 
       {/* Main content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-        {view === "dashboard" && <DashboardPage user={user} onNavigate={setView} />}
         {view === "sea_export" && <OrdersPage user={user} />}
         {view === "sea_import" && <PlaceholderPage title="海运进口" desc="开发中..." />}
         {view === "air_export" && <PlaceholderPage title="空运出口" desc="开发中..." />}

@@ -8,7 +8,7 @@ import { Spinner } from "./components/ui.jsx";
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("orders");
+  const [view, setView] = useState("sea_export");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -59,14 +59,43 @@ export default function App() {
   }
 
   const role = user.profile?.role || "operator";
-  const nav = [
-    { key: "orders",    icon: "📦", label: "订单" },
-    { key: "charges",   icon: "💰", label: "费用" },
-    { key: "billing",   icon: "📄", label: "账单" },
-    { key: "payments",  icon: "💳", label: "收付款" },
-    { key: "documents", icon: "📑", label: "文档" },
-    { key: "settings",  icon: "⚙", label: "设置" },
-  ].filter(n => canAccessPage(role, n.key));
+  const navGroups = [
+    { key: "shipping", label: "集运订单", icon: "🚢", defaultOpen: true, items: [
+      { key: "sea_export", label: "海运出口", icon: "🚢" },
+      { key: "sea_import", label: "海运进口", icon: "🚢", disabled: true },
+      { key: "air_export", label: "空运出口", icon: "✈", disabled: true },
+      { key: "air_import", label: "空运进口", icon: "✈", disabled: true },
+    ]},
+    { key: "finance", label: "费用管理", icon: "💰", items: [
+      { key: "billing",    label: "账单管理", icon: "📄" },
+      { key: "invoices",   label: "开票记录", icon: "🧾" },
+      { key: "payments",   label: "收付记录", icon: "💳" },
+      { key: "settlement", label: "核销管理", icon: "✅" },
+    ]},
+    { key: "partners", label: "客商管理", icon: "👥", items: [
+      { key: "clients",     label: "客户", icon: "🏢" },
+      { key: "agents_intl", label: "国外代理", icon: "🌍" },
+      { key: "suppliers_m", label: "供应商", icon: "🏭" },
+      { key: "agents_book", label: "订舱代理", icon: "📋" },
+      { key: "truckers",    label: "车队", icon: "🚛" },
+      { key: "brokers",     label: "报关行", icon: "📑" },
+    ]},
+    { key: "master", label: "基础数据", icon: "⚙", items: [
+      { key: "vessels",      label: "船名", icon: "🚢" },
+      { key: "ports",        label: "港口（代码）", icon: "🏗" },
+      { key: "terminals",    label: "码头", icon: "⚓" },
+      { key: "charge_types", label: "费用设置", icon: "💲" },
+      { key: "exchange",     label: "汇率设置", icon: "💱" },
+      { key: "numbering",    label: "编号设置", icon: "🔢" },
+    ]},
+    { key: "system", label: "系统设置", icon: "🔧", items: [
+      { key: "user_new",  label: "新建用户", icon: "➕" },
+      { key: "users",     label: "用户", icon: "👤" },
+    ]},
+  ];
+
+  const [openGroups, setOpenGroups] = useState({ shipping: true });
+  const toggleGroup = (key) => setOpenGroups(p => ({ ...p, [key]: !p[key] }));
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'Inter','DM Sans',sans-serif", background: "#f1f5f9" }}>
@@ -77,12 +106,25 @@ export default function App() {
           <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>Operations Management</div>
         </div>
 
-        <nav style={{ flex: 1, padding: "8px 8px" }}>
-          {nav.map(n => (
-            <button key={n.key} onClick={() => setView(n.key)}
-              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px", borderRadius: 8, border: "none", background: view === n.key ? "#1e293b" : "transparent", color: view === n.key ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: view === n.key ? 600 : 400, cursor: "pointer", textAlign: "left", marginBottom: 2 }}>
-              <span style={{ fontSize: 15 }}>{n.icon}</span> {n.label}
-            </button>
+        <nav style={{ flex: 1, padding: "8px 8px", overflowY: "auto" }}>
+          {navGroups.map(g => (
+            <div key={g.key} style={{ marginBottom: 4 }}>
+              <button onClick={() => toggleGroup(g.key)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "9px 12px", borderRadius: 8, border: "none", background: openGroups[g.key] ? "#1e293b" : "transparent", color: openGroups[g.key] ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 14 }}>{g.icon}</span> {g.label}</span>
+                <span style={{ fontSize: 10, transition: "transform .2s", transform: openGroups[g.key] ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
+              </button>
+              {openGroups[g.key] && (
+                <div style={{ paddingLeft: 16, marginTop: 2 }}>
+                  {g.items.map(item => (
+                    <button key={item.key} onClick={() => !item.disabled && setView(item.key)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 12px", borderRadius: 6, border: "none", background: view === item.key ? "#0ea5e9" : "transparent", color: item.disabled ? "#475569" : view === item.key ? "#fff" : "#94a3b8", fontSize: 12, fontWeight: view === item.key ? 600 : 400, cursor: item.disabled ? "default" : "pointer", textAlign: "left", marginBottom: 1, opacity: item.disabled ? 0.5 : 1 }}>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </nav>
 
@@ -97,12 +139,28 @@ export default function App() {
 
       {/* Main content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-        {view === "orders" && <OrdersPage user={user} />}
-        {view === "charges" && <PlaceholderPage title={t("Charges")} desc="费用录入 — Phase 2" />}
-        {view === "billing" && <PlaceholderPage title={t("Billing")} desc="账单管理 — Phase 2" />}
-        {view === "payments" && <PlaceholderPage title={t("Payments")} desc="收付款 — Phase 3" />}
-        {view === "documents" && <PlaceholderPage title={t("Documents")} desc="文档生成 — Phase 3" />}
-        {view === "settings" && <PlaceholderPage title={t("Settings")} desc="系统设置 — Phase 4" />}
+        {view === "sea_export" && <OrdersPage user={user} />}
+        {view === "sea_import" && <PlaceholderPage title="海运进口" desc="开发中..." />}
+        {view === "air_export" && <PlaceholderPage title="空运出口" desc="开发中..." />}
+        {view === "air_import" && <PlaceholderPage title="空运进口" desc="开发中..." />}
+        {view === "billing" && <PlaceholderPage title="账单管理" desc="Phase 2 开发中" />}
+        {view === "invoices" && <PlaceholderPage title="开票记录" desc="Phase 2 开发中" />}
+        {view === "payments" && <PlaceholderPage title="收付记录" desc="Phase 3 开发中" />}
+        {view === "settlement" && <PlaceholderPage title="核销管理" desc="Phase 3 开发中" />}
+        {view === "clients" && <PlaceholderPage title="客户" desc="客商管理" />}
+        {view === "agents_intl" && <PlaceholderPage title="国外代理" desc="客商管理" />}
+        {view === "suppliers_m" && <PlaceholderPage title="供应商" desc="客商管理" />}
+        {view === "agents_book" && <PlaceholderPage title="订舱代理" desc="客商管理" />}
+        {view === "truckers" && <PlaceholderPage title="车队" desc="客商管理" />}
+        {view === "brokers" && <PlaceholderPage title="报关行" desc="客商管理" />}
+        {view === "vessels" && <PlaceholderPage title="船名" desc="基础数据" />}
+        {view === "ports" && <PlaceholderPage title="港口（代码）" desc="基础数据" />}
+        {view === "terminals" && <PlaceholderPage title="码头" desc="基础数据" />}
+        {view === "charge_types" && <PlaceholderPage title="费用设置" desc="基础数据" />}
+        {view === "exchange" && <PlaceholderPage title="汇率设置" desc="基础数据" />}
+        {view === "numbering" && <PlaceholderPage title="编号设置" desc="基础数据" />}
+        {view === "user_new" && <PlaceholderPage title="新建用户" desc="系统设置" />}
+        {view === "users" && <PlaceholderPage title="用户" desc="系统设置" />}
       </div>
     </div>
   );

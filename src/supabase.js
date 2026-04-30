@@ -133,7 +133,12 @@ function createClient() {
     return builder;
   };
 
-  return { auth, from, api };
+  const getSession = () => {
+    if (accessToken && currentUser) return { access_token: accessToken, user: currentUser };
+    return null;
+  };
+
+  return { auth, from, api, getSession };
 }
 
 export const supabase = createClient();

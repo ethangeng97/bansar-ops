@@ -7,6 +7,12 @@ export const BUSINESS_TYPES = [
   { key: "fba",        label: "FBA", labelEn: "FBA", enabled: false },
 ];
 
+export const SHIPMENT_TYPES = [
+  { key: "FCL",     label: "整箱 FCL" },
+  { key: "LCL",     label: "拼箱 LCL" },
+  { key: "Console", label: "自拼柜 Console" },
+];
+
 export const SERVICE_TYPES = [
   { key: "booking",    label: "订舱", labelEn: "Booking" },
   { key: "trucking",   label: "拖车", labelEn: "Trucking" },

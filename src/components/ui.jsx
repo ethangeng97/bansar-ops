@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import { STATUS_COLORS } from "../lib/constants.js";
 
 export const Badge = ({ value, small }) => {
@@ -86,3 +87,115 @@ export const FilterDropdown = ({ label, value, options, onChange, optionLabels }
 export const Spinner = () => <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><div style={{ width: 28, height: 28, border: "3px solid #e2e8f0", borderTopColor: "#0ea5e9", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
 
 export const EmptyState = ({ children }) => <div style={{ padding: "40px 20px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>{children}</div>;
+
+// ── ComboBox: searchable dropdown ────────────────────────────────
+export function ComboBox({ value, onChange, options, placeholder, style: extStyle }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = (options || []).filter(o =>
+    !query || o.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const display = open ? query : (value || "");
+
+  return (
+    <div ref={ref} style={{ position: "relative", ...extStyle }}>
+      <input
+        ref={inputRef}
+        value={display}
+        placeholder={placeholder || "搜索..."}
+        onChange={(e) => { setQuery(e.target.value); if (!open) setOpen(true); }}
+        onFocus={() => { setQuery(value || ""); setOpen(true); }}
+        style={{
+          width: "100%", padding: "5px 24px 5px 8px", borderRadius: 5,
+          border: open ? "1px solid #0ea5e9" : "1px solid #e2e8f0",
+          fontSize: 11.5, outline: "none", boxSizing: "border-box", background: "#fff",
+        }}
+      />
+      <span style={{
+        position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+        fontSize: 10, color: "#94a3b8", pointerEvents: "none",
+      }}>▼</span>
+      {value && !open && (
+        <button onClick={() => { onChange(""); inputRef.current?.focus(); }}
+          style={{
+            position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)",
+            background: "none", border: "none", fontSize: 12, color: "#94a3b8",
+            cursor: "pointer", padding: 0, lineHeight: 1,
+          }}>✕</button>
+      )}
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, maxHeight: 200,
+          overflowY: "auto", background: "#fff", border: "1px solid #e2e8f0",
+          borderRadius: "0 0 6px 6px", boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+          zIndex: 100,
+        }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: "8px 10px", fontSize: 11, color: "#94a3b8" }}>无匹配项</div>
+          )}
+          {filtered.slice(0, 50).map((o) => (
+            <div key={o}
+              onClick={() => { onChange(o); setOpen(false); setQuery(""); }}
+              style={{
+                padding: "6px 10px", fontSize: 11.5, cursor: "pointer",
+                background: o === value ? "#f0f9ff" : "transparent",
+                color: o === value ? "#0369a1" : "#334155",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#f0f9ff")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = o === value ? "#f0f9ff" : "transparent")}
+            >{o}</div>
+          ))}
+          {query && !options.includes(query) && (
+            <div
+              onClick={() => { onChange(query); setOpen(false); setQuery(""); }}
+              style={{ padding: "6px 10px", fontSize: 11.5, cursor: "pointer", color: "#0ea5e9", borderTop: "1px solid #f1f5f9" }}
+            >使用 "{query}"</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── EditField: standalone edit/display field (must be top-level, not nested in render) ──
+export function EditField({ label, field, type, options, editing, value, displayValue, onChange }) {
+  if (!editing) return <Field label={label} value={displayValue ?? value} />;
+  if (options) return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: "#8896a7", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 3 }}>{label}</div>
+      <ComboBox
+        value={value ?? ""}
+        onChange={(v) => onChange(field, v)}
+        options={options}
+        placeholder={`搜索 ${label}...`}
+        style={{ width: "100%" }}
+      />
+    </div>
+  );
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: "#8896a7", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 3 }}>{label}</div>
+      <input
+        type={type || "text"}
+        value={value ?? ""}
+        onChange={(e) => onChange(field, e.target.value)}
+        style={{
+          width: "100%", padding: "5px 8px", borderRadius: 5,
+          border: "1px solid #bae6fd", background: "#f0f9ff",
+          fontSize: 12, fontWeight: 600, outline: "none", color: "#0c4a6e",
+          boxSizing: "border-box", fontFamily: "'DM Mono',monospace",
+        }}
+      />
+    </div>
+  );
+}

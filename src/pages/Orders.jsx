@@ -1,8 +1,35 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
-import { Badge, Field, SectionHeader, Modal, Button, Input, Select, Spinner, EmptyState, FilterDropdown } from "../components/ui.jsx";
+import { Badge, Field, SectionHeader, Modal, Button, Input, Select, Spinner, EmptyState, FilterDropdown, ComboBox, EditField } from "../components/ui.jsx";
 import { t } from "../lib/i18n.js";
 import { STATUS_CONFIGS, STATUS_COLORS, TRADE_TERMS, CONTAINER_TYPES, CONTAINER_OWNERS, BL_TYPES, FREIGHT_TERMS, TRANSPORT_TERMS, CARGO_TYPES, SERVICE_TYPES } from "../lib/constants.js";
+
+// ── All filterable columns definition ────────────────────────────
+const ALL_FILTER_FIELDS = [
+  { key: "supplier",     label: "委托方",     type: "combo" },
+  { key: "customer",     label: "客户",       type: "combo" },
+  { key: "carrier",      label: "船公司",     type: "combo" },
+  { key: "vessel",       label: "船名",       type: "text" },
+  { key: "voyage",       label: "航次",       type: "text" },
+  { key: "pol",          label: "起运港",     type: "combo" },
+  { key: "pod",          label: "卸货港",     type: "combo" },
+  { key: "mbl_no",       label: "MB/L No.",   type: "text" },
+  { key: "booking_no",   label: "Booking No.", type: "text" },
+  { key: "container_no", label: "柜号",       type: "text" },
+  { key: "etd_from",     label: "ETD 从",     type: "date" },
+  { key: "etd_to",       label: "ETD 至",     type: "date" },
+  { key: "destination",  label: "目的港",     type: "combo" },
+  { key: "incoterms",    label: "贸易条款",   type: "combo" },
+  { key: "container_type", label: "箱型",     type: "combo" },
+  { key: "order_no",     label: "订单编号",   type: "text" },
+  { key: "po",           label: "PO#",        type: "text" },
+  { key: "customer_po",  label: "Customer PO#", type: "text" },
+  { key: "end_customer", label: "终端客户",   type: "text" },
+  { key: "carrier_agent", label: "订舱代理",  type: "text" },
+  { key: "terminal",     label: "码头",       type: "text" },
+  { key: "bl_type",      label: "提单形式",   type: "combo" },
+];
+const DEFAULT_FILTER_KEYS = ["supplier", "customer", "carrier", "vessel", "pol", "pod", "mbl_no", "booking_no", "container_no", "etd_from", "etd_to"];
 
 export function OrdersPage({ user }) {
   const role = user.profile?.role || "operator";
@@ -13,12 +40,9 @@ export function OrdersPage({ user }) {
   const [showFilters, setShowFilters] = useState(true);
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState({
-    supplier: "", customer: "", carrier: "", vessel: "", voyage: "",
-    pol: "", pod: "", booking_no: "", mbl_no: "", container_no: "",
-    qc_status: "All", space_status: "All", bl_status: "All",
-    etd_from: "", etd_to: "",
-  });
+  const [filters, setFilters] = useState({});
+  const [activeFilterKeys, setActiveFilterKeys] = useState(DEFAULT_FILTER_KEYS);
+  const [showFieldPicker, setShowFieldPicker] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
 
@@ -29,38 +53,46 @@ export function OrdersPage({ user }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Reference lists
-  const supplierList = useMemo(() => [...new Set(shipments.map(o => o.supplier).filter(Boolean))].sort(), [shipments]);
-  const customerList = useMemo(() => [...new Set(shipments.map(o => o.customer).filter(Boolean))].sort(), [shipments]);
-  const carrierList = useMemo(() => [...new Set(shipments.map(o => o.carrier).filter(Boolean))].sort(), [shipments]);
-  const vesselList = useMemo(() => [...new Set(shipments.map(o => o.vessel).filter(Boolean))].sort(), [shipments]);
-  const polList = useMemo(() => [...new Set(shipments.map(o => o.pol).filter(Boolean))].sort(), [shipments]);
-  const podList = useMemo(() => [...new Set(shipments.map(o => o.pod).filter(Boolean))].sort(), [shipments]);
+  // Reference lists for combo filters
+  const refLists = useMemo(() => {
+    const extract = (field) => [...new Set(shipments.map(o => o[field]).filter(Boolean))].sort();
+    return {
+      supplier: extract("supplier"), customer: extract("customer"), carrier: extract("carrier"),
+      vessel: extract("vessel"), pol: extract("pol"), pod: extract("pod"),
+      destination: extract("destination"), incoterms: TRADE_TERMS,
+      container_type: CONTAINER_TYPES, bl_type: BL_TYPES,
+    };
+  }, [shipments]);
 
   // Filter logic
   const filtered = useMemo(() => shipments.filter(o => {
-    if (filters.qc_status !== "All" && o.qc_status !== filters.qc_status) return false;
-    if (filters.space_status !== "All" && o.space_status !== filters.space_status) return false;
-    if (filters.bl_status !== "All" && o.bl_status !== filters.bl_status) return false;
-    if (filters.supplier && o.supplier !== filters.supplier) return false;
-    if (filters.customer && o.customer !== filters.customer) return false;
-    if (filters.carrier && o.carrier !== filters.carrier) return false;
-    if (filters.vessel && !(o.vessel || "").toLowerCase().includes(filters.vessel.toLowerCase())) return false;
-    if (filters.voyage && !(o.voyage || "").toLowerCase().includes(filters.voyage.toLowerCase())) return false;
-    if (filters.pol && o.pol !== filters.pol) return false;
-    if (filters.pod && o.pod !== filters.pod) return false;
-    if (filters.booking_no && !(o.booking_no || "").toLowerCase().includes(filters.booking_no.toLowerCase())) return false;
-    if (filters.mbl_no && !(o.mbl_no || "").toLowerCase().includes(filters.mbl_no.toLowerCase())) return false;
-    if (filters.container_no && !(o.container_no || "").toLowerCase().includes(filters.container_no.toLowerCase())) return false;
-    if (filters.etd_from && o.etd && o.etd < filters.etd_from) return false;
-    if (filters.etd_to && o.etd && o.etd > filters.etd_to) return false;
+    for (const key of activeFilterKeys) {
+      const val = filters[key];
+      if (!val) continue;
+      const def = ALL_FILTER_FIELDS.find(f => f.key === key);
+      if (!def) continue;
+
+      if (key === "etd_from") { if (o.etd && o.etd < val) return false; continue; }
+      if (key === "etd_to") { if (o.etd && o.etd > val) return false; continue; }
+
+      if (def.type === "combo") {
+        if (o[key] !== val) return false;
+      } else {
+        if (!(o[key] || "").toLowerCase().includes(val.toLowerCase())) return false;
+      }
+    }
+    // Status filters
+    if (filters.qc_status && filters.qc_status !== "All" && o.qc_status !== filters.qc_status) return false;
+    if (filters.space_status && filters.space_status !== "All" && o.space_status !== filters.space_status) return false;
+    if (filters.bl_status && filters.bl_status !== "All" && o.bl_status !== filters.bl_status) return false;
+
     if (search) {
       const q = search.toLowerCase();
-      const fields = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.supplier, o.order_no, o.mbl_no].filter(Boolean);
+      const fields = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.supplier, o.order_no, o.mbl_no, o.customer].filter(Boolean);
       if (!fields.some(f => f.toLowerCase().includes(q))) return false;
     }
     return true;
-  }), [shipments, filters, search]);
+  }), [shipments, filters, search, activeFilterKeys]);
 
   useEffect(() => { setPage(0); }, [filters, search]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -74,29 +106,27 @@ export function OrdersPage({ user }) {
       const qt = o.qty_container || "";
       const m = qt.match(/(\d+)x(\w+)/);
       if (m) {
-        const cnt = parseInt(m[1]);
-        const typ = m[2];
+        const cnt = parseInt(m[1]); const typ = m[2];
         types[typ] = (types[typ] || 0) + cnt;
-        if (typ === "20GP") teu += cnt;
-        else teu += cnt * 2;
+        teu += typ === "20GP" ? cnt : cnt * 2;
       }
     });
-    const typeStr = Object.entries(types).map(([t, c]) => `${c}x${t}`).join(", ");
-    return { rows: filtered.length, teu, typeStr };
+    return { rows: filtered.length, teu, typeStr: Object.entries(types).map(([t, c]) => `${c}x${t}`).join(", ") };
   }, [filtered]);
 
-  // Checkbox
   const toggleCheck = (id) => setCheckedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAll = () => { if (checkedIds.size === pagedRows.length) setCheckedIds(new Set()); else setCheckedIds(new Set(pagedRows.map(o => o.id))); };
 
-  const clearFilters = () => {
-    setFilters({ supplier: "", customer: "", carrier: "", vessel: "", voyage: "", pol: "", pod: "", booking_no: "", mbl_no: "", container_no: "", qc_status: "All", space_status: "All", bl_status: "All", etd_from: "", etd_to: "" });
-    setSearch("");
-  };
-
-  const activeCount = Object.values(filters).filter(v => v && v !== "All").length + (search ? 1 : 0);
+  const clearFilters = () => { setFilters({}); setSearch(""); };
+  const activeCount = Object.entries(filters).filter(([k, v]) => v && v !== "All").length + (search ? 1 : 0);
 
   const selectedOrder = shipments.find(o => o.id === selectedId);
+
+  const toggleFilterField = (key) => {
+    setActiveFilterKeys(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
 
   if (loading) return <Spinner />;
 
@@ -109,7 +139,7 @@ export function OrdersPage({ user }) {
 
   return (
     <div>
-      {/* 1. 动作行 */}
+      {/* 1. Action bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, padding: "8px 12px", background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0" }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>海运出口</h1>
@@ -117,39 +147,86 @@ export function OrdersPage({ user }) {
         <div style={{ display: "flex", gap: 6 }}>
           <Button small variant="secondary" onClick={() => setShowFilters(p => !p)}>{showFilters ? "隐藏筛选" : "显示筛选"} {activeCount > 0 && `(${activeCount})`}</Button>
           <Button small variant="secondary" onClick={clearFilters}>清除</Button>
+          <Button small variant="secondary" onClick={() => setShowFieldPicker(p => !p)}>⚙ 自定义筛选</Button>
           <Button small onClick={() => setShowNew(true)}>+ 新建订单</Button>
         </div>
       </div>
 
-      {/* 2. 筛选字段 */}
-      {showFilters && (
+      {/* Field picker */}
+      {showFieldPicker && (
         <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0", padding: "10px 12px", marginBottom: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px 10px" }}>
-            <div><div style={fl}>委托方</div><select value={filters.supplier} onChange={e => setFilters(p => ({ ...p, supplier: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{supplierList.map(s => <option key={s}>{s}</option>)}</select></div>
-            <div><div style={fl}>客户</div><select value={filters.customer} onChange={e => setFilters(p => ({ ...p, customer: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{customerList.map(s => <option key={s}>{s}</option>)}</select></div>
-            <div><div style={fl}>船公司</div><select value={filters.carrier} onChange={e => setFilters(p => ({ ...p, carrier: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{carrierList.map(s => <option key={s}>{s}</option>)}</select></div>
-            <div><div style={fl}>船名</div><input value={filters.vessel} onChange={e => setFilters(p => ({ ...p, vessel: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="船名..." /></div>
-            <div><div style={fl}>起运港</div><select value={filters.pol} onChange={e => setFilters(p => ({ ...p, pol: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{polList.map(s => <option key={s}>{s}</option>)}</select></div>
-            <div><div style={fl}>卸货港</div><select value={filters.pod} onChange={e => setFilters(p => ({ ...p, pod: e.target.value }))} style={{ ...fs, width: "100%" }}><option value="">全部</option>{podList.map(s => <option key={s}>{s}</option>)}</select></div>
-            <div><div style={fl}>MB/L No.</div><input value={filters.mbl_no} onChange={e => setFilters(p => ({ ...p, mbl_no: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="提单号..." /></div>
-            <div><div style={fl}>Booking No.</div><input value={filters.booking_no} onChange={e => setFilters(p => ({ ...p, booking_no: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="订舱号..." /></div>
-            <div><div style={fl}>柜号</div><input value={filters.container_no} onChange={e => setFilters(p => ({ ...p, container_no: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder="柜号..." /></div>
-            <div><div style={fl}>ETD 从</div><input type="date" value={filters.etd_from} onChange={e => setFilters(p => ({ ...p, etd_from: e.target.value }))} style={{ ...fs, width: "100%" }} /></div>
-            <div><div style={fl}>ETD 至</div><input type="date" value={filters.etd_to} onChange={e => setFilters(p => ({ ...p, etd_to: e.target.value }))} style={{ ...fs, width: "100%" }} /></div>
-            <div><div style={fl}>搜索</div><input value={search} onChange={e => setSearch(e.target.value)} style={{ ...fs, width: "100%" }} placeholder="PO / Cust PO / 关键词..." /></div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 8 }}>选择筛选字段（勾选显示）</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {ALL_FILTER_FIELDS.map(f => (
+              <label key={f.key} style={{
+                display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
+                borderRadius: 6, fontSize: 11, cursor: "pointer",
+                background: activeFilterKeys.includes(f.key) ? "#f0f9ff" : "#f8fafc",
+                border: `1px solid ${activeFilterKeys.includes(f.key) ? "#bae6fd" : "#e2e8f0"}`,
+                color: activeFilterKeys.includes(f.key) ? "#0369a1" : "#64748b",
+              }}>
+                <input type="checkbox" checked={activeFilterKeys.includes(f.key)} onChange={() => toggleFilterField(f.key)}
+                  style={{ width: 12, height: 12 }} />
+                {f.label}
+              </label>
+            ))}
           </div>
         </div>
       )}
 
-      {/* 3. 数据统计 + 状态快捷 */}
+      {/* 2. Filter fields */}
+      {showFilters && (
+        <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0", padding: "10px 12px", marginBottom: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px 10px" }}>
+            {activeFilterKeys.map(key => {
+              const def = ALL_FILTER_FIELDS.find(f => f.key === key);
+              if (!def) return null;
+              if (def.type === "combo") {
+                const opts = refLists[key] || [...new Set(shipments.map(o => o[key]).filter(Boolean))].sort();
+                return (
+                  <div key={key}>
+                    <div style={fl}>{def.label}</div>
+                    <ComboBox
+                      value={filters[key] || ""}
+                      onChange={(v) => setFilters(p => ({ ...p, [key]: v }))}
+                      options={opts}
+                      placeholder={`${def.label}...`}
+                    />
+                  </div>
+                );
+              }
+              if (def.type === "date") {
+                return (
+                  <div key={key}>
+                    <div style={fl}>{def.label}</div>
+                    <input type="date" value={filters[key] || ""} onChange={e => setFilters(p => ({ ...p, [key]: e.target.value }))} style={{ ...fs, width: "100%" }} />
+                  </div>
+                );
+              }
+              return (
+                <div key={key}>
+                  <div style={fl}>{def.label}</div>
+                  <input value={filters[key] || ""} onChange={e => setFilters(p => ({ ...p, [key]: e.target.value }))} style={{ ...fs, width: "100%" }} placeholder={`${def.label}...`} />
+                </div>
+              );
+            })}
+            <div>
+              <div style={fl}>搜索</div>
+              <input value={search} onChange={e => setSearch(e.target.value)} style={{ ...fs, width: "100%" }} placeholder="PO / Cust PO / 关键词..." />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Stats + status quick filters */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, padding: "6px 12px", background: "#f0f9ff", borderRadius: 8, border: "1px solid #bae6fd" }}>
         <div style={{ fontSize: 12, color: "#0369a1", fontWeight: 600 }}>
           行数: <strong>{stats.rows}</strong> &nbsp; TEU: <strong>{stats.teu}</strong> &nbsp; {stats.typeStr && <>箱型: <strong>{stats.typeStr}</strong></>}
         </div>
         <div style={{ display: "flex", gap: 4 }}>
-          <FilterDropdown label="QC" value={filters.qc_status} options={[...STATUS_CONFIGS.qc_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, qc_status: v }))} />
-          <FilterDropdown label="放舱" value={filters.space_status} options={[...STATUS_CONFIGS.space_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, space_status: v }))} />
-          <FilterDropdown label="提单" value={filters.bl_status} options={[...STATUS_CONFIGS.bl_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, bl_status: v }))} />
+          <FilterDropdown label="QC" value={filters.qc_status || "All"} options={[...STATUS_CONFIGS.qc_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, qc_status: v }))} />
+          <FilterDropdown label="放舱" value={filters.space_status || "All"} options={[...STATUS_CONFIGS.space_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, space_status: v }))} />
+          <FilterDropdown label="提单" value={filters.bl_status || "All"} options={[...STATUS_CONFIGS.bl_status.options, "__empty__"]} optionLabels={{ "__empty__": "未设置" }} onChange={v => setFilters(p => ({ ...p, bl_status: v }))} />
         </div>
       </div>
 
@@ -163,7 +240,7 @@ export function OrdersPage({ user }) {
         </div>
       )}
 
-      {/* 4. 订单列表 */}
+      {/* 4. Order list table */}
       <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, minWidth: 1200 }}>
@@ -175,7 +252,7 @@ export function OrdersPage({ user }) {
             </tr></thead>
             <tbody>
               {pagedRows.length === 0 && <tr><td colSpan={17} style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>暂无数据</td></tr>}
-              {pagedRows.map((o, i) => {
+              {pagedRows.map((o) => {
                 const bg = checkedIds.has(o.id) ? "#f0f9ff" : "transparent";
                 return (
                 <tr key={o.id} style={{ borderBottom: "1px solid #f1f5f9", cursor: "pointer", background: bg }}
@@ -227,7 +304,7 @@ export function OrdersPage({ user }) {
 }
 
 // =========================================================================
-// Order Detail — Page 1: order info, Page 2: charges
+// Order Detail
 // =========================================================================
 function OrderDetail({ order, role, user, onBack, onReload }) {
   const [tab, setTab] = useState("info");
@@ -235,6 +312,8 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const [editData, setEditData] = useState({});
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
   const [cargoItems, setCargoItems] = useState([]);
+  const [editingCargo, setEditingCargo] = useState(false);
+  const [cargoEdits, setCargoEdits] = useState([]);
 
   useEffect(() => {
     Promise.all([
@@ -244,7 +323,10 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
     ]).then(([s, c, p]) => {
       setRefData({ suppliers: (s.data || []).map(r => r.name), customers: (c.data || []).map(r => r.name), ports: (p.data || []).map(r => r.name) });
     });
-    // Load container_items as cargo detail
+    loadCargo();
+  }, [order.id]);
+
+  const loadCargo = useCallback(() => {
     if (order.po || order.customer_po) {
       const q = order.po && order.customer_po
         ? supabase.from("container_items").select("*").eq("po", order.po).eq("customer_po", String(order.customer_po))
@@ -253,7 +335,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
           : supabase.from("container_items").select("*").eq("po", order.po);
       q.then(({ data }) => setCargoItems(data || []));
     }
-  }, [order.id]);
+  }, [order.id, order.po, order.customer_po]);
 
   const startEdit = () => { setEditData({ ...order }); setEditing(true); };
   const cancelEdit = () => { setEditing(false); };
@@ -271,25 +353,26 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
     setEditing(false);
     onReload();
   };
-  const ed = (f) => editing ? (editData[f] ?? "") : null;
+  const ed = (f) => editing ? (editData[f] ?? "") : "";
   const setEd = (f, v) => setEditData(p => ({ ...p, [f]: v }));
 
-  const EF = ({ label, field, type, options }) => {
-    if (!editing) return <Field label={label} value={order[field]} />;
-    if (options) return (
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: "#8896a7", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 3 }}>{label}</div>
-        <select value={ed(field)} onChange={e => setEd(field, e.target.value)} style={{ width: "100%", padding: "5px 8px", borderRadius: 5, border: "1px solid #bae6fd", background: "#f0f9ff", fontSize: 12, fontWeight: 600, outline: "none", color: "#0c4a6e", boxSizing: "border-box" }}>
-          <option value="">—</option>{options.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
-      </div>
-    );
-    return (
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: "#8896a7", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 3 }}>{label}</div>
-        <input type={type || "text"} value={ed(field)} onChange={e => setEd(field, e.target.value)} style={{ width: "100%", padding: "5px 8px", borderRadius: 5, border: "1px solid #bae6fd", background: "#f0f9ff", fontSize: 12, fontWeight: 600, outline: "none", color: "#0c4a6e", boxSizing: "border-box", fontFamily: "'DM Mono',monospace" }} />
-      </div>
-    );
+  // Cargo editing
+  const startCargoEdit = () => {
+    setCargoEdits(cargoItems.map(it => ({ ...it })));
+    setEditingCargo(true);
+  };
+  const cancelCargoEdit = () => { setEditingCargo(false); };
+  const saveCargoEdit = async () => {
+    for (const item of cargoEdits) {
+      const { id, created_at, ...rest } = item;
+      const { error } = await supabase.from("container_items").update(rest).eq("id", id);
+      if (error) { alert(error.message); return; }
+    }
+    setEditingCargo(false);
+    loadCargo();
+  };
+  const updateCargoItem = (id, field, value) => {
+    setCargoEdits(prev => prev.map(it => it.id === id ? { ...it, [field]: value } : it));
   };
 
   return (
@@ -321,14 +404,14 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
           <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #0ea5e9" : "1px solid #e2e8f0", marginBottom: 14 }}>
             <SectionHeader icon="📄" title="基本信息" accent="#0ea5e9" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px" }}>
-              <EF label="订单编号" field="order_no" />
-              <EF label="委托单位" field="supplier" options={refData.suppliers} />
-              <EF label="贸易条款" field="incoterms" options={TRADE_TERMS} />
-              <EF label="货物类型" field="cargo_type" options={CARGO_TYPES.map(c => c.label)} />
-              <EF label="PO#（业务编号）" field="po" />
-              <EF label="Customer PO#（客户业务编号）" field="customer_po" />
-              <EF label="客户" field="customer" options={refData.customers} />
-              <EF label="终端客户" field="end_customer" />
+              <EditField label="订单编号" field="order_no" editing={editing} value={ed("order_no")} displayValue={order.order_no} onChange={setEd} />
+              <EditField label="委托单位" field="supplier" editing={editing} value={ed("supplier")} displayValue={order.supplier} onChange={setEd} options={refData.suppliers} />
+              <EditField label="贸易条款" field="incoterms" editing={editing} value={ed("incoterms")} displayValue={order.incoterms} onChange={setEd} options={TRADE_TERMS} />
+              <EditField label="货物类型" field="cargo_type" editing={editing} value={ed("cargo_type")} displayValue={order.cargo_type} onChange={setEd} options={CARGO_TYPES.map(c => c.label)} />
+              <EditField label="PO#（业务编号）" field="po" editing={editing} value={ed("po")} displayValue={order.po} onChange={setEd} />
+              <EditField label="Customer PO#（客户业务编号）" field="customer_po" editing={editing} value={ed("customer_po")} displayValue={order.customer_po} onChange={setEd} />
+              <EditField label="客户" field="customer" editing={editing} value={ed("customer")} displayValue={order.customer} onChange={setEd} options={refData.customers} />
+              <EditField label="终端客户" field="end_customer" editing={editing} value={ed("end_customer")} displayValue={order.end_customer} onChange={setEd} />
             </div>
           </div>
 
@@ -336,51 +419,62 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
           <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #6366f1" : "1px solid #e2e8f0", marginBottom: 14 }}>
             <SectionHeader icon="🚢" title="运输信息" accent="#6366f1" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px" }}>
-              <EF label="船公司 Carrier" field="carrier" />
-              <EF label="订舱代理 Agent" field="carrier_agent" />
-              <EF label="起运港 POL" field="pol" options={refData.ports} />
-              <EF label="卸货港 POD" field="pod" options={refData.ports} />
-              <EF label="目的港 Destination" field="destination" />
-              <EF label="箱量" field="qty_container" />
-              <EF label="箱型 Container Type" field="container_type" options={CONTAINER_TYPES} />
-              <EF label="箱类型 COC/SOC" field="container_owner" options={CONTAINER_OWNERS} />
-              <EF label="船名 Vessel" field="vessel" />
-              <EF label="航次 Voyage" field="voyage" />
-              <EF label="码头 Terminal" field="terminal" />
+              <EditField label="船公司 Carrier" field="carrier" editing={editing} value={ed("carrier")} displayValue={order.carrier} onChange={setEd} />
+              <EditField label="订舱代理 Agent" field="carrier_agent" editing={editing} value={ed("carrier_agent")} displayValue={order.carrier_agent} onChange={setEd} />
+              <EditField label="起运港 POL" field="pol" editing={editing} value={ed("pol")} displayValue={order.pol} onChange={setEd} options={refData.ports} />
+              <EditField label="卸货港 POD" field="pod" editing={editing} value={ed("pod")} displayValue={order.pod} onChange={setEd} options={refData.ports} />
+              <EditField label="目的港 Destination" field="destination" editing={editing} value={ed("destination")} displayValue={order.destination} onChange={setEd} />
+              <EditField label="箱量" field="qty_container" editing={editing} value={ed("qty_container")} displayValue={order.qty_container} onChange={setEd} />
+              <EditField label="箱型 Container Type" field="container_type" editing={editing} value={ed("container_type")} displayValue={order.container_type} onChange={setEd} options={CONTAINER_TYPES} />
+              <EditField label="箱类型 COC/SOC" field="container_owner" editing={editing} value={ed("container_owner")} displayValue={order.container_owner} onChange={setEd} options={CONTAINER_OWNERS} />
+              <EditField label="船名 Vessel" field="vessel" editing={editing} value={ed("vessel")} displayValue={order.vessel} onChange={setEd} />
+              <EditField label="航次 Voyage" field="voyage" editing={editing} value={ed("voyage")} displayValue={order.voyage} onChange={setEd} />
+              <EditField label="码头 Terminal" field="terminal" editing={editing} value={ed("terminal")} displayValue={order.terminal} onChange={setEd} />
               <div />
-              <EF label="ETD 预计开船" field="etd" type="date" />
-              <EF label="ATD 实际开船" field="atd" type="date" />
-              <EF label="ETA 预计到港" field="eta" type="date" />
+              <EditField label="ETD 预计开船" field="etd" type="date" editing={editing} value={ed("etd")} displayValue={order.etd} onChange={setEd} />
+              <EditField label="ATD 实际开船" field="atd" type="date" editing={editing} value={ed("atd")} displayValue={order.atd} onChange={setEd} />
+              <EditField label="ETA 预计到港" field="eta" type="date" editing={editing} value={ed("eta")} displayValue={order.eta} onChange={setEd} />
               <div />
-              <EF label="截单时间 SI Cutoff" field="si_cutoff" type="datetime-local" />
-              <EF label="截关时间 CY Cutoff" field="cy_cutoff" type="datetime-local" />
+              <EditField label="截单时间 SI Cutoff" field="si_cutoff" type="datetime-local" editing={editing} value={ed("si_cutoff")} displayValue={order.si_cutoff} onChange={setEd} />
+              <EditField label="截关时间 CY Cutoff" field="cy_cutoff" type="datetime-local" editing={editing} value={ed("cy_cutoff")} displayValue={order.cy_cutoff} onChange={setEd} />
             </div>
           </div>
 
-          {/* Part 3: 提单信息 */}
+          {/* Part 3: 提单信息 + Shipper/Consignee */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
             <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #f59e0b" : "1px solid #e2e8f0" }}>
               <SectionHeader icon="📜" title="提单信息" accent="#f59e0b" />
-              <EF label="Booking No 订舱号" field="booking_no" />
-              <EF label="E-Booking No" field="e_booking_no" />
-              <EF label="MBL No 主提单号" field="mbl_no" />
-              <EF label="提单形式 BL Type" field="bl_type" options={BL_TYPES} />
-              <EF label="付款方式 Freight Terms" field="freight_terms" options={FREIGHT_TERMS} />
-              <EF label="运输条款 Transport Terms" field="transport_terms" options={TRANSPORT_TERMS} />
+              <EditField label="Booking No 订舱号" field="booking_no" editing={editing} value={ed("booking_no")} displayValue={order.booking_no} onChange={setEd} />
+              <EditField label="E-Booking No" field="e_booking_no" editing={editing} value={ed("e_booking_no")} displayValue={order.e_booking_no} onChange={setEd} />
+              <EditField label="MBL No 主提单号" field="mbl_no" editing={editing} value={ed("mbl_no")} displayValue={order.mbl_no} onChange={setEd} />
+              <EditField label="提单形式 BL Type" field="bl_type" editing={editing} value={ed("bl_type")} displayValue={order.bl_type} onChange={setEd} options={BL_TYPES} />
+              <EditField label="付款方式 Freight Terms" field="freight_terms" editing={editing} value={ed("freight_terms")} displayValue={order.freight_terms} onChange={setEd} options={FREIGHT_TERMS} />
+              <EditField label="运输条款 Transport Terms" field="transport_terms" editing={editing} value={ed("transport_terms")} displayValue={order.transport_terms} onChange={setEd} options={TRANSPORT_TERMS} />
             </div>
             <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: editing ? "2px solid #8b5cf6" : "1px solid #e2e8f0" }}>
               <SectionHeader icon="👤" title="Shipper / Consignee / Notify" accent="#8b5cf6" />
-              <EF label="Shipper 发货人" field="shipper" />
-              <EF label="Consignee 收货人" field="consignee" />
-              <EF label="Notify Party 通知方" field="notify_party" />
+              <EditField label="Shipper 发货人" field="shipper" editing={editing} value={ed("shipper")} displayValue={order.shipper} onChange={setEd} />
+              <EditField label="Consignee 收货人" field="consignee" editing={editing} value={ed("consignee")} displayValue={order.consignee} onChange={setEd} />
+              <EditField label="Notify Party 通知方" field="notify_party" editing={editing} value={ed("notify_party")} displayValue={order.notify_party} onChange={setEd} />
             </div>
           </div>
 
-          {/* Part 4: 货物明细 — 多行表格 */}
+          {/* Part 4: 货物明细 */}
           <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "2px solid #10b981", marginBottom: 14 }}>
-            <SectionHeader icon="📦" title="货物明细" accent="#10b981" />
+            <SectionHeader icon="📦" title="货物明细" accent="#10b981"
+              right={
+                cargoItems.length > 0 && !editingCargo ? (
+                  <Button small variant="secondary" onClick={startCargoEdit} style={{ marginRight: 8 }}>✎ 编辑明细</Button>
+                ) : editingCargo ? (
+                  <div style={{ display: "flex", gap: 4, marginRight: 8 }}>
+                    <Button small onClick={saveCargoEdit}>✓ 保存</Button>
+                    <Button small variant="secondary" onClick={cancelCargoEdit}>✕ 取消</Button>
+                  </div>
+                ) : null
+              }
+            />
 
-            {/* 原始数据（shipment 上的） */}
+            {/* Shipment-level summary */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px", marginBottom: 12, padding: 10, background: "#f8fafc", borderRadius: 8 }}>
               <Field label="品名 Description" value={order.tuc} />
               <Field label="SKU" value={order.sku} />
@@ -390,10 +484,12 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
               <Field label="唛头 Marks" value={order.marks} />
             </div>
 
-            {/* 装柜明细（从 container_items） */}
-            {cargoItems.length > 0 && (
+            {/* Container items table */}
+            {(editingCargo ? cargoEdits : cargoItems).length > 0 && (
               <>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>装柜明细（实际数据）</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>
+                  装柜明细{editingCargo ? "（编辑中）" : "（实际数据）"}
+                </div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                     <thead><tr style={{ background: "#ecfdf5" }}>
@@ -402,31 +498,48 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                       )}
                     </tr></thead>
                     <tbody>
-                      {cargoItems.map(it => (
+                      {(editingCargo ? cargoEdits : cargoItems).map(it => (
                         <tr key={it.id} style={{ borderBottom: "1px solid #d1fae5" }}>
-                          <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{order.mbl_no || order.booking_no || "—"}</td>
-                          <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{it.hbl || "—"}</td>
-                          <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#0369a1" }}>{it.container_no || "—"}</td>
-                          <td style={{ padding: "5px 6px", fontSize: 10 }}>{it.seal_no || "—"}</td>
-                          <td style={{ padding: "5px 6px", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.tuc || "—"}</td>
-                          <td style={{ padding: "5px 6px" }}>{it.marks || "—"}</td>
-                          <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.qty || "—"}</td>
-                          <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.weight || "—"}</td>
-                          <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.volume || "—"}</td>
+                          <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>
+                            {order.mbl_no || order.booking_no || "—"}
+                          </td>
+                          {editingCargo ? (
+                            <>
+                              <CargoCell id={it.id} field="hbl" value={it.hbl} onChange={updateCargoItem} />
+                              <CargoCell id={it.id} field="container_no" value={it.container_no} onChange={updateCargoItem} />
+                              <CargoCell id={it.id} field="seal_no" value={it.seal_no} onChange={updateCargoItem} />
+                              <CargoCell id={it.id} field="tuc" value={it.tuc} onChange={updateCargoItem} wide />
+                              <CargoCell id={it.id} field="marks" value={it.marks} onChange={updateCargoItem} />
+                              <CargoCell id={it.id} field="qty" value={it.qty} onChange={updateCargoItem} num />
+                              <CargoCell id={it.id} field="weight" value={it.weight} onChange={updateCargoItem} num />
+                              <CargoCell id={it.id} field="volume" value={it.volume} onChange={updateCargoItem} num />
+                            </>
+                          ) : (
+                            <>
+                              <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{it.hbl || "—"}</td>
+                              <td style={{ padding: "5px 6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#0369a1" }}>{it.container_no || "—"}</td>
+                              <td style={{ padding: "5px 6px", fontSize: 10 }}>{it.seal_no || "—"}</td>
+                              <td style={{ padding: "5px 6px", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.tuc || "—"}</td>
+                              <td style={{ padding: "5px 6px" }}>{it.marks || "—"}</td>
+                              <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.qty || "—"}</td>
+                              <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.weight || "—"}</td>
+                              <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.volume || "—"}</td>
+                            </>
+                          )}
                         </tr>
                       ))}
                       <tr style={{ background: "#ecfdf5", fontWeight: 700 }}>
                         <td colSpan={6} style={{ padding: "6px", textAlign: "right", fontSize: 10, color: "#065f46" }}>合计</td>
-                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{cargoItems.reduce((s, i) => s + (Number(i.qty) || 0), 0)}</td>
-                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{cargoItems.reduce((s, i) => s + (Number(i.weight) || 0), 0).toFixed(4)}</td>
-                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{cargoItems.reduce((s, i) => s + (Number(i.volume) || 0), 0).toFixed(4)}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{(editingCargo ? cargoEdits : cargoItems).reduce((s, i) => s + (Number(i.qty) || 0), 0)}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{(editingCargo ? cargoEdits : cargoItems).reduce((s, i) => s + (Number(i.weight) || 0), 0).toFixed(4)}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontSize: 10 }}>{(editingCargo ? cargoEdits : cargoItems).reduce((s, i) => s + (Number(i.volume) || 0), 0).toFixed(4)}</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
               </>
             )}
-            {cargoItems.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>暂无装柜明细 — 请在「柜子」模块中录入</div>}
+            {cargoItems.length === 0 && !editingCargo && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>暂无装柜明细 — 请在「柜子」模块中录入</div>}
           </div>
         </>
       )}
@@ -438,6 +551,26 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Cargo cell editor (top-level component, no focus loss) ────────
+function CargoCell({ id, field, value, onChange, num, wide }) {
+  return (
+    <td style={{ padding: "3px 4px" }}>
+      <input
+        value={value ?? ""}
+        onChange={(e) => onChange(id, field, num ? e.target.value : e.target.value)}
+        style={{
+          width: "100%", padding: "3px 5px", borderRadius: 4,
+          border: "1px solid #a7f3d0", background: "#f0fdf4",
+          fontSize: 10, outline: "none", boxSizing: "border-box",
+          fontFamily: num ? "'DM Mono',monospace" : "inherit",
+          textAlign: num ? "right" : "left",
+          minWidth: wide ? 120 : 60,
+        }}
+      />
+    </td>
   );
 }
 
@@ -477,15 +610,30 @@ function NewOrderModal({ onClose, onSaved }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         <Input label="PO#" value={form.po} onChange={e => set("po", e.target.value)} />
         <Input label="Customer PO#" value={form.customer_po} onChange={e => set("customer_po", e.target.value)} />
-        <Select label={t("Supplier")} value={form.supplier} onChange={e => set("supplier", e.target.value)} options={refData.suppliers} />
-        <Select label={t("Customer")} value={form.customer} onChange={e => set("customer", e.target.value)} options={refData.customers} />
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{t("Supplier")}</div>
+          <ComboBox value={form.supplier} onChange={v => set("supplier", v)} options={refData.suppliers} placeholder="搜索委托方..." />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{t("Customer")}</div>
+          <ComboBox value={form.customer} onChange={v => set("customer", v)} options={refData.customers} placeholder="搜索客户..." />
+        </div>
         <Input label={t("Carrier")} value={form.carrier} onChange={e => set("carrier", e.target.value)} />
         <Input label={t("Agent")} value={form.carrier_agent} onChange={e => set("carrier_agent", e.target.value)} />
         <Input label={t("Vessel")} value={form.vessel} onChange={e => set("vessel", e.target.value)} />
-        <Select label={t("POL")} value={form.pol} onChange={e => set("pol", e.target.value)} options={refData.ports} />
-        <Select label={t("POD")} value={form.pod} onChange={e => set("pod", e.target.value)} options={refData.ports} />
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{t("POL")}</div>
+          <ComboBox value={form.pol} onChange={v => set("pol", v)} options={refData.ports} placeholder="搜索港口..." />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{t("POD")}</div>
+          <ComboBox value={form.pod} onChange={v => set("pod", v)} options={refData.ports} placeholder="搜索港口..." />
+        </div>
         <Input label="ETD" type="date" value={form.etd} onChange={e => set("etd", e.target.value)} />
-        <Select label={t("Trade Terms")} value={form.incoterms} onChange={e => set("incoterms", e.target.value)} options={TRADE_TERMS} />
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{t("Trade Terms")}</div>
+          <ComboBox value={form.incoterms} onChange={v => set("incoterms", v)} options={TRADE_TERMS} placeholder="选择..." />
+        </div>
         <Input label={t("Booking No")} value={form.booking_no} onChange={e => set("booking_no", e.target.value)} />
         <Input label="E-Booking" value={form.e_booking_no} onChange={e => set("e_booking_no", e.target.value)} />
       </div>

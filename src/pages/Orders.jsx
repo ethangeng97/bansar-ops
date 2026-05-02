@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { Badge, Field, SectionHeader, Modal, Button, Input, Select, Spinner, EmptyState, FilterDropdown, ComboBox, EditField } from "../components/ui.jsx";
 import { t } from "../lib/i18n.js";
-import { STATUS_CONFIGS, STATUS_COLORS, TRADE_TERMS, CONTAINER_TYPES, CONTAINER_OWNERS, BL_TYPES, FREIGHT_TERMS, TRANSPORT_TERMS, CARGO_TYPES, SERVICE_TYPES } from "../lib/constants.js";
+import { STATUS_CONFIGS, STATUS_COLORS, TRADE_TERMS, CONTAINER_TYPES, CONTAINER_OWNERS, BL_TYPES, FREIGHT_TERMS, TRANSPORT_TERMS, CARGO_TYPES, SERVICE_TYPES, SHIPMENT_TYPES } from "../lib/constants.js";
 
 // ── All filterable columns definition ────────────────────────────
 const ALL_FILTER_FIELDS = [
   { key: "supplier",     label: "委托方",     type: "combo" },
   { key: "customer",     label: "客户",       type: "combo" },
+  { key: "shipment_type", label: "出运类型", type: "combo" },
   { key: "carrier",      label: "船公司",     type: "combo" },
   { key: "vessel",       label: "船名",       type: "text" },
   { key: "voyage",       label: "航次",       type: "text" },
@@ -61,6 +62,7 @@ export function OrdersPage({ user }) {
       vessel: extract("vessel"), pol: extract("pol"), pod: extract("pod"),
       destination: extract("destination"), incoterms: TRADE_TERMS,
       container_type: CONTAINER_TYPES, bl_type: BL_TYPES,
+      shipment_type: SHIPMENT_TYPES.map(t => t.key),
     };
   }, [shipments]);
 
@@ -104,11 +106,13 @@ export function OrdersPage({ user }) {
     let teu = 0;
     filtered.forEach(o => {
       const qt = o.qty_container || "";
-      const m = qt.match(/(\d+)x(\w+)/);
-      if (m) {
-        const cnt = parseInt(m[1]); const typ = m[2];
+      // Match patterns like "1x40HQ", "2x1x40HQ" (take last NxTYPE), or multiple "2x40HQ, 1x20GP"
+      const matches = qt.matchAll(/(\d+)x((?:20|40|45)(?:GP|HQ|RF|OT|FR))/gi);
+      for (const m of matches) {
+        const cnt = parseInt(m[1]);
+        const typ = m[2].toUpperCase();
         types[typ] = (types[typ] || 0) + cnt;
-        teu += typ === "20GP" ? cnt : cnt * 2;
+        teu += typ.startsWith("20") ? cnt : cnt * 2;
       }
     });
     return { rows: filtered.length, teu, typeStr: Object.entries(types).map(([t, c]) => `${c}x${t}`).join(", ") };
@@ -259,7 +263,7 @@ export function OrdersPage({ user }) {
                   onMouseEnter={e => { e.currentTarget.style.background = "#f8fafc"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = bg; }}>
                   <td style={{ padding: "6px", textAlign: "center" }} onClick={e => e.stopPropagation()}><input type="checkbox" checked={checkedIds.has(o.id)} onChange={() => toggleCheck(o.id)} /></td>
-                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.qty_container?.includes("Multi") ? "拼箱" : "整箱"}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{(SHIPMENT_TYPES.find(t => t.key === o.shipment_type) || SHIPMENT_TYPES[0]).label}</td>
                   <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#0369a1", fontWeight: 600 }} onClick={() => setSelectedId(o.id)}>{o.order_no || "—"}</td>
                   <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.po || "—"}</td>
                   <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.customer_po || "—"}</td>
@@ -405,6 +409,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
             <SectionHeader icon="📄" title="基本信息" accent="#0ea5e9" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px" }}>
               <EditField label="订单编号" field="order_no" editing={editing} value={ed("order_no")} displayValue={order.order_no} onChange={setEd} />
+              <EditField label="出运类型" field="shipment_type" editing={editing} value={ed("shipment_type")} displayValue={(SHIPMENT_TYPES.find(t => t.key === order.shipment_type) || SHIPMENT_TYPES[0]).label} onChange={setEd} options={SHIPMENT_TYPES.map(t => t.key)} />
               <EditField label="委托单位" field="supplier" editing={editing} value={ed("supplier")} displayValue={order.supplier} onChange={setEd} options={refData.suppliers} />
               <EditField label="贸易条款" field="incoterms" editing={editing} value={ed("incoterms")} displayValue={order.incoterms} onChange={setEd} options={TRADE_TERMS} />
               <EditField label="货物类型" field="cargo_type" editing={editing} value={ed("cargo_type")} displayValue={order.cargo_type} onChange={setEd} options={CARGO_TYPES.map(c => c.label)} />
@@ -578,7 +583,7 @@ function CargoCell({ id, field, value, onChange, num, wide }) {
 // New Order Modal
 // =========================================================================
 function NewOrderModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ po: "", customer_po: "", supplier: "", customer: "", carrier: "", carrier_agent: "", vessel: "", pol: "", pod: "", etd: "", incoterms: "FOB", booking_no: "", e_booking_no: "" });
+  const [form, setForm] = useState({ po: "", customer_po: "", supplier: "", customer: "", carrier: "", carrier_agent: "", vessel: "", pol: "", pod: "", etd: "", incoterms: "FOB", booking_no: "", e_booking_no: "", shipment_type: "FCL" });
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
   const [saving, setSaving] = useState(false);
 
@@ -610,6 +615,10 @@ function NewOrderModal({ onClose, onSaved }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         <Input label="PO#" value={form.po} onChange={e => set("po", e.target.value)} />
         <Input label="Customer PO#" value={form.customer_po} onChange={e => set("customer_po", e.target.value)} />
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>出运类型</div>
+          <ComboBox value={form.shipment_type} onChange={v => set("shipment_type", v)} options={SHIPMENT_TYPES.map(t => t.key)} placeholder="FCL / LCL / Console" />
+        </div>
         <div>
           <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{t("Supplier")}</div>
           <ComboBox value={form.supplier} onChange={v => set("supplier", v)} options={refData.suppliers} placeholder="搜索委托方..." />

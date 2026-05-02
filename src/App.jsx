@@ -111,14 +111,14 @@ export default function App() {
           {/* Dashboard - always on top */}
           <button onClick={() => setView("dashboard")}
             style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", borderRadius: 8, border: "none", background: view === "dashboard" ? "#0ea5e9" : "transparent", color: view === "dashboard" ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left", marginBottom: 8 }}>
-            <span style={{ fontSize: 14 }}>🏠</span> 工作台
+            工作台
           </button>
 
           {navGroups.map(g => (
             <div key={g.key} style={{ marginBottom: 4 }}>
               <button onClick={() => toggleGroup(g.key)}
                 style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "9px 12px", borderRadius: 8, border: "none", background: openGroups[g.key] ? "#1e293b" : "transparent", color: openGroups[g.key] ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 14 }}>{g.icon}</span> {g.label}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>{g.label}</span>
                 <span style={{ fontSize: 10, transition: "transform .2s", transform: openGroups[g.key] ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
               </button>
               {openGroups[g.key] && (

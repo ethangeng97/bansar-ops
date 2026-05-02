@@ -97,8 +97,62 @@ export function OrdersPage({ user }) {
   }), [shipments, filters, search, activeFilterKeys]);
 
   useEffect(() => { setPage(0); }, [filters, search]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const pagedRows = filtered.slice(page * pageSize, (page + 1) * pageSize);
+
+  // ── Console Box grouping ──────────────────────────────────────────
+  // Group by mbl_no: if 2+ shipments share same mbl_no → Console Box
+  const { groupedRows, flatCount } = useMemo(() => {
+    const mblGroups = {};
+    const noMbl = [];
+    filtered.forEach(o => {
+      const key = o.mbl_no || o.booking_no;
+      if (key) {
+        if (!mblGroups[key]) mblGroups[key] = [];
+        mblGroups[key].push(o);
+      } else {
+        noMbl.push(o);
+      }
+    });
+
+    const rows = [];
+    // Console groups first (sorted by first item's created_at desc)
+    const consoleGroups = Object.entries(mblGroups)
+      .filter(([, items]) => items.length >= 2)
+      .sort((a, b) => (b[1][0].created_at || "").localeCompare(a[1][0].created_at || ""));
+
+    // Singles (including single-MBL entries)
+    const singles = [
+      ...Object.entries(mblGroups).filter(([, items]) => items.length === 1).map(([, items]) => items[0]),
+      ...noMbl,
+    ].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+
+    // Build flat list with group markers
+    consoleGroups.forEach(([mbl, items]) => {
+      // Parent row (MBL level) - use first item for shared fields
+      const first = items[0];
+      rows.push({
+        type: "console_parent",
+        mbl,
+        data: first,
+        children: items,
+        count: items.length,
+      });
+      // Child rows
+      items.forEach(child => {
+        rows.push({ type: "console_child", mbl, data: child });
+      });
+    });
+
+    singles.forEach(o => {
+      rows.push({ type: "single", data: o });
+    });
+
+    return { groupedRows: rows, flatCount: filtered.length };
+  }, [filtered]);
+
+  const totalPages = Math.max(1, Math.ceil(groupedRows.length / pageSize));
+  const pagedRows = groupedRows.slice(page * pageSize, (page + 1) * pageSize);
+  const [collapsedMbls, setCollapsedMbls] = useState(new Set());
+  const toggleCollapse = (mbl) => setCollapsedMbls(p => { const n = new Set(p); n.has(mbl) ? n.delete(mbl) : n.add(mbl); return n; });
 
   // Stats
   const stats = useMemo(() => {
@@ -256,14 +310,97 @@ export function OrdersPage({ user }) {
             </tr></thead>
             <tbody>
               {pagedRows.length === 0 && <tr><td colSpan={17} style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>暂无数据</td></tr>}
-              {pagedRows.map((o) => {
+              {pagedRows.map((row, ri) => {
+                // Skip collapsed children
+                if (row.type === "console_child" && collapsedMbls.has(row.mbl)) return null;
+
+                const o = row.data;
                 const bg = checkedIds.has(o.id) ? "#f0f9ff" : "transparent";
+
+                // ── Console Parent Row (MBL level) ──
+                if (row.type === "console_parent") {
+                  const isOpen = !collapsedMbls.has(row.mbl);
+                  return (
+                    <tr key={`mbl-${row.mbl}`} style={{ borderBottom: "2px solid #e2e8f0", background: "#fefce8" }}>
+                      <td style={{ padding: "6px", textAlign: "center" }}>
+                        <input type="checkbox" checked={row.children.every(c => checkedIds.has(c.id))}
+                          onChange={() => row.children.forEach(c => toggleCheck(c.id))} />
+                      </td>
+                      <td style={{ padding: "6px", fontSize: 10 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: "#fbbf24", color: "#78350f", fontSize: 9, fontWeight: 700 }}>
+                          自拼柜
+                        </span>
+                      </td>
+                      <td style={{ padding: "6px", fontSize: 10, color: "#92400e", fontWeight: 600 }}>
+                        <button onClick={() => toggleCollapse(row.mbl)}
+                          style={{ border: "none", background: "none", cursor: "pointer", padding: 0, fontSize: 12, color: "#92400e", marginRight: 4 }}>
+                          {isOpen ? "▼" : "▶"}
+                        </button>
+                        MBL
+                      </td>
+                      <td colSpan={3} style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 11, fontWeight: 700, color: "#92400e" }}>
+                        {row.mbl}
+                        <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4, background: "#fef3c7", color: "#92400e" }}>
+                          {row.count} 票
+                        </span>
+                      </td>
+                      <td style={{ padding: "6px", fontSize: 10 }}>{o.customer || "—"}</td>
+                      <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{row.mbl}</td>
+                      <td style={{ padding: "6px", fontSize: 10, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.vessel || "—"}</td>
+                      <td style={{ padding: "6px", fontSize: 10 }}>{o.voyage || "—"}</td>
+                      <td style={{ padding: "6px", fontSize: 10 }}>{(o.pol || "").split("(")[0].trim() || "—"}</td>
+                      <td style={{ padding: "6px", fontSize: 10 }}>{(o.pod || "").split("(")[0].trim() || "—"}</td>
+                      <td style={{ padding: "6px", fontSize: 10 }}>{o.qty_container || "—"}</td>
+                      <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{o.etd || "—"}</td>
+                      <td style={{ padding: "6px" }}>{o.qc_status ? <Badge value={o.qc_status} small /> : "—"}</td>
+                      <td style={{ padding: "6px" }}>{o.space_status ? <Badge value={o.space_status} small /> : "—"}</td>
+                      <td style={{ padding: "6px" }}>{o.bl_status ? <Badge value={o.bl_status} small /> : "—"}</td>
+                    </tr>
+                  );
+                }
+
+                // ── Console Child Row (HBL / 分单 level) ──
+                if (row.type === "console_child") {
+                  return (
+                    <tr key={o.id} style={{ borderBottom: "1px solid #fef3c7", cursor: "pointer", background: bg || "#fffef5" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#fef9c3"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = bg || "#fffef5"; }}>
+                      <td style={{ padding: "6px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={checkedIds.has(o.id)} onChange={() => toggleCheck(o.id)} />
+                      </td>
+                      <td style={{ padding: "6px", fontSize: 10 }}></td>
+                      <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#0369a1", fontWeight: 600, paddingLeft: 24 }} onClick={() => setSelectedId(o.id)}>
+                        {o.order_no || "—"}
+                      </td>
+                      <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10, paddingLeft: 8 }} onClick={() => setSelectedId(o.id)}>
+                        <span style={{ color: "#94a3b8", marginRight: 4 }}>└</span>{o.po || "—"}
+                      </td>
+                      <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.customer_po || "—"}</td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.supplier || "—"}</td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.customer || "—"}</td>
+                      <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#94a3b8" }} onClick={() => setSelectedId(o.id)}>{o.mbl_no || o.booking_no || "—"}</td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}></td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}></td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}></td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}></td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}></td>
+                      <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}></td>
+                      <td style={{ padding: "6px" }} onClick={() => setSelectedId(o.id)}>{o.qc_status ? <Badge value={o.qc_status} small /> : "—"}</td>
+                      <td style={{ padding: "6px" }} onClick={() => setSelectedId(o.id)}>{o.space_status ? <Badge value={o.space_status} small /> : "—"}</td>
+                      <td style={{ padding: "6px" }} onClick={() => setSelectedId(o.id)}></td>
+                    </tr>
+                  );
+                }
+
+                // ── Normal single row ──
                 return (
                 <tr key={o.id} style={{ borderBottom: "1px solid #f1f5f9", cursor: "pointer", background: bg }}
                   onMouseEnter={e => { e.currentTarget.style.background = "#f8fafc"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = bg; }}>
                   <td style={{ padding: "6px", textAlign: "center" }} onClick={e => e.stopPropagation()}><input type="checkbox" checked={checkedIds.has(o.id)} onChange={() => toggleCheck(o.id)} /></td>
-                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{(SHIPMENT_TYPES.find(t => t.key === o.shipment_type) || SHIPMENT_TYPES[0]).label}</td>
+                  <td style={{ padding: "6px", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>
+                    <span style={{ fontSize: 10 }}>{o.shipment_type === "LCL" ? "拼箱" : "整箱"}</span>
+                  </td>
                   <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#0369a1", fontWeight: 600 }} onClick={() => setSelectedId(o.id)}>{o.order_no || "—"}</td>
                   <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.po || "—"}</td>
                   <td style={{ padding: "6px", fontFamily: "'DM Mono',monospace", fontSize: 10 }} onClick={() => setSelectedId(o.id)}>{o.customer_po || "—"}</td>
@@ -293,7 +430,7 @@ export function OrdersPage({ user }) {
           <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }} style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12, outline: "none" }}>
             {[20, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
-          <span style={{ color: "#94a3b8" }}>{filtered.length} 条 · 第 {page + 1}/{totalPages} 页</span>
+          <span style={{ color: "#94a3b8" }}>{flatCount} 条 · 第 {page + 1}/{totalPages} 页</span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           {[["⟨⟨", 0, page === 0], ["⟨", page - 1, page === 0], ["⟩", page + 1, page >= totalPages - 1], ["⟩⟩", totalPages - 1, page >= totalPages - 1]].map(([label, target, disabled]) =>

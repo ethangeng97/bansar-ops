@@ -115,7 +115,7 @@ export function OrdersPage({ user, onBack }) {
     if (f.pol && o.pol !== f.pol) return false;
     if (f.pod && o.pod !== f.pod) return false;
     if (f.destination && o.destination !== f.destination) return false;
-    if (f.mbl_no && !(o.mbl_no || "").toLowerCase().includes(String(f.mbl_no).toLowerCase())) return false;
+    if (f.booking_no && !(o.booking_no || "").toLowerCase().includes(String(f.booking_no).toLowerCase())) return false;
     if (f.booking_no && !(o.booking_no || "").toLowerCase().includes(String(f.booking_no).toLowerCase())) return false;
     if (f.container_no && !(o.container_no || "").toLowerCase().includes(String(f.container_no).toLowerCase())) return false;
     if (f.order_no && !(o.order_no || "").toLowerCase().includes(String(f.order_no).toLowerCase())) return false;
@@ -125,7 +125,7 @@ export function OrdersPage({ user, onBack }) {
     if (f.etd_to && o.etd && o.etd > f.etd_to) return false;
     if (search) {
       const q = search.toLowerCase();
-      const pool = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.voyage, o.supplier, o.order_no, o.mbl_no, o.customer, o.pol, o.pod];
+      const pool = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.voyage, o.supplier, o.order_no, o.customer, o.pol, o.pod];
       if (!pool.filter(Boolean).some(x => String(x).toLowerCase().includes(q))) return false;
     }
     return true;
@@ -137,7 +137,7 @@ export function OrdersPage({ user, onBack }) {
     const mblG = {};
     const noMbl = [];
     filtered.forEach(o => {
-      const k = o.mbl_no || o.booking_no;
+      const k = o.booking_no;
       if (k) {
         if (!mblG[k]) mblG[k] = [];
         mblG[k].push(o);
@@ -335,7 +335,7 @@ export function OrdersPage({ user, onBack }) {
               <input value={filters.po || ""} onChange={e => sf("po", e.target.value)} />
             </Fi>
             <Fi label="MB/L No.">
-              <input value={filters.mbl_no || ""} onChange={e => sf("mbl_no", e.target.value)} />
+              <input value={filters.booking_no || ""} onChange={e => sf("booking_no", e.target.value)} />
             </Fi>
             <Fi label="HB/L No.">
               <input value={filters.hbl_no || ""} onChange={e => sf("hbl_no", e.target.value)} />
@@ -442,7 +442,7 @@ export function OrdersPage({ user, onBack }) {
                     <span className="lk">{o.order_no || ""}</span>
                   </td>
                   <td>{o.po || o.customer_po || ""}</td>
-                  <td><span className="lk">{o.mbl_no || o.booking_no || ""}</span></td>
+                  <td><span className="lk">{o.booking_no || ""}</span></td>
                   <td><span className="lk">{o.vessel || ""}</span></td>
                   <td>{o.voyage || ""}</td>
                   <td>{o.etd || ""}</td>
@@ -686,7 +686,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                 </Df>
                 <Df label="航线"><input value={v("route")} onChange={e => ch("route", e.target.value)} disabled={!editing} /></Df>
 
-                <Df label="MB/L No." required><input value={v("mbl_no")} onChange={e => ch("mbl_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
                 <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
                 <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", e.target.value)} disabled={!editing} className="notnull" /></Df>
                 <Df label="揽货方式">
@@ -804,7 +804,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                         <tr key={it.id || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
                           <td style={cellBody}>{(i + 1) * 10}</td>
                           <td style={cellBody}>{it.serial_no || it.id}</td>
-                          <td style={cellBody}>{order.mbl_no || ""}</td>
+                          <td style={cellBody}>{order.booking_no || ""}</td>
                           <td style={cellBody}>{it.carrier_ref || ""}</td>
                           <td style={cellBody}>{it.product_name || ""}</td>
                           <td style={cellBody}>{it.hs_code || ""}</td>
@@ -848,7 +848,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                           <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
                             <td style={cellBody}>{r.no}</td>
                             <td style={cellBody}>{order.order_no}-{i + 1}</td>
-                            <td style={cellBody}>{order.mbl_no || ""}</td>
+                            <td style={cellBody}>{order.booking_no || ""}</td>
                             <td style={cellBody}>{order.hbl_no || ""}</td>
                             <td style={cellBody}>{r.type}</td>
                             <td style={cellBody}></td>
@@ -867,7 +867,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
 
               {subtab === "MB/L" && (
                 <div className="tms-detail-grid">
-                  <Df label="MB/L No." required><input value={v("mbl_no")} onChange={e => ch("mbl_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                  <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
                   <Df label="MB/L 状态">
                     <select value={v("mbl_status") || "未签单"} onChange={e => ch("mbl_status", e.target.value)} disabled={!editing}>
                       <option>未签单</option><option>已签单</option><option>已放单</option><option>已电放</option>

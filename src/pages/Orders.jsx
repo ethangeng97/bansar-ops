@@ -432,7 +432,11 @@ export function OrdersPage({ user, onBack }) {
                   <td className="center" onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={checked} onChange={() => togChk(o.id)} />
                   </td>
-                  <td className="center">{o.shipment_type === "LCL" ? "拼箱" : "整箱"}</td>
+                  <td className="center">{
+                    o.shipment_type === "LCL" ? "拼箱"
+                    : o.shipment_type === "Console" ? "自拼"
+                    : "整箱"
+                  }</td>
                   <td>
                     {child && <span className="ind">└</span>}
                     <span className="lk">{o.order_no || ""}</span>
@@ -540,7 +544,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const v = (f) => editing ? (ed[f] ?? "") : (order[f] ?? "");
   const ch = (f, val) => setEd(p => ({ ...p, [f]: val }));
 
-  const titlePrefix = order.shipment_type === "LCL" ? "拼箱" : order.shipment_type === "Console" ? "拼柜" : "整箱";
+  const titlePrefix = order.shipment_type === "LCL" ? "拼箱" : order.shipment_type === "Console" ? "自拼" : "整箱";
   const isLocked = order.lifecycle === "已完结" || order.lifecycle === "已关闭";
 
   const cargoFromContainerItems = cargoItems;
@@ -649,7 +653,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                   <select value={v("shipment_type")} onChange={e => ch("shipment_type", e.target.value)} disabled={!editing}>
                     <option value="FCL">整箱</option>
                     <option value="LCL">拼箱</option>
-                    <option value="Console">拼柜</option>
+                    <option value="Console">自拼</option>
                   </select>
                 </Df>
                 <Df label="联系人"><input value={v("contact")} onChange={e => ch("contact", e.target.value)} disabled={!editing} /></Df>

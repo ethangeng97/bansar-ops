@@ -10,7 +10,7 @@ export const BUSINESS_TYPES = [
 export const SHIPMENT_TYPES = [
   { key: "FCL",     label: "整箱 FCL" },
   { key: "LCL",     label: "拼箱 LCL" },
-  { key: "Console", label: "自拼柜 Console" },
+  { key: "Console", label: "自拼 Console" },
 ];
 
 export const SERVICE_TYPES = [

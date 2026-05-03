@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
-import { TmsTitle, Mi, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
+import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
 import {
   STATUS_COLORS,
   TRADE_TERMS,
@@ -49,6 +49,7 @@ export function OrdersPage({ user, onBack }) {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [newType, setNewType] = useState("FCL");
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [search, setSearch] = useState("");
   const [showFilter, setShowFilter] = useState(true);
@@ -237,7 +238,11 @@ export function OrdersPage({ user, onBack }) {
         <Mi checked={showDetail} onClick={() => setShowDetail(p => !p)}>显示明细</Mi>
         <Mi onClick={() => setShowFilter(p => !p)}>搜索</Mi>
         <Tbl/>
-        <Mi onClick={() => setShowNew(true)} arrow>新建作业</Mi>
+        <MiDropdown options={[
+          { label: "整箱", onClick: () => { setNewType("FCL"); setShowNew(true); } },
+          { label: "自拼", onClick: () => { setNewType("Console"); setShowNew(true); } },
+          { label: "拼箱", onClick: () => { setNewType("LCL"); setShowNew(true); } },
+        ]}>新建作业</MiDropdown>
         <Mi arrow>显示预览</Mi>
         <Mi>统计模板</Mi>
         <Tbl/>
@@ -463,7 +468,7 @@ export function OrdersPage({ user, onBack }) {
         onPageSizeChange={setPageSize}
       />
 
-      {showNew && <NewOrderModal onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load(); }} />}
+      {showNew && <NewOrderModal defaultType={newType} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load(); }} />}
     </div>
   );
 }
@@ -948,10 +953,10 @@ const cellHead = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, f
 const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, whiteSpace: "nowrap" };
 
 
-function NewOrderModal({ onClose, onSaved }) {
+function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {
   const [form, setForm] = useState({
     po: "", customer_po: "", supplier: "", customer: "", carrier: "", carrier_agent: "",
-    vessel: "", pol: "", pod: "", etd: "", incoterms: "FOB", booking_no: "", shipment_type: "FCL"
+    vessel: "", pol: "", pod: "", etd: "", incoterms: "FOB", booking_no: "", shipment_type: defaultType
   });
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
   const [saving, setSaving] = useState(false);

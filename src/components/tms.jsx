@@ -3,7 +3,7 @@
 // 配套 src/styles/tms.css 使用，所有组件用 className 而非 inline style
 // ═══════════════════════════════════════════════════════════════
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { LIFECYCLE, lifecycleOf, SOP_NODES, nodeStatusOf, applicableNodesFor } from "../lib/constants.js";
 
 /* ── 标题栏 ─────────────────────────────────────────────────── */
@@ -33,6 +33,54 @@ export function Mi({ children, onClick, checked, disabled, arrow }) {
         {children}
         {arrow && <span className="ar"></span>}
       </div>
+    </div>
+  );
+}
+
+/* ── 工具栏：带下拉菜单的按钮 ─────────────────────────────────
+   options: [{ label, onClick, disabled }]
+   主按钮 onClick 不传时点击直接展开下拉，传了则先执行主操作
+   ─────────────────────────────────────────────────────────── */
+export function MiDropdown({ children, options = [], disabled }) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+
+  // 点别处自动关闭
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (!e.target.closest?.(".tms-mi-dd")) close();
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div className="tms-mi tms-mi-dd" style={{ position: "relative" }}>
+      <div
+        className={"tms-mb" + (disabled ? " disable" : "") + (open ? " checked" : "")}
+        onClick={() => !disabled && setOpen(o => !o)}
+      >
+        {children}
+        <span className="ar"></span>
+      </div>
+      {open && options.length > 0 && (
+        <div className="tms-mb-menu">
+          {options.map((o, i) => (
+            <div
+              key={i}
+              className={"tms-mb-mi" + (o.disabled ? " disable" : "")}
+              onClick={() => {
+                if (o.disabled) return;
+                close();
+                o.onClick?.();
+              }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -120,6 +120,26 @@ function injectStyles() {
 
 const FAM = "'Segoe UI','Microsoft YaHei',Arial,sans-serif";
 
+// legacy constants for OrderDetail / NewOrderModal (旧代码沿用)
+const F = FAM;
+const mono = { fontFamily: "'Consolas','Microsoft YaHei',monospace" };
+const C = {
+  titleBlue: "#42A5F5",
+  titleBlue2: "#1e88e5",
+  topLine: "#1976d2",
+  beige: "#fff0e3",
+  beigeLine: "#ffd28e",
+  panel: "#c8dfff",
+  panel2: "#b8d3f5",
+  border: "#abadb3",
+  grid: "#bbb",
+  head1: "#f9f9f9",
+  head2: "#f0f0f0",
+  selected: "#eec99d",
+  rowAlt: "#eee",
+  hover: "#ecf3eb",
+};
+
 export function OrdersPage({ user, onBack }) {
   const role = user.profile?.role || "operator";
   const [shipments, setShipments] = useState([]);

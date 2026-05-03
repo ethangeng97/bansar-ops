@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
-import { TmsTitle, Mi, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
+import { TmsTitle, Mi, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
 import {
   STATUS_COLORS,
   TRADE_TERMS,
@@ -10,6 +10,8 @@ import {
   FREIGHT_TERMS,
   TRANSPORT_TERMS,
   SHIPMENT_TYPES,
+  SOP_NODES,
+  isNodeDone,
 } from "../lib/constants.js";
 
 /*
@@ -57,6 +59,21 @@ export function OrdersPage({ user, onBack }) {
   const [maxRows, setMaxRows] = useState(300);
   const [activeTab, setActiveTab] = useState("过滤");
 
+  // 从 URL hash 解析 SOP 过滤参数（如 #/sea_export?sop=qc）
+  const [sopFilter, setSopFilter] = useState(() => {
+    const m = window.location.hash.match(/[?&]sop=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  });
+  useEffect(() => {
+    const onHashChange = () => {
+      const m = window.location.hash.match(/[?&]sop=([^&]+)/);
+      setSopFilter(m ? decodeURIComponent(m[1]) : null);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+  const sopNode = sopFilter ? SOP_NODES.find(n => n.code === sopFilter) : null;
+
   const load = useCallback(async () => {
     const { data } = await supabase.from("shipments").select("*").order("created_at", { ascending: false });
     setShipments(data || []);
@@ -82,6 +99,12 @@ export function OrdersPage({ user, onBack }) {
   const sf = (k, v) => setFilters(p => ({ ...p, [k]: v }));
 
   const filtered = useMemo(() => shipments.filter(o => {
+    // SOP 过滤：只显示该节点未完成 + 非已关闭/已完结的订单
+    if (sopNode) {
+      if (o.lifecycle === "已关闭" || o.lifecycle === "已完结") return false;
+      if (sopNode.requiresHbl && !o.has_hbl) return false;
+      if (isNodeDone(sopNode, o[sopNode.field])) return false;
+    }
     const f = filters;
     if (f.supplier && o.supplier !== f.supplier) return false;
     if (f.customer && o.customer !== f.customer) return false;
@@ -105,7 +128,7 @@ export function OrdersPage({ user, onBack }) {
       if (!pool.filter(Boolean).some(x => String(x).toLowerCase().includes(q))) return false;
     }
     return true;
-  }), [shipments, filters, search]);
+  }), [shipments, filters, search, sopNode]);
 
   useEffect(() => { setPage(0); }, [filters, search]);
 
@@ -205,7 +228,7 @@ export function OrdersPage({ user, onBack }) {
     <div className="tms">
 
       {/* 标题栏 + 顶部菜单（共享组件） */}
-      <TmsTitle title="作业 / 海运出口" user={user} role={role} onClose={onBack} />
+      <TmsTitle title={sopNode ? `海运出口 / ${sopNode.zh} 待办` : "作业 / 海运出口"} user={user} role={role} onClose={onBack} />
 
       {/* 工具栏 */}
       <div className="tms-mn">
@@ -342,6 +365,15 @@ export function OrdersPage({ user, onBack }) {
         行数:<b>{stats.n}</b>
         TEU:<b>{stats.teu}</b>
         {stats.ts && <>箱型:<b>{stats.ts}</b></>}
+        {sopNode && (
+          <span style={{ marginLeft: 14, color: "#1990FF" }}>
+            🔎 SOP 过滤：<b>{sopNode.zh}</b> 未完成
+            <span style={{ marginLeft: 8, color: "#888", cursor: "pointer", textDecoration: "underline" }}
+              onClick={() => { window.location.hash = "#/sea_export"; }}>
+              清除
+            </span>
+          </span>
+        )}
       </TmsInfoBar>
 
       {/* 表格 */}
@@ -440,6 +472,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const [editing, setEditing] = useState(false);
   const [ed, setEd] = useState({});
   const [tab, setTab] = useState("作业");
+  const [subtab, setSubtab] = useState("托单信息");
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
   const [cargoItems, setCargoItems] = useState([]);
 
@@ -481,154 +514,439 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
     onReload();
   };
 
+  // 单字段直接保存（SOP 节点状态变更、has_hbl 切换、生命周期变更等）
+  const updateField = async (field, value) => {
+    const { error } = await supabase.from("shipments").update({ [field]: value }).eq("id", order.id);
+    if (error) { alert(error.message); return; }
+    onReload();
+  };
+
+  const setLifecycle = async (lc) => {
+    const updates = { lifecycle: lc };
+    if (lc === "已完结") {
+      updates.completed_at = new Date().toISOString();
+      updates.completed_by = user?.id || null;
+    }
+    const { error } = await supabase.from("shipments").update(updates).eq("id", order.id);
+    if (error) { alert(error.message); return; }
+    onReload();
+  };
+
   const v = (f) => editing ? (ed[f] ?? "") : (order[f] ?? "");
   const ch = (f, val) => setEd(p => ({ ...p, [f]: val }));
-  const tabs = ["作业", "装箱", "费用", "凭证", "代理对账单", "附件"];
+
+  const titlePrefix = order.shipment_type === "LCL" ? "拼箱" : order.shipment_type === "Console" ? "拼柜" : "整箱";
+  const isLocked = order.lifecycle === "已完结" || order.lifecycle === "已关闭";
+
+  const cargoFromContainerItems = cargoItems;
 
   return (
-    <div style={pageWrap}>
-      <TmsTitle user={user} role={role} title={`${order.shipment_type === "LCL" ? "拼箱" : order.shipment_type === "Console" ? "拼柜" : "整箱"} / 海运出口`} />
+    <div className="tms">
+      <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
-      <Toolbar
-        left={[
-          ["返回", onBack, "text"],
-          ["新建", undefined, "text"],
-          ["删除", undefined, "text"],
-          ["舱单确认", undefined, "text"],
-          ["订舱确认", undefined, "text"],
-          ["放舱确认", undefined, "text"],
-          ["放箱确认", undefined, "text"],
-          ["开船锁定", undefined, "text"],
-          ["单证作业", undefined, "text"],
-          ["内部利润分析", undefined, "text"],
-          ["打印", undefined, "text"],
-          ["编辑", startEdit, "box"],
-        ]}
-      />
-
-      <div style={{ display: "flex", gap: 0, height: 27, background: "#f8fbff", borderBottom: `1px solid ${C.border}`, paddingLeft: 8 }}>
-        {tabs.map(t => (
-          <div key={t} onClick={() => setTab(t)} style={{
-            height: 26,
-            lineHeight: "26px",
-            padding: "0 18px",
-            border: `1px solid ${C.border}`,
-            borderBottom: tab === t ? `1px solid ${C.panel}` : `1px solid ${C.border}`,
-            background: tab === t ? C.panel : "linear-gradient(#fff,#e8f1fa)",
-            marginRight: -1,
-            fontWeight: tab === t ? 700 : 400,
-            color: tab === t ? "#0055aa" : "#333",
-            cursor: "pointer",
-          }}>{t}</div>
-        ))}
-        <div style={{ flex: 1 }} />
-        {editing && (
-          <div style={{ display: "flex", alignItems: "center", gap: 5, paddingRight: 8 }}>
-            <button onClick={save} style={primaryBtn}>保存</button>
-            <button onClick={cancel} style={grayBtn}>取消</button>
-          </div>
+      {/* 第一行工具栏：主操作（白底） */}
+      <div className="tms-dtb1">
+        <Mi onClick={onBack}>返回</Mi>
+        <Tbl/>
+        <Mi disabled={isLocked}>新建</Mi>
+        <Mi disabled={isLocked}>复制</Mi>
+        <Mi disabled={isLocked}>删除</Mi>
+        <Tbl/>
+        <Mi disabled={isLocked}>舱单确认</Mi>
+        <Mi disabled={isLocked}>航线确认</Mi>
+        <Mi disabled={isLocked}>订舱确认</Mi>
+        <Mi disabled={isLocked}>放舱确认</Mi>
+        <Mi disabled={isLocked}>放箱确认</Mi>
+        <Mi disabled={isLocked}>开船确认</Mi>
+        <Mi disabled={isLocked}>单证锁定</Mi>
+        <Tbl/>
+        <Mi disabled={order.lifecycle === "已关闭"} onClick={() => {
+          if (confirm("确定关闭此作业？")) setLifecycle("已关闭");
+        }}>关闭作业</Mi>
+        <Mi disabled={order.lifecycle === "已完结" || order.lifecycle === "已关闭"} onClick={() => {
+          if (confirm("确定完结此作业？完结后只能查看，不能编辑。")) setLifecycle("已完结");
+        }}>完结作业</Mi>
+        {(order.lifecycle === "已完结" || order.lifecycle === "已关闭") && (
+          <Mi onClick={() => setLifecycle("处理中")}>恢复处理中</Mi>
         )}
+        <Tbl/>
+        <Mi>内部利润分析</Mi>
+        <Mi arrow>动作</Mi>
+        <Mi arrow>打印</Mi>
+        <Mi disabled>上行</Mi>
+        <Mi disabled>下行</Mi>
+        <Tbl/>
+        <Mi onClick={onBack}>关闭</Mi>
       </div>
 
-      <div style={{ flex: 1, overflow: "auto", background: "#fff", padding: 8 }}>
+      {/* 大 tab：作业 / 装箱 / 费用 / 凭证 / 代理对账单 / 附件 / SOP 进度 */}
+      <div className="tms-bigtabs">
+        {["作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"].map(t => (
+          <div key={t} className={"bt " + (tab === t ? "act" : "")} onClick={() => setTab(t)}>
+            {t === "SOP 进度" && (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 11 12 14 22 4"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+            )}
+            {t}
+          </div>
+        ))}
+      </div>
+
+      {/* 第二行工具栏：子操作（米色） */}
+      <div className="tms-dtb2">
+        {!editing ? (
+          <Mi disabled={isLocked} onClick={startEdit}>编辑</Mi>
+        ) : (
+          <>
+            <Mi onClick={save}>保存</Mi>
+            <Mi onClick={cancel}>取消</Mi>
+          </>
+        )}
+        <Mi arrow>订舱模板</Mi>
+        <Mi arrow>费用确认</Mi>
+        <Mi arrow>相关操作</Mi>
+        <Mi arrow>动作</Mi>
+        <Mi onClick={onReload}>刷新</Mi>
+        <Mi>显示预览</Mi>
+        <Mi arrow>数据交换</Mi>
+        <Mi arrow>通知</Mi>
+        <Mi arrow>打印</Mi>
+        <Mi>工作流</Mi>
+        <Mi>附件</Mi>
+        <Mi>历史</Mi>
+        <Mi arrow>系统功能</Mi>
+      </div>
+
+      {/* 主体 */}
+      <div className="tms-detail-body">
+        <LifecycleStamp shipment={order} />
+
         {tab === "作业" && (
-          <div style={detailPanel}>
-            <SectionTitle>基本信息</SectionTitle>
-            <DetailGrid>
-              <DL req>作业号</DL><DV edit={editing} v={v("order_no")} f="order_no" ch={ch} />
-              <DL req>委托人</DL><DV edit={editing} v={v("supplier")} f="supplier" ch={ch} opts={refData.suppliers} />
-              <DL>订舱代理</DL><DV edit={editing} v={v("carrier_agent")} f="carrier_agent" ch={ch} />
-              <DL>操作员</DL><DV v={user.profile?.name || user.email} />
+          <>
+            {/* ─── 基本信息 ─── */}
+            <div className="tms-detail-section">基本信息</div>
+            <div className="tms-detail-panel">
+              <div className="tms-detail-grid">
+                <Df label="作业号"><input value={v("order_no")} onChange={e => ch("order_no", e.target.value)} disabled={!editing} className="readonly" /></Df>
+                <Df label="委托人" required>
+                  {editing
+                    ? <ComboBox value={v("supplier")} onChange={val => ch("supplier", val)} options={refData.suppliers} />
+                    : <input value={v("supplier")} disabled className="notnull" />}
+                </Df>
+                <Df label="订舱代理"><input value={v("booking_agent")} onChange={e => ch("booking_agent", e.target.value)} disabled={!editing} /></Df>
+                <Df label="操作员"><input value={v("operator")} onChange={e => ch("operator", e.target.value)} disabled={!editing} /></Df>
+                <Df label="销售员"><input value={v("salesperson")} onChange={e => ch("salesperson", e.target.value)} disabled={!editing} /></Df>
+                <Df label="客服"><input value={v("cs")} onChange={e => ch("cs", e.target.value)} disabled={!editing} /></Df>
 
-              <DL>出运类型</DL><DV edit={editing} v={v("shipment_type")} f="shipment_type" ch={ch} opts={SHIPMENT_TYPES.map(t => t.key)} />
-              <DL req>客户</DL><DV edit={editing} v={v("customer")} f="customer" ch={ch} opts={refData.customers} />
-              <DL>船东</DL><DV edit={editing} v={v("carrier")} f="carrier" ch={ch} />
-              <DL>终端客户</DL><DV edit={editing} v={v("end_customer")} f="end_customer" ch={ch} />
+                <Df label="出运类型">
+                  <select value={v("shipment_type")} onChange={e => ch("shipment_type", e.target.value)} disabled={!editing}>
+                    <option value="FCL">整箱</option>
+                    <option value="LCL">拼箱</option>
+                    <option value="Console">拼柜</option>
+                  </select>
+                </Df>
+                <Df label="联系人"><input value={v("contact")} onChange={e => ch("contact", e.target.value)} disabled={!editing} /></Df>
+                <Df label="船东">
+                  {editing
+                    ? <ComboBox value={v("carrier")} onChange={val => ch("carrier", val)} options={refData.suppliers} />
+                    : <input value={v("carrier")} disabled />}
+                </Df>
+                <Df label="单证"><input value={v("documenter")} onChange={e => ch("documenter", e.target.value)} disabled={!editing} /></Df>
+                <Df label="商务"><input value={v("commercial")} onChange={e => ch("commercial", e.target.value)} disabled={!editing} /></Df>
+                <Df label="委托部门"><input value={v("entrust_dept")} onChange={e => ch("entrust_dept", e.target.value)} disabled={!editing} /></Df>
 
-              <DL req>订舱日期</DL><DV v={v("created_at")?.slice(0, 10)} />
-              <DL>PO#</DL><DV edit={editing} v={v("po")} f="po" ch={ch} />
-              <DL>Customer PO#</DL><DV edit={editing} v={v("customer_po")} f="customer_po" ch={ch} />
-              <DL>贸易条款</DL><DV edit={editing} v={v("incoterms")} f="incoterms" ch={ch} opts={TRADE_TERMS} />
+                <Df label="出运状态">
+                  <select value={v("space_status") || "未订舱"} onChange={e => ch("space_status", e.target.value)} disabled={!editing}>
+                    <option>未订舱</option><option>已订舱</option>
+                  </select>
+                </Df>
+                <Df label="电话"><input value={v("phone")} onChange={e => ch("phone", e.target.value)} disabled={!editing} /></Df>
+                <Df label="船名" refLabel>
+                  {editing
+                    ? <ComboBox value={v("vessel")} onChange={val => ch("vessel", val)} options={[]} />
+                    : <input value={v("vessel")} disabled className="notnull" />}
+                </Df>
+                <Df label="状态"><input value={v("status") || "处理中"} disabled className="readonly" /></Df>
+                <Df label="贸易条款">
+                  <select value={v("trade_term") || ""} onChange={e => ch("trade_term", e.target.value)} disabled={!editing}>
+                    <option value=""></option>
+                    {TRADE_TERMS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Df>
+                <Df label="航线"><input value={v("route")} onChange={e => ch("route", e.target.value)} disabled={!editing} /></Df>
 
-              <DL>船名</DL><DV edit={editing} v={v("vessel")} f="vessel" ch={ch} />
-              <DL>航次</DL><DV edit={editing} v={v("voyage")} f="voyage" ch={ch} />
-              <DL req>MB/L No.</DL><DV edit={editing} v={v("mbl_no")} f="mbl_no" ch={ch} mono />
-              <DL>HB/L No.</DL><DV edit={editing} v={v("hbl_no")} f="hbl_no" ch={ch} />
+                <Df label="MB/L No." required><input value={v("mbl_no")} onChange={e => ch("mbl_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
+                <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                <Df label="揽货方式">
+                  <select value={v("solicitation_type") || ""} onChange={e => ch("solicitation_type", e.target.value)} disabled={!editing}>
+                    <option value=""></option>
+                    <option>本地自揽货</option>
+                    <option>国外揽货</option>
+                    <option>合作揽货</option>
+                  </select>
+                </Df>
+                <Df label="揽货代理"><input value={v("solicitation_agent")} onChange={e => ch("solicitation_agent", e.target.value)} disabled={!editing} /></Df>
+                <Df label="海外代理"><input value={v("overseas_agent")} onChange={e => ch("overseas_agent", e.target.value)} disabled={!editing} /></Df>
 
-              <DL req>预计开航时间</DL><DV edit={editing} v={v("etd")} f="etd" ch={ch} type="date" />
-              <DL>实际开航时间</DL><DV edit={editing} v={v("atd")} f="atd" ch={ch} type="date" />
-              <DL req>截单日期</DL><DV edit={editing} v={v("si_cutoff")} f="si_cutoff" ch={ch} type="date" />
-              <DL>预计到港时间</DL><DV edit={editing} v={v("eta")} f="eta" ch={ch} type="date" />
+                <Df label="HB/L No." optional>
+                  <input value={v("hbl_no")} onChange={e => ch("hbl_no", e.target.value)} disabled={!editing} placeholder={!order.has_hbl ? "未签 HBL" : ""} />
+                </Df>
+                <Df label="邮件"><input value={v("email")} onChange={e => ch("email", e.target.value)} disabled={!editing} /></Df>
+                <Df label="预计开航时间"><input type="date" value={v("etd")} onChange={e => ch("etd", e.target.value)} disabled={!editing} /></Df>
+                <Df label="实际开航时间"><input type="date" value={v("atd")} onChange={e => ch("atd", e.target.value)} disabled={!editing} /></Df>
+                <Df label="预计到港时间"><input type="date" value={v("eta")} onChange={e => ch("eta", e.target.value)} disabled={!editing} /></Df>
+                <Df label="清关日期"><input type="date" value={v("customs_clear_date")} onChange={e => ch("customs_clear_date", e.target.value)} disabled={!editing} /></Df>
 
-              <DL>出单类型</DL><DV edit={editing} v={v("bl_type")} f="bl_type" ch={ch} opts={BL_TYPES} />
-              <DL>付款方式</DL><DV edit={editing} v={v("freight_terms")} f="freight_terms" ch={ch} opts={FREIGHT_TERMS} />
-              <DL>服务类型</DL><DV edit={editing} v={v("transport_terms")} f="transport_terms" ch={ch} opts={TRANSPORT_TERMS} />
-              <DL>箱号</DL><DV edit={editing} v={v("container_no")} f="container_no" ch={ch} />
+                <Df label="客户编号"><input value={v("po")} onChange={e => ch("po", e.target.value)} disabled={!editing} /></Df>
+                <Df label="付款方式">
+                  <select value={v("payment_term") || ""} onChange={e => ch("payment_term", e.target.value)} disabled={!editing}>
+                    <option value=""></option>
+                    {FREIGHT_TERMS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Df>
+                <Df label="出单类型">
+                  <select value={v("bl_type") || ""} onChange={e => ch("bl_type", e.target.value)} disabled={!editing}>
+                    <option value=""></option>
+                    {BL_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Df>
+                <Df label="正本份数"><input type="number" value={v("original_count")} onChange={e => ch("original_count", e.target.value)} disabled={!editing} /></Df>
+                <Df label="副本份数"><input type="number" value={v("copy_count")} onChange={e => ch("copy_count", e.target.value)} disabled={!editing} /></Df>
+                <Df label="服务类型">
+                  <select value={v("service_type") || ""} onChange={e => ch("service_type", e.target.value)} disabled={!editing}>
+                    <option value=""></option>
+                    {TRANSPORT_TERMS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Df>
 
-              <DL>起运港</DL><DV edit={editing} v={v("pol")} f="pol" ch={ch} opts={refData.ports} />
-              <DL>卸货港</DL><DV edit={editing} v={v("pod")} f="pod" ch={ch} opts={refData.ports} />
-              <DL>目的地</DL><DV edit={editing} v={v("destination")} f="destination" ch={ch} />
-              <DL>码头</DL><DV edit={editing} v={v("terminal")} f="terminal" ch={ch} />
-            </DetailGrid>
-
-            <SectionTitle>发货人 / 收货人 / 通知方</SectionTitle>
-            <div style={{ display: "grid", gridTemplateColumns: "88px 1fr 88px 1fr 88px 1fr", gap: "4px 8px", alignItems: "start" }}>
-              <DL req>发货人</DL><DV edit={editing} v={v("shipper")} f="shipper" ch={ch} area />
-              <DL req>收货人</DL><DV edit={editing} v={v("consignee")} f="consignee" ch={ch} area />
-              <DL>通知人</DL><DV edit={editing} v={v("notify_party")} f="notify_party" ch={ch} area />
+                <Df label="操作备注" span={3}><textarea value={v("operator_note")} onChange={e => ch("operator_note", e.target.value)} disabled={!editing} /></Df>
+                <Df label="内部备注" span={3}><textarea value={v("internal_note")} onChange={e => ch("internal_note", e.target.value)} disabled={!editing} /></Df>
+              </div>
             </div>
 
-            <SectionTitle>货物信息</SectionTitle>
-            <DetailGrid>
-              <DL>集装箱</DL><DV edit={editing} v={v("qty_container")} f="qty_container" ch={ch} />
-              <DL>箱型</DL><DV edit={editing} v={v("container_type")} f="container_type" ch={ch} opts={CONTAINER_TYPES} />
-              <DL>货物件数</DL><DV v={order.qty_packages} />
-              <DL>毛重</DL><DV v={order.weight} />
+            {/* ─── 业务勾选 ─── */}
+            <div className="tms-detail-cbgroup">
+              <DfCheckbox label="拖车" checked={v("has_trucking")} onChange={val => editing ? ch("has_trucking", val) : updateField("has_trucking", val)} />
+              <DfCheckbox label="报关" checked={v("has_customs")} onChange={val => editing ? ch("has_customs", val) : updateField("has_customs", val)} />
+              <DfCheckbox label="仓储" checked={v("has_warehouse")} onChange={val => editing ? ch("has_warehouse", val) : updateField("has_warehouse", val)} />
+              <DfCheckbox label="保险" checked={v("has_insurance")} onChange={val => editing ? ch("has_insurance", val) : updateField("has_insurance", val)} />
+              <DfCheckbox label="AMS" checked={v("has_ams")} onChange={val => editing ? ch("has_ams", val) : updateField("has_ams", val)} />
+              <DfCheckbox label="ENS" checked={v("has_ens")} onChange={val => editing ? ch("has_ens", val) : updateField("has_ens", val)} />
+              <span style={{ marginLeft: "auto", color: "#1990FF", fontWeight: "bold" }}>
+                <DfCheckbox label="签 HB/L 提单" checked={v("has_hbl")} onChange={val => editing ? ch("has_hbl", val) : updateField("has_hbl", val)} />
+              </span>
+            </div>
 
-              <DL>体积</DL><DV v={order.volume} />
-              <DL>品名</DL><DV edit={editing} v={v("tuc")} f="tuc" ch={ch} />
-              <DL>唛头</DL><DV edit={editing} v={v("marks")} f="marks" ch={ch} />
-              <DL>SKU</DL><DV v={order.sku} />
-            </DetailGrid>
-          </div>
+            {/* ─── 子 tab：托单信息 / 船东舱单 / 货物 / 集装箱 / MB/L / HB/L / 其它信息 / 目的港信息 ─── */}
+            <div className="tms-subtabs">
+              {["托单信息", "船东舱单", "货物", "集装箱", "MB/L", "HB/L", "其它信息", "目的港信息"].filter(t => t !== "HB/L" || order.has_hbl).map(t => (
+                <div key={t} className={"st " + (subtab === t ? "act" : "")} onClick={() => setSubtab(t)}>{t}</div>
+              ))}
+            </div>
+
+            <div className="tms-detail-panel-light">
+              {subtab === "托单信息" && (
+                <div className="tms-detail-grid">
+                  <Df label="发货人" refLabel span={2}><textarea value={v("shipper_name")} onChange={e => ch("shipper_name", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="收货人" refLabel span={2}><textarea value={v("consignee_name")} onChange={e => ch("consignee_name", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="通知人" span={2}><textarea value={v("notify_party")} onChange={e => ch("notify_party", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="起运港" refLabel><input value={v("pol")} onChange={e => ch("pol", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="卸货港" refLabel><input value={v("pod")} onChange={e => ch("pod", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="目的地"><input value={v("destination")} onChange={e => ch("destination", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="箱型箱量"><input value={v("qty_container")} onChange={e => ch("qty_container", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="货物种类"><input value={v("cargo_type") || "普通"} onChange={e => ch("cargo_type", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="唛头" span={2}><textarea value={v("marks")} onChange={e => ch("marks", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="品名货描" span={3}><textarea value={v("description")} onChange={e => ch("description", e.target.value)} disabled={!editing} /></Df>
+                </div>
+              )}
+
+              {subtab === "船东舱单" && (
+                <div className="tms-detail-grid">
+                  <Df label="发货人" refLabel><input value={v("carrier_shipper")} onChange={e => ch("carrier_shipper", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="收货地代码"><input value={v("place_of_receipt_code") || "CNNGB"} disabled={!editing} onChange={e => ch("place_of_receipt_code", e.target.value)} /></Df>
+                  <Df label="收货地"><input value={v("place_of_receipt") || "NINGBO"} disabled={!editing} onChange={e => ch("place_of_receipt", e.target.value)} /></Df>
+                  <Df label="起运港" refLabel><input value={v("carrier_pol_code") || "CNNGB"} disabled={!editing} onChange={e => ch("carrier_pol_code", e.target.value)} /></Df>
+                  <Df label="卸货港" refLabel><input value={v("carrier_pod_code")} disabled={!editing} onChange={e => ch("carrier_pod_code", e.target.value)} /></Df>
+                  <Df label="交货地"><input value={v("place_of_delivery_code")} disabled={!editing} onChange={e => ch("place_of_delivery_code", e.target.value)} /></Df>
+                  <Df label="目的地"><input value={v("destination_code")} disabled={!editing} onChange={e => ch("destination_code", e.target.value)} /></Df>
+                  <Df label="付款方式"><input value={v("carrier_payment_term") || "预付"} disabled={!editing} onChange={e => ch("carrier_payment_term", e.target.value)} /></Df>
+                  <Df label="服务类型"><input value={v("carrier_service") || "CY-CY"} disabled={!editing} onChange={e => ch("carrier_service", e.target.value)} /></Df>
+                  <Df label="企业代码" required><input value={v("enterprise_code")} disabled={!editing} onChange={e => ch("enterprise_code", e.target.value)} /></Df>
+                </div>
+              )}
+
+              {subtab === "货物" && (
+                <div style={{ overflow: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
+                        <th style={cellHead}>行号</th><th style={cellHead}>流水号</th><th style={cellHead}>MB/L No.</th>
+                        <th style={cellHead}>船东参考编号</th><th style={cellHead}>品名</th><th style={cellHead}>HSCode</th>
+                        <th style={cellHead}>件数</th><th style={cellHead}>包装</th><th style={cellHead}>毛重</th><th style={cellHead}>体积</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cargoFromContainerItems.length === 0 ? (
+                        <tr><td colSpan={10} style={{ padding: 30, textAlign: "center", color: "#888" }}>暂无货物明细</td></tr>
+                      ) : cargoFromContainerItems.map((it, i) => (
+                        <tr key={it.id || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                          <td style={cellBody}>{(i + 1) * 10}</td>
+                          <td style={cellBody}>{it.serial_no || it.id}</td>
+                          <td style={cellBody}>{order.mbl_no || ""}</td>
+                          <td style={cellBody}>{it.carrier_ref || ""}</td>
+                          <td style={cellBody}>{it.product_name || ""}</td>
+                          <td style={cellBody}>{it.hs_code || ""}</td>
+                          <td style={cellBody}>{it.cartons || ""}</td>
+                          <td style={cellBody}>{it.package || "CARTONS"}</td>
+                          <td style={cellBody}>{it.gross_weight || ""}</td>
+                          <td style={cellBody}>{it.volume || ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {subtab === "集装箱" && (
+                <div style={{ overflow: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
+                        <th style={cellHead}>行号</th><th style={cellHead}>流水号</th><th style={cellHead}>MB/L No.</th>
+                        <th style={cellHead}>HB/L No.</th><th style={cellHead}>箱型</th><th style={cellHead}>箱号</th>
+                        <th style={cellHead}>封号</th><th style={cellHead}>件数</th><th style={cellHead}>包装</th>
+                        <th style={cellHead}>毛重</th><th style={cellHead}>体积</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const matches = (order.qty_container || "").match(/(\d+)\s*x\s*((?:20|40|45)(?:GP|HQ|RF|OT|FR)?)/gi) || [];
+                        const rows = [];
+                        let row = 1;
+                        for (const m of matches) {
+                          const [, count, type] = m.match(/(\d+)\s*x\s*((?:20|40|45)(?:GP|HQ|RF|OT|FR)?)/i);
+                          for (let i = 0; i < parseInt(count); i++) {
+                            rows.push({ no: row * 10, type });
+                            row++;
+                          }
+                        }
+                        return rows.length === 0 ? (
+                          <tr><td colSpan={11} style={{ padding: 30, textAlign: "center", color: "#888" }}>暂无集装箱信息</td></tr>
+                        ) : rows.map((r, i) => (
+                          <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                            <td style={cellBody}>{r.no}</td>
+                            <td style={cellBody}>{order.order_no}-{i + 1}</td>
+                            <td style={cellBody}>{order.mbl_no || ""}</td>
+                            <td style={cellBody}>{order.hbl_no || ""}</td>
+                            <td style={cellBody}>{r.type}</td>
+                            <td style={cellBody}></td>
+                            <td style={cellBody}></td>
+                            <td style={cellBody}></td>
+                            <td style={cellBody}></td>
+                            <td style={cellBody}></td>
+                            <td style={cellBody}></td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {subtab === "MB/L" && (
+                <div className="tms-detail-grid">
+                  <Df label="MB/L No." required><input value={v("mbl_no")} onChange={e => ch("mbl_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                  <Df label="MB/L 状态">
+                    <select value={v("mbl_status") || "未签单"} onChange={e => ch("mbl_status", e.target.value)} disabled={!editing}>
+                      <option>未签单</option><option>已签单</option><option>已放单</option><option>已电放</option>
+                    </select>
+                  </Df>
+                  <Df label="签发地"><input value={v("place_of_issue")} onChange={e => ch("place_of_issue", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="签发日期"><input type="date" value={v("date_of_issue")} onChange={e => ch("date_of_issue", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="电放号"><input value={v("telex_release_no")} onChange={e => ch("telex_release_no", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="电放日期"><input type="date" value={v("telex_release_date")} onChange={e => ch("telex_release_date", e.target.value)} disabled={!editing} /></Df>
+                </div>
+              )}
+
+              {subtab === "HB/L" && order.has_hbl && (
+                <div className="tms-detail-grid">
+                  <Df label="HB/L No."><input value={v("hbl_no")} onChange={e => ch("hbl_no", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="HB/L 状态">
+                    <select value={v("hbl_status") || "未签单"} onChange={e => ch("hbl_status", e.target.value)} disabled={!editing}>
+                      <option>未签单</option><option>已签单</option><option>已放单</option><option>已电放</option>
+                    </select>
+                  </Df>
+                  <Df label="签发地"><input value={v("hbl_place_of_issue")} onChange={e => ch("hbl_place_of_issue", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="签发日期"><input type="date" value={v("hbl_date_of_issue")} onChange={e => ch("hbl_date_of_issue", e.target.value)} disabled={!editing} /></Df>
+                </div>
+              )}
+
+              {subtab === "其它信息" && (
+                <div className="tms-detail-grid">
+                  <Df label="约号"><input value={v("contract_no")} onChange={e => ch("contract_no", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="订舱日期"><input type="date" value={v("booking_date")} onChange={e => ch("booking_date", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="截单日期"><input type="date" value={v("doc_cutoff_date")} onChange={e => ch("doc_cutoff_date", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="AMS截止日期"><input type="date" value={v("ams_cutoff")} onChange={e => ch("ams_cutoff", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="ENS截止日期"><input type="date" value={v("ens_cutoff")} onChange={e => ch("ens_cutoff", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="业务类型"><input value={v("business_type")} onChange={e => ch("business_type", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="海运提单类型">
+                    <select value={v("ocean_bl_type") || "正本提单"} onChange={e => ch("ocean_bl_type", e.target.value)} disabled={!editing}>
+                      <option>正本提单</option><option>电放提单</option><option>SWB</option>
+                    </select>
+                  </Df>
+                  <Df label="报关行"><input value={v("customs_broker")} onChange={e => ch("customs_broker", e.target.value)} disabled={!editing} /></Df>
+                </div>
+              )}
+
+              {subtab === "目的港信息" && (
+                <div className="tms-detail-grid">
+                  <Df label="目的港代理"><input value={v("destination_agent")} onChange={e => ch("destination_agent", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="第三方付款地"><input value={v("third_party_payment_place")} onChange={e => ch("third_party_payment_place", e.target.value)} disabled={!editing} /></Df>
+                  <Df label="目的港码头"><input value={v("destination_terminal")} onChange={e => ch("destination_terminal", e.target.value)} disabled={!editing} /></Df>
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {tab === "装箱" && (
-          <div style={detailPanel}>
-            <SectionTitle>装箱明细</SectionTitle>
-            {cargoItems.length > 0 ? (
-              <table style={{ ...tableStyle, minWidth: 900 }}>
-                <thead><tr>{["B/L", "HBL", "柜号", "封号", "品名", "唛头", "件数", "毛重", "体积"].map(h => <TH key={h}>{h}</TH>)}</tr></thead>
-                <tbody>
-                  {cargoItems.map((it, i) => (
-                    <tr key={it.id} style={{ background: i % 2 ? C.rowAlt : "#fff" }}>
-                      <td style={td}>{order.mbl_no || ""}</td>
-                      <td style={td}>{it.hbl || ""}</td>
-                      <td style={{ ...td, color: "#0066cc" }}>{it.container_no || ""}</td>
-                      <td style={td}>{it.seal_no || ""}</td>
-                      <td style={td}>{it.tuc || ""}</td>
-                      <td style={td}>{it.marks || ""}</td>
-                      <td style={{ ...td, textAlign: "right" }}>{it.qty || ""}</td>
-                      <td style={{ ...td, textAlign: "right" }}>{it.weight || ""}</td>
-                      <td style={{ ...td, textAlign: "right" }}>{it.volume || ""}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : <div style={{ color: "#888", padding: 12 }}>暂无装箱数据</div>}
+          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>
+            装箱详细信息（暂用作业 tab 下的"集装箱"子 tab 替代）
           </div>
         )}
 
-        {!["作业", "装箱"].includes(tab) && (
-          <div style={detailPanel}>
-            <SectionTitle>{tab}</SectionTitle>
-            <div style={{ padding: 20, color: "#888" }}>功能开发中</div>
+        {tab === "费用" && (
+          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>
+            费用录入功能开发中
           </div>
+        )}
+
+        {tab === "凭证" && (
+          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>凭证管理功能开发中</div>
+        )}
+
+        {tab === "代理对账单" && (
+          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>代理对账单功能开发中</div>
+        )}
+
+        {tab === "附件" && (
+          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>附件管理功能开发中</div>
+        )}
+
+        {tab === "SOP 进度" && (
+          <SopProgress shipment={order} onUpdate={updateField} disabled={isLocked} />
         )}
       </div>
     </div>
   );
 }
+
+const cellHead = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, fontWeight: "bold", color: "#444", textAlign: "left", whiteSpace: "nowrap" };
+const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, whiteSpace: "nowrap" };
+
 
 function NewOrderModal({ onClose, onSaved }) {
   const [form, setForm] = useState({

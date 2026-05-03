@@ -1,10 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
 // Bansar OPS - 门户首页
-// 顶部蓝条 + 左侧模块菜单 + 中间业务流程图（P2 单色高亮风格）
-// 点击模块/节点 → window.open 开新 tab 进入对应页面（hash 路由）
+// - 顶部蓝条 + 左侧 模块/待办 切换 + 中间主区
+// - "模块" tab：4 阶段流程图，点节点新 tab 打开页面
+// - "待办" tab：SOP 节点列表 + 未完成数量（实时查 Supabase），点击 → 列表过滤页
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, Fragment } from "react";
+import { useState, useEffect, Fragment } from "react";
+import { supabase } from "../supabase.js";
+import { SOP_NODES, isNodeDone } from "../lib/constants.js";
 
 // ── 模块定义（左侧菜单） ──
 const MODULES = [
@@ -12,21 +15,20 @@ const MODULES = [
   { key: "sea_import",  zh: "海运进口", icon: "ship",     active: false },
   { key: "air_export",  zh: "空运出口", icon: "plane",    active: false },
   { key: "air_import",  zh: "空运进口", icon: "plane",    active: false },
-  { key: "finance",     zh: "财务管理", icon: "dollar",   active: false, badge: 0 },
+  { key: "finance",     zh: "财务管理", icon: "dollar",   active: false },
   { key: "partners",    zh: "客商管理", icon: "users",    active: false },
   { key: "master",      zh: "基础数据", icon: "database", active: false },
   { key: "system",      zh: "系统设置", icon: "gear",     active: false },
 ];
 
-// ── 流程图四阶段定义（按当前模块=海运出口） ──
+// ── 流程图四阶段定义（"模块" tab 用） ──
 const STAGES = [
   { num: 1, name: "基础数据维护", active: false },
-  { num: 2, name: "业务操作",     active: true  },  // 当前阶段（业务操作已实现）
+  { num: 2, name: "业务操作",     active: true  },
   { num: 3, name: "费用结算",     active: false },
   { num: 4, name: "统计报表",     active: false },
 ];
 
-// ── 流程节点（每阶段下挂的具体功能） ──
 const NODES = {
   1: [
     { name: "客商录入维护", icon: "users",    href: null },
@@ -36,9 +38,9 @@ const NODES = {
   ],
   2: [
     { name: "新建作业",     icon: "fileplus", href: "#/sea_export?action=new" },
+    { name: "作业列表",     icon: "filelist", href: "#/sea_export" },
     { name: "订舱确认",     icon: "check",    href: "#/sea_export" },
     { name: "装箱确认",     icon: "box",      href: "#/sea_export" },
-    { name: "舱单确认",     icon: "filelist", href: "#/sea_export" },
     { name: "提单确认",     icon: "file",     href: "#/sea_export" },
   ],
   3: [
@@ -78,6 +80,7 @@ const ICONS = {
   tag: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>,
   circle: <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>,
   refresh: <><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>,
+  chevron: <polyline points="6 9 12 15 18 9"/>,
 };
 
 function Icon({ name, ...rest }) {
@@ -88,31 +91,64 @@ function Icon({ name, ...rest }) {
   );
 }
 
-// ── 主组件 ──
+// ═══════════════════════════════════════════════════════════════
+// 主组件
+// ═══════════════════════════════════════════════════════════════
+
 export default function Portal({ user, onLogout }) {
   const [activeModule, setActiveModule] = useState("sea_export");
   const [tab, setTab] = useState("模块");
+  const [todoCounts, setTodoCounts] = useState({});
+  const [sopCollapsed, setSopCollapsed] = useState(false);
 
   const role = user?.profile?.role || "operator";
   const userName = user?.profile?.name || user?.email?.split("@")[0] || "用户";
 
-  // 打开模块（新 tab）
+  // ── 加载待办数量（每次进入"待办" tab 时刷新） ──
+  useEffect(() => {
+    if (tab !== "待办") return;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("shipments")
+        .select("id, has_hbl, lifecycle, qc_status, space_status, hbl_status, mbl_status, finance_status");
+
+      if (error || cancelled) return;
+
+      const all = (data || []).filter(o => o.lifecycle !== "已关闭" && o.lifecycle !== "已完结");
+      const counts = {};
+      for (const node of SOP_NODES) {
+        if (node.requiresHbl) {
+          counts[node.code] = all.filter(o => o.has_hbl && !isNodeDone(node, o[node.field])).length;
+        } else {
+          counts[node.code] = all.filter(o => !isNodeDone(node, o[node.field])).length;
+        }
+      }
+      setTodoCounts(counts);
+    })();
+
+    return () => { cancelled = true; };
+  }, [tab]);
+
   const openModule = (mod) => {
-    if (!mod.active) return;          // 未实现的模块不可点
+    if (!mod.active) return;
     if (!mod.href) return;
-    window.open(mod.href, "_blank");  // 新 tab 全屏打开
+    window.open(mod.href, "_blank");
   };
 
-  // 打开节点
   const openNode = (node) => {
     if (!node.href) return;
     window.open(node.href, "_blank");
   };
 
+  const openSopNode = (nodeCode) => {
+    window.open(`#/sea_export?sop=${nodeCode}`, "_blank");
+  };
+
   return (
     <div className="tms-portal">
 
-      {/* 顶部蓝条 */}
       <div className="tms-portal-tb">
         <div className="logo">
           <Icon name="logo" />
@@ -127,10 +163,8 @@ export default function Portal({ user, onLogout }) {
         </div>
       </div>
 
-      {/* 主体 */}
       <div className="tms-portal-body">
 
-        {/* 左侧菜单 */}
         <div className="tms-portal-side">
           <div className="tabs">
             {["模块", "待办"].map(t => (
@@ -140,7 +174,7 @@ export default function Portal({ user, onLogout }) {
             ))}
           </div>
           <div className="list">
-            {MODULES.map(m => (
+            {tab === "模块" && MODULES.map(m => (
               <div
                 key={m.key}
                 className={"it " + (activeModule === m.key ? "act" : "") + (!m.active ? " disabled" : "")}
@@ -150,66 +184,94 @@ export default function Portal({ user, onLogout }) {
               >
                 <Icon name={m.icon} />
                 {m.zh}
-                {m.badge > 0 && <span className="badge">{m.badge}</span>}
               </div>
             ))}
+
+            {tab === "待办" && (
+              <div className="tms-portal-todo">
+                <div className={"group-head " + (sopCollapsed ? "collapsed" : "")} onClick={() => setSopCollapsed(c => !c)}>
+                  <Icon name="chevron" />
+                  SOP
+                </div>
+                {!sopCollapsed && SOP_NODES.map(n => {
+                  const cnt = todoCounts[n.code] ?? 0;
+                  return (
+                    <div key={n.code} className="it-todo" onClick={() => openSopNode(n.code)}>
+                      <span>{n.zh}</span>
+                      <span className={"badge-num " + (cnt === 0 ? "zero" : "")}>{cnt}</span>
+                    </div>
+                  );
+                })}
+                <div className="add-btn" onClick={() => alert("自定义 SOP 节点功能开发中")}>
+                  + 添加节点
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* 右侧主区 */}
         <div className="tms-portal-main">
           <div className="tms-portal-bar">
             <div className="tt">
               <Icon name="filelist" />
-              操作导航
+              {tab === "待办" ? "待办事项" : "操作导航"}
             </div>
             <div className="crumb">
-              {MODULES.find(m => m.key === activeModule)?.zh || "海运出口"} / <span>业务流程</span>
+              {tab === "待办"
+                ? <>SOP / <span>待处理订单</span></>
+                : <>{MODULES.find(m => m.key === activeModule)?.zh || "海运出口"} / <span>业务流程</span></>}
             </div>
           </div>
 
-          <div className="tms-portal-flow">
+          {tab === "模块" && (
+            <div className="tms-portal-flow">
+              <div className="tms-stages">
+                {STAGES.map((s, i) => (
+                  <Fragment key={s.num}>
+                    <div className={"tms-stage " + (s.active ? "act" : "")}>
+                      <span className="num">{s.num}</span>
+                      <span>{s.name}</span>
+                    </div>
+                    {i < STAGES.length - 1 && <div className="tms-arr">→</div>}
+                  </Fragment>
+                ))}
+              </div>
 
-            {/* 阶段条 */}
-            <div className="tms-stages">
-              {STAGES.map((s, i) => (
-                <Fragment key={s.num}>
-                  <div className={"tms-stage " + (s.active ? "act" : "")}>
-                    <span className="num">{s.num}</span>
-                    <span>{s.name}</span>
-                  </div>
-                  {i < STAGES.length - 1 && <div className="tms-arr">→</div>}
-                </Fragment>
-              ))}
+              <div className="tms-cols">
+                {STAGES.map((s, i) => (
+                  <Fragment key={s.num}>
+                    <div className="tms-col">
+                      {NODES[s.num].map((n, ni) => (
+                        <button
+                          key={ni}
+                          className={"tms-node " + (!n.href ? "dim" : "")}
+                          onClick={() => openNode(n)}
+                          disabled={!n.href}
+                        >
+                          <Icon name={n.icon} />
+                          {n.name}
+                        </button>
+                      ))}
+                    </div>
+                    {i < STAGES.length - 1 && <div className="tms-colarr">→</div>}
+                  </Fragment>
+                ))}
+              </div>
             </div>
+          )}
 
-            {/* 节点列 */}
-            <div className="tms-cols">
-              {STAGES.map((s, i) => (
-                <Fragment key={s.num}>
-                  <div className="tms-col">
-                    {NODES[s.num].map((n, ni) => (
-                      <button
-                        key={ni}
-                        className={"tms-node " + (!n.href ? "dim" : "")}
-                        onClick={() => openNode(n)}
-                        disabled={!n.href}
-                      >
-                        <Icon name={n.icon} />
-                        {n.name}
-                      </button>
-                    ))}
-                  </div>
-                  {i < STAGES.length - 1 && <div className="tms-colarr">→</div>}
-                </Fragment>
-              ))}
+          {tab === "待办" && (
+            <div style={{ padding: 30, color: "#666", lineHeight: 1.8 }}>
+              <h3 style={{ fontSize: 16, color: "#222", marginBottom: 12 }}>SOP 节点待办</h3>
+              <p style={{ marginBottom: 8 }}>左侧 SOP 列表显示每个节点下"未完成的订单数量"。点击任一节点（如 <b style={{ color: "#1990FF" }}>验货</b>），将在新标签页打开海运出口列表，自动筛选出所有该节点未完成的订单。</p>
+              <p style={{ marginBottom: 8, color: "#888", fontSize: 12 }}>· HB 提单节点只统计已勾选「签 HBL」的订单。</p>
+              <p style={{ marginBottom: 8, color: "#888", fontSize: 12 }}>· 已完结、已关闭的订单不计入待办。</p>
+              <p style={{ marginTop: 24, fontSize: 12, color: "#999" }}>配置入口（添加/编辑 SOP 节点）：开发中。</p>
             </div>
-
-          </div>
+          )}
         </div>
 
       </div>
-
     </div>
   );
 }

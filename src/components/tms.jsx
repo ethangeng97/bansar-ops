@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { useState } from "react";
+import { LIFECYCLE, lifecycleOf, SOP_NODES, nodeStatusOf, applicableNodesFor } from "../lib/constants.js";
 
 /* ── 标题栏 ─────────────────────────────────────────────────── */
 export function TmsTitle({ title, user, role, onClose }) {
@@ -141,6 +142,107 @@ export function TmsPlaceholder({ title, onBack }) {
       <div className="ttl">{title}</div>
       <div className="sub">该模块功能开发中，敬请期待</div>
       <button onClick={onBack}>返回首页</button>
+    </div>
+  );
+}
+
+/* ── 详情页生命周期印章 ──────────────────────────────────────── */
+
+export function LifecycleStamp({ shipment }) {
+  const lc = lifecycleOf(shipment);
+  return (
+    <div className="tms-stamp" style={{ "--stamp-color": lc.color }}>
+      {lc.v}
+    </div>
+  );
+}
+
+/* ── 详情字段 ───────────────────────────────────────────────── */
+export function Df({ label, required, refLabel, optional, children, span }) {
+  const cls = (required ? "req" : refLabel ? "ref" : optional ? "opt" : "");
+  const colCls = span === 2 ? "full2" : span === 3 ? "full3" : span === 4 ? "full4" : span === 6 ? "full6" : "";
+  return (
+    <div className={"tms-df " + colCls}>
+      <label className={cls}>{label}</label>
+      <div className="tms-df-blk">{children}</div>
+    </div>
+  );
+}
+
+export function DfCheckbox({ label, checked, onChange, disabled }) {
+  return (
+    <label className="tms-df-checkbox">
+      <input type="checkbox" checked={!!checked} onChange={e => onChange?.(e.target.checked)} disabled={disabled} />
+      {label}
+    </label>
+  );
+}
+
+/* ── SOP 节点卡片（详情页 SOP 进度 tab 用） ─────────────────── */
+const SOP_ICONS = {
+  check:    <><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></>,
+  ship:     <><path d="M2 20a2.4 2.4 0 0 0 2 1 2.4 2.4 0 0 0 2-1 2.4 2.4 0 0 1 2-1 2.4 2.4 0 0 1 2 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/></>,
+  filelist: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>,
+  file:     <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>,
+  dollar:   <><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>,
+};
+
+function SopIcon({ name }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {SOP_ICONS[name] || null}
+    </svg>
+  );
+}
+
+export function SopCard({ node, shipment, onChange, disabled }) {
+  const status = nodeStatusOf(shipment, node);
+  const iconClass = status.danger ? "icn danger" : status.done ? "icn done" : "icn";
+  const statClass = "stat " + (status.danger ? "danger" : status.done ? "done" : status.value === node.options[0].v ? "pending" : "warn");
+  return (
+    <div className="tms-sop-card">
+      <div className={iconClass}><SopIcon name={node.icon} /></div>
+      <div className="nm">{node.zh}</div>
+      <div className={statClass}>{status.label}</div>
+      <select
+        value={status.value}
+        disabled={disabled}
+        onChange={e => onChange?.(node.field, e.target.value)}
+      >
+        {node.options.map(o => <option key={o.v} value={o.v}>{o.v}</option>)}
+      </select>
+    </div>
+  );
+}
+
+export function SopProgress({ shipment, onUpdate, disabled }) {
+  const nodes = applicableNodesFor(shipment);
+  const total = nodes.length;
+  const done = nodes.filter(n => nodeStatusOf(shipment, n).done).length;
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+
+  return (
+    <div className="tms-sop-area">
+      <div className="tms-sop-summary">
+        <span>当前进度：</span>
+        <b>{done} / {total}</b>
+        <span>节点完成（{pct}%）</span>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 200, height: 8, background: "#f0f0f0", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ width: pct + "%", height: "100%", background: pct === 100 ? "#52c41a" : "var(--tms-primary)", transition: "width .25s" }} />
+          </div>
+        </div>
+      </div>
+      <div className="tms-sop-grid">
+        {nodes.map(n => (
+          <SopCard key={n.code} node={n} shipment={shipment} onChange={onUpdate} disabled={disabled} />
+        ))}
+      </div>
+      {!shipment.has_hbl && (
+        <div style={{ marginTop: 14, padding: 8, color: "#888", fontSize: 12, textAlign: "center" }}>
+          提示：当前订单未勾选「签 HBL」，HB 提单节点已隐藏。如需启用，请回到「作业」tab 勾选。
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,863 @@
+/* ═══════════════════════════════════════════════════════════════
+   Bansar OPS — TMS Visual System
+   主色 #1990FF (Ant Design Blue)
+   参考：XCloud 货代 TMS 视觉规范，专业化处理
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── CSS 变量：所有色值集中管理，方便后续整体调色 ── */
+:root {
+  /* 主色 */
+  --tms-primary: #1990FF;
+  --tms-primary-hover: #40a9ff;
+  --tms-primary-active: #0e7fe6;
+  --tms-primary-bg: #e6f4ff;
+  --tms-primary-bg-hover: #f0f7ff;
+  --tms-primary-border: #91caff;
+
+  /* 文字 */
+  --tms-text: #222;
+  --tms-text-2: #555;
+  --tms-text-3: #888;
+  --tms-text-link: #001ace;
+
+  /* 背景 */
+  --tms-bg: #fff;
+  --tms-bg-page: #f0f2f5;
+
+  /* 标题栏 */
+  --tms-title-bg: #1990FF;
+  --tms-title-bg-2: #0e7fe6;
+
+  /* 工具栏 */
+  --tms-toolbar-bg: #fff0e3;
+  --tms-toolbar-border: #ffd28e;
+  --tms-toolbar-divider: #e4d3a8;
+
+  /* 按钮 */
+  --tms-btn-hover-bg: linear-gradient(#fff,#e1e1e1);
+  --tms-btn-hover-border: #aaa;
+  --tms-btn-checked-bg: #dfe5f6;
+  --tms-btn-checked-border: #8c9ae4;
+
+  /* 筛选区 */
+  --tms-filter-bg: #c8dfff;
+  --tms-filter-border: #ccc;
+
+  /* 输入框 */
+  --tms-input-border: #c1c1c1;
+  --tms-input-border-hover: #5d7bdd;
+  --tms-input-required-bg: #fdf8d2;
+  --tms-input-readonly-bg: #e6e6e6;
+
+  /* 表格 */
+  --tms-list-head-1: #f9f9f9;
+  --tms-list-head-2: #f0f0f0;
+  --tms-list-head-border: #e0e3e5;
+  --tms-list-grid: #bbb;
+  --tms-list-row-alt: #eee;
+  --tms-list-row-hover: #ecf3eb;
+  --tms-list-row-selected: #eec99d;
+  --tms-list-border: #d8d8d8;
+
+  /* 信息栏 */
+  --tms-info-bg: #e1e1e1;
+  --tms-info-orange: #d9681d;
+
+  /* 状态色板 */
+  --tms-status-red: #c70000;
+  --tms-status-blue: #001ace;
+  --tms-status-yellow: #d46a00;
+  --tms-status-green: #009c00;
+  --tms-status-purple: #ce00cc;
+  --tms-status-gray: #b1b1b1;
+
+  /* 字体 */
+  --tms-font: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+  --tms-font-mono: 'Consolas', 'Microsoft YaHei', monospace;
+  --tms-font-size: 12px;
+}
+
+/* ── 全局重置（仅在 .tms 内部生效） ── */
+.tms, .tms input, .tms select, .tms button, .tms textarea {
+  font-family: var(--tms-font);
+  font-size: var(--tms-font-size);
+  color: var(--tms-text);
+}
+.tms * { box-sizing: border-box; }
+.tms {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--tms-bg);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   标题栏 (Title Bar) + 顶部菜单
+   ═══════════════════════════════════════════════════════════════ */
+.tms-tb {
+  flex-shrink: 0;
+  height: 35px;
+  line-height: 35px;
+  background: var(--tms-title-bg);
+  color: #fff;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  text-shadow: 0 1px 2px rgba(0,0,0,.2);
+}
+.tms-tb .tt {
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tms-tb .tt svg {
+  width: 22px;
+  height: 22px;
+}
+.tms-tb .ri {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: normal;
+  text-shadow: none;
+}
+.tms-tb .mi {
+  padding: 0 12px;
+  line-height: 35px;
+  cursor: pointer;
+  color: #fff;
+}
+.tms-tb .mi:hover { background: rgba(255,255,255,.12); }
+.tms-tb .ar {
+  display: inline-block;
+  border: 3px solid transparent;
+  border-top: 4px solid rgba(255,255,255,.85);
+  margin-left: 5px;
+  vertical-align: middle;
+  margin-top: -2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   工具栏 (Toolbar)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-mn {
+  flex-shrink: 0;
+  background: var(--tms-toolbar-bg);
+  border-bottom: 1px solid var(--tms-toolbar-border);
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.tms-mi {
+  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  height: 30px;
+}
+.tms-mb {
+  height: 18px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--tms-text);
+  line-height: 18px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  background: transparent;
+}
+.tms-mb:hover {
+  border-color: var(--tms-btn-hover-border);
+  background: var(--tms-btn-hover-bg);
+}
+.tms-mb.checked {
+  background: var(--tms-btn-checked-bg);
+  border-color: var(--tms-btn-checked-border);
+}
+.tms-mb.disable { opacity: .3; cursor: default; }
+.tms-mb.disable:hover { border-color: transparent; background: transparent; }
+.tms-mb .ar {
+  display: inline-block;
+  border: 3px solid transparent;
+  border-top: 4px solid var(--tms-input-border);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.tms-tbl {
+  margin: 0 1px;
+  display: flex;
+  align-items: center;
+  height: 30px;
+}
+.tms-tbl div {
+  width: 1px;
+  height: 20px;
+  background: var(--tms-toolbar-divider);
+  border-right: 1px solid #f7f7f7;
+}
+.tms-mn-r {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  flex-wrap: nowrap;
+}
+.tms-mn-r label {
+  font-size: 12px;
+  color: var(--tms-text);
+  white-space: nowrap;
+}
+.tms-mn-r select, .tms-mn-r input {
+  height: 23px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 0 3px;
+  outline: none;
+  background: #fff;
+}
+.tms-mn-r select { padding: 0 16px 0 3px; }
+.tms-mn-r input { padding: 0 4px; }
+.tms-mn-r input:hover, .tms-mn-r input:focus,
+.tms-mn-r select:hover, .tms-mn-r select:focus {
+  border-color: var(--tms-input-border-hover);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   筛选面板 (Filter Panel)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-fp {
+  flex-shrink: 0;
+  margin: 6px 6px 0 6px;
+  background: var(--tms-filter-bg);
+  border: 1px solid var(--tms-filter-border);
+  border-radius: 5px;
+  max-width: 1240px;
+}
+.tms-tabs {
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 8px;
+  border-bottom: 1px solid var(--tms-filter-border);
+}
+.tms-tabs li {
+  padding: 5px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--tms-text);
+  border: 1px solid transparent;
+  border-bottom: 0;
+  margin-right: 1px;
+  margin-top: 3px;
+  border-radius: 3px 3px 0 0;
+}
+.tms-tabs li.active {
+  background: #fff;
+  font-weight: bold;
+  border-color: #abadb3;
+  border-bottom: 1px solid #fff;
+  margin-bottom: -1px;
+}
+.tms-fg {
+  padding: 8px 8px 4px 8px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0 6px;
+}
+.tms-fi {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-width: 0;
+}
+.tms-fi label {
+  font-size: 12px;
+  line-height: 25px;
+  color: #333;
+  width: 74px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tms-fi label.notnull { color: #d46120; }
+.tms-fi label.ref { cursor: pointer; }
+.tms-fi label.ref:hover { text-decoration: underline; }
+.tms-blk {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+}
+.tms-blk input, .tms-blk select {
+  width: 100%;
+  height: 22px;
+  padding: 1px 2px;
+  border: 1px solid var(--tms-input-border);
+  border-radius: 3px;
+  background: #fff;
+  font-size: 12px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color .15s;
+}
+.tms-blk input:hover, .tms-blk input:focus,
+.tms-blk select:hover, .tms-blk select:focus {
+  border-color: var(--tms-input-border-hover);
+}
+.tms-blk input.readonly { background: var(--tms-input-readonly-bg); color: #333; }
+.tms-blk input.notnull { background: var(--tms-input-required-bg); }
+.tms-blk input:disabled, .tms-blk select:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+  color: #aaa;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   信息栏 (Info Bar)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-info {
+  flex-shrink: 0;
+  height: 25px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  border-top: 1px solid var(--tms-list-border);
+  border-bottom: 1px solid var(--tms-list-border);
+  background: var(--tms-info-bg);
+  font-weight: bold;
+}
+.tms-info .or { color: var(--tms-info-orange); padding: 0 3px; }
+.tms-info b { font-weight: bold; margin: 0 3px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   表格 (List)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-list {
+  flex: 1;
+  overflow: auto;
+  background: #fff;
+}
+.tms-list table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  border: 0;
+  border-bottom: 1px solid #dcdcdc;
+  font-size: 12px;
+}
+.tms-list thead th {
+  background: linear-gradient(var(--tms-list-head-1), var(--tms-list-head-2));
+  padding: 0 5px;
+  border-right: 1px solid var(--tms-list-border);
+  border-bottom: 1px solid var(--tms-list-head-border);
+  height: 23px;
+  line-height: 23px;
+  text-align: left;
+  font-weight: normal;
+  color: #333;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.tms-list thead th .ht { cursor: pointer; }
+.tms-list thead th.link .ht { text-decoration: underline; }
+.tms-list thead th:hover { background: #ddd; }
+.tms-list tr { height: 25px; }
+.tms-list tbody tr.even { background: #fff; }
+.tms-list tbody tr.odd { background: var(--tms-list-row-alt); }
+.tms-list tbody tr:hover td { background: var(--tms-list-row-hover) !important; }
+.tms-list tbody tr.current td { background: var(--tms-list-row-selected) !important; }
+.tms-list td {
+  padding: 1px 5px;
+  border-bottom: 1px dotted var(--tms-list-grid);
+  border-right: 1px dotted var(--tms-list-grid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 22px;
+  cursor: pointer;
+}
+.tms-list td.center { text-align: center; }
+.tms-list td a, .tms-list td .lk {
+  color: var(--tms-text-link);
+  text-decoration: none;
+  cursor: pointer;
+}
+.tms-list td a:hover, .tms-list td .lk:hover { text-decoration: underline; }
+.tms-list .ind { color: #777; margin-right: 5px; font-family: monospace; }
+.tms-list .grp { font-weight: bold; background: #fff !important; }
+.tms-list .grp td {
+  border-top: 1px solid #ccc;
+  border-bottom: 1px solid #ccc;
+}
+.tms-list input[type=checkbox] { margin: 0; vertical-align: middle; }
+
+/* ═══════════════════════════════════════════════════════════════
+   分页 (Pagination)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-pg {
+  flex-shrink: 0;
+  height: 30px;
+  background: var(--tms-toolbar-bg);
+  border-top: 1px solid var(--tms-toolbar-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 12px;
+}
+.tms-pg select, .tms-pg input {
+  height: 22px;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  font-size: 12px;
+  padding: 0 3px;
+  outline: none;
+  background: #fff;
+}
+.tms-pg button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid #bbb;
+  background: linear-gradient(#f8f8f8, #eee);
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #333;
+}
+.tms-pg button:hover {
+  border-color: #aaa;
+  background: linear-gradient(#fff, #e1e1e1);
+}
+.tms-pg button.on {
+  background: var(--tms-btn-checked-bg);
+  border-color: var(--tms-btn-checked-border);
+  color: #222;
+  font-weight: bold;
+}
+.tms-pg button:disabled {
+  color: #bbb;
+  cursor: default;
+  background: #f5f5f5;
+  border-color: #ddd;
+}
+.tms-pg button:disabled:hover { background: #f5f5f5; border-color: #ddd; }
+
+/* ═══════════════════════════════════════════════════════════════
+   门户首页 (Portal Home Page)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-portal {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--tms-bg-page);
+  font-family: var(--tms-font);
+  font-size: var(--tms-font-size);
+  color: var(--tms-text);
+}
+.tms-portal *, .tms-portal *::before, .tms-portal *::after { box-sizing: border-box; }
+
+/* 顶部蓝条 */
+.tms-portal-tb {
+  height: 46px;
+  background: linear-gradient(var(--tms-title-bg), var(--tms-title-bg-2));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  flex-shrink: 0;
+}
+.tms-portal-tb .logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: bold;
+  font-size: 16px;
+}
+.tms-portal-tb .logo svg { width: 26px; height: 26px; }
+.tms-portal-tb .ri {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+}
+.tms-portal-tb .mi {
+  padding: 0 12px;
+  line-height: 46px;
+  cursor: pointer;
+}
+.tms-portal-tb .mi:hover { background: rgba(255,255,255,.12); }
+.tms-portal-tb .ar {
+  display: inline-block;
+  border: 3px solid transparent;
+  border-top: 4px solid rgba(255,255,255,.85);
+  margin-left: 4px;
+  vertical-align: middle;
+  margin-top: -2px;
+}
+
+/* 主体 */
+.tms-portal-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 左侧菜单 */
+.tms-portal-side {
+  width: 240px;
+  background: #fff;
+  border-right: 1px solid #e5e5e5;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.tms-portal-side .tabs {
+  display: flex;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+}
+.tms-portal-side .tabs .tb2 {
+  flex: 1;
+  padding: 11px 0;
+  text-align: center;
+  font-size: 13px;
+  cursor: pointer;
+  color: #555;
+}
+.tms-portal-side .tabs .tb2:hover { color: var(--tms-primary); }
+.tms-portal-side .tabs .tb2.act {
+  color: var(--tms-primary);
+  border-bottom: 2px solid var(--tms-primary);
+  font-weight: bold;
+  margin-bottom: -1px;
+}
+.tms-portal-side .list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.tms-portal-side .it {
+  padding: 10px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #333;
+  border-left: 3px solid transparent;
+  user-select: none;
+}
+.tms-portal-side .it:hover {
+  background: var(--tms-primary-bg-hover);
+  color: var(--tms-primary);
+}
+.tms-portal-side .it.act {
+  background: var(--tms-primary-bg);
+  color: var(--tms-primary-active);
+  border-left-color: var(--tms-primary);
+  font-weight: bold;
+}
+.tms-portal-side .it svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--tms-primary);
+}
+.tms-portal-side .it.act svg { color: var(--tms-primary-active); }
+.tms-portal-side .it .badge {
+  margin-left: auto;
+  background: #ff5252;
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  line-height: 14px;
+}
+
+/* 右侧主区 */
+.tms-portal-main {
+  flex: 1;
+  background: #fafbfc;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tms-portal-bar {
+  height: 38px;
+  border-bottom: 1px solid #e5e5e5;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 14px;
+  flex-shrink: 0;
+}
+.tms-portal-bar .tt {
+  font-size: 13px;
+  font-weight: bold;
+  color: #222;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tms-portal-bar .tt svg { width: 14px; height: 14px; color: var(--tms-primary); }
+.tms-portal-bar .crumb { color: #888; font-size: 12px; }
+.tms-portal-bar .crumb span { color: var(--tms-primary-active); }
+
+.tms-portal-flow {
+  flex: 1;
+  padding: 28px 32px;
+  overflow: auto;
+}
+
+/* 流程阶段条 P2 风格 */
+.tms-stages {
+  display: grid;
+  grid-template-columns: 1fr 32px 1fr 32px 1fr 32px 1fr;
+  align-items: center;
+  margin-bottom: 24px;
+  max-width: 1100px;
+}
+.tms-stage {
+  padding: 13px 14px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f5f7fa;
+  color: #666;
+  border: 1px solid #e0e0e0;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all .2s;
+}
+.tms-stage .num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  color: #888;
+  font-size: 12px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+.tms-stage.act {
+  background: var(--tms-primary);
+  color: #fff;
+  border-color: var(--tms-primary);
+  box-shadow: 0 4px 12px rgba(25,144,255,.25);
+}
+.tms-stage.act .num {
+  background: rgba(255,255,255,.25);
+  color: #fff;
+}
+.tms-arr {
+  text-align: center;
+  color: #bfbfbf;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.tms-cols {
+  display: grid;
+  grid-template-columns: 1fr 32px 1fr 32px 1fr 32px 1fr;
+  align-items: start;
+  max-width: 1100px;
+}
+.tms-col {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 0 4px;
+}
+.tms-node {
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 5px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  color: #333;
+  transition: all .15s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  text-align: left;
+  font-family: inherit;
+  width: 100%;
+}
+.tms-node:hover {
+  border-color: var(--tms-primary);
+  color: var(--tms-primary-active);
+  background: var(--tms-primary-bg-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(25,144,255,.15);
+}
+.tms-node svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--tms-primary);
+}
+.tms-node.dim {
+  opacity: .55;
+  cursor: not-allowed;
+  color: #888;
+}
+.tms-node.dim svg { color: #999; }
+.tms-node.dim:hover {
+  opacity: .55;
+  border-color: #e8e8e8;
+  background: #fff;
+  color: #888;
+  transform: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,.03);
+}
+.tms-colarr {
+  align-self: flex-start;
+  text-align: center;
+  color: #cfd8dc;
+  font-size: 14px;
+  padding-top: 14px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   登录页 (Login)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: linear-gradient(135deg, #1990FF 0%, #0e7fe6 100%);
+  font-family: var(--tms-font);
+}
+.tms-login-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 36px 32px 28px;
+  width: 360px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.18);
+}
+.tms-login-box .ttl {
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 4px;
+  color: #222;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tms-login-box .ttl svg { width: 24px; height: 24px; color: var(--tms-primary); }
+.tms-login-box .sub {
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: center;
+  margin-bottom: 26px;
+}
+.tms-login-box .err {
+  background: #fef2f2;
+  color: #dc2626;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #fecaca;
+}
+.tms-login-box input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: 1px solid #d9d9d9;
+  font-size: 13px;
+  margin-bottom: 10px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color .15s, box-shadow .15s;
+}
+.tms-login-box input:focus {
+  border-color: var(--tms-primary);
+  box-shadow: 0 0 0 2px rgba(25,144,255,.15);
+}
+.tms-login-box button {
+  width: 100%;
+  padding: 10px;
+  border-radius: 4px;
+  background: var(--tms-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background .15s;
+  font-family: inherit;
+}
+.tms-login-box button:hover { background: var(--tms-primary-active); }
+
+/* ═══════════════════════════════════════════════════════════════
+   占位页 (Placeholder for unimplemented modules)
+   ═══════════════════════════════════════════════════════════════ */
+.tms-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--tms-bg-page);
+  font-family: var(--tms-font);
+}
+.tms-placeholder .icn {
+  width: 64px;
+  height: 64px;
+  color: #c1c1c1;
+  margin-bottom: 16px;
+}
+.tms-placeholder .ttl {
+  font-size: 18px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 6px;
+}
+.tms-placeholder .sub { font-size: 13px; color: #999; margin-bottom: 20px; }
+.tms-placeholder button {
+  padding: 8px 20px;
+  background: var(--tms-primary);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.tms-placeholder button:hover { background: var(--tms-primary-active); }

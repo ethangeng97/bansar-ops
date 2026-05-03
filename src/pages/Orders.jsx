@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
+import { TmsTitle, Mi, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
 import {
   STATUS_COLORS,
   TRADE_TERMS,
@@ -13,124 +14,24 @@ import {
 
 /*
   Bansar OPS - 海运出口列表页
-  视觉参考：XCloud 货代 TMS（xc.css + list.css）
-  - 标题栏 + 顶部菜单 同条 #42A5F5 35px
-  - 工具栏 #fff0e3 / 边框 #ffd28e
-  - 筛选区 #c8dfff / 圆角 5 / tab 选中态白底凸起
-  - 输入 1px #c1c1c1 / hover #5d7bdd
-  - 表格 dotted #bbb / 选中 #eec99d / hover #ecf3eb / 奇数行 #eee
-  - 作业号链接 #001ace
-  - 数据范围 橙 #d9681d
-  - 字体 'Segoe UI','Microsoft YaHei' 12px
-  - 数据逻辑保留：filtered → groupedRows（Console Box 同 mbl_no 2+ 归组）→ paged → stats
+  样式来自 src/styles/tms.css（由 App.jsx 入口加载）
+  公共组件来自 src/components/tms.jsx
+  保留：filtered → groupedRows（Console Box）→ paged → stats
+  保留：OrderDetail / NewOrderModal 不变（Phase 2 再重构）
 */
 
-// 样式表（一次性注入到 <head>，省得到处写 inline 样式）
-const STYLE_ID = "bansar-tms-styles";
-function injectStyles() {
-  if (typeof document === "undefined") return;
-  if (document.getElementById(STYLE_ID)) return;
-  const s = document.createElement("style");
-  s.id = STYLE_ID;
-  s.textContent = `
-.tms,.tms input,.tms select,.tms button,.tms textarea{
-  font-family:'Segoe UI','Microsoft YaHei',Arial,sans-serif;font-size:12px;color:#222;
-}
-.tms *{box-sizing:border-box}
-.tms{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:#fff}
-
-.tms-tb{flex-shrink:0;height:35px;line-height:35px;background:#42A5F5;color:#fff;
-  padding:0 12px;display:flex;align-items:center;gap:0;text-shadow:0 2px 2px rgba(0,0,0,.22)}
-.tms-tb .tt{font-size:18px;font-weight:bold;cursor:pointer}
-.tms-tb .ri{margin-left:auto;display:flex;align-items:center;font-size:12px;font-weight:normal;text-shadow:none}
-.tms-tb .mi{padding:0 10px;line-height:35px;cursor:pointer;color:#fff}
-.tms-tb .mi:hover{background:rgba(255,255,255,.12)}
-.tms-tb .ar{display:inline-block;border:3px solid transparent;border-top:4px solid rgba(255,255,255,.8);margin-left:5px;vertical-align:middle;margin-top:-2px}
-
-.tms-mn{flex-shrink:0;background:#fff0e3;border-bottom:1px solid #ffd28e;display:flex;align-items:center;padding:2px 4px;flex-wrap:nowrap;overflow-x:auto}
-.tms-mi{padding:0 2px;display:flex;align-items:center;height:30px}
-.tms-mb{height:18px;padding:5px;border:1px solid transparent;border-radius:3px;cursor:pointer;font-size:13px;color:#222;line-height:18px;white-space:nowrap;display:flex;align-items:center;background:transparent}
-.tms-mb:hover{border-color:#aaa;background:linear-gradient(#fff,#e1e1e1)}
-.tms-mb.checked{background:#dfe5f6;border-color:#8c9ae4}
-.tms-mb.disable{opacity:.3;cursor:default}
-.tms-mb.disable:hover{border-color:transparent;background:transparent}
-.tms-mb .ar{display:inline-block;border:3px solid transparent;border-top:4px solid #c1c1c1;margin-left:4px;vertical-align:middle}
-.tms-tbl{margin:0 1px;display:flex;align-items:center;height:30px}
-.tms-tbl div{width:1px;height:20px;background:#e4d3a8;border-right:1px solid #f7f7f7}
-.tms-mn-r{margin-left:auto;display:flex;align-items:center;gap:6px;padding:0 6px;flex-wrap:nowrap}
-.tms-mn-r label{font-size:12px;color:#222;white-space:nowrap}
-.tms-mn-r select,.tms-mn-r input{height:23px;border:1px solid #ccc;border-radius:3px;font-size:12px;padding:0 3px;outline:none;background:#fff}
-.tms-mn-r select{padding:0 16px 0 3px}
-.tms-mn-r input{padding:0 4px}
-.tms-mn-r input:hover,.tms-mn-r input:focus,.tms-mn-r select:hover,.tms-mn-r select:focus{border-color:#5d7bdd}
-
-.tms-fp{flex-shrink:0;margin:6px 6px 0 6px;background:#c8dfff;border:1px solid #ccc;border-radius:5px;max-width:1240px}
-.tms-tabs{display:flex;list-style:none;margin:0;padding:0 0 0 8px;border-bottom:1px solid #ccc}
-.tms-tabs li{padding:5px 14px;cursor:pointer;font-size:12px;color:#222;border:1px solid transparent;border-bottom:0;margin-right:1px;margin-top:3px;border-radius:3px 3px 0 0}
-.tms-tabs li.active{background:#fff;font-weight:bold;border-color:#abadb3;border-bottom:1px solid #fff;margin-bottom:-1px}
-.tms-fg{padding:8px 8px 4px 8px;display:grid;grid-template-columns:repeat(6, 1fr);gap:0 6px}
-.tms-fi{display:flex;align-items:center;height:28px;min-width:0}
-.tms-fi label{font-size:12px;line-height:25px;color:#333;width:74px;flex-shrink:0;text-align:right;padding-right:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tms-fi label.notnull{color:#d46120}
-.tms-fi label.ref{cursor:pointer}
-.tms-fi label.ref:hover{text-decoration:underline}
-.tms-blk{position:relative;flex:1;min-width:0;height:26px;display:flex;align-items:center}
-.tms-blk input,.tms-blk select{width:100%;height:22px;padding:1px 2px;border:1px solid #c1c1c1;border-radius:3px;background:#fff;font-size:12px;outline:none;font-family:inherit;transition:border-color .15s}
-.tms-blk.with-icon input{padding-right:18px}
-.tms-blk input:hover,.tms-blk input:focus,.tms-blk select:hover,.tms-blk select:focus{border-color:#5d7bdd}
-.tms-blk input.readonly{background:#e6e6e6;color:#333}
-.tms-blk input.notnull{background:#fdf8d2}
-.tms-icon{position:absolute;right:1px;top:3px;width:16px;height:17px;border:0;background:#f0f0f0;border-radius:2px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#666;font-size:10px;padding:0;outline:none}
-.tms-icon:hover{background:#dfe5f6}
-
-.tms-info{flex-shrink:0;height:25px;display:flex;align-items:center;padding:0 8px;font-size:12px;background:#fff;border-top:1px solid #d8d8d8;border-bottom:1px solid #d8d8d8;background:#e1e1e1;font-weight:bold}
-.tms-info .or{color:#d9681d;padding:0 3px}
-.tms-info b{font-weight:bold;margin:0 3px}
-
-.tms-list{flex:1;overflow:auto;background:#fff}
-.tms-list table{border-collapse:collapse;width:100%;table-layout:fixed;border:0;border-bottom:1px solid #dcdcdc;font-size:12px}
-.tms-list thead th{background:linear-gradient(#f9f9f9,#f0f0f0);padding:0 5px;border-right:1px solid #d8d8d8;border-bottom:1px solid #e0e3e5;height:23px;line-height:23px;text-align:left;font-weight:normal;color:#333;font-size:12px;overflow:hidden;white-space:nowrap;position:sticky;top:0;z-index:1}
-.tms-list thead th .ht{cursor:pointer}
-.tms-list thead th.link .ht{text-decoration:underline}
-.tms-list thead th:hover{background:#ddd}
-.tms-list tr{height:25px}
-.tms-list tbody tr.even{background:#fff}
-.tms-list tbody tr.odd{background:#eee}
-.tms-list tbody tr:hover td{background:#ecf3eb !important}
-.tms-list tbody tr.current td{background:#eec99d !important}
-.tms-list td{padding:1px 5px;border-bottom:1px dotted #bbb;border-right:1px dotted #bbb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;line-height:22px;cursor:pointer}
-.tms-list td.center{text-align:center}
-.tms-list td a,.tms-list td .lk{color:#001ace;text-decoration:none;cursor:pointer}
-.tms-list td a:hover,.tms-list td .lk:hover{text-decoration:underline}
-.tms-list .ind{color:#777;margin-right:5px;font-family:monospace}
-.tms-list .grp{font-weight:bold;background:#fff !important}
-.tms-list .grp td{border-top:1px solid #ccc;border-bottom:1px solid #ccc}
-.tms-list input[type=checkbox]{margin:0;vertical-align:middle}
-
-.tms-pg{flex-shrink:0;height:30px;background:#fff0e3;border-top:1px solid #ffd28e;display:flex;align-items:center;justify-content:flex-end;padding:0 8px;gap:4px;font-size:12px}
-.tms-pg select,.tms-pg input{height:22px;border:1px solid #ccc;border-radius:2px;font-size:12px;padding:0 3px;outline:none;background:#fff}
-.tms-pg button{height:22px;padding:0 8px;border:1px solid #bbb;background:linear-gradient(#f8f8f8,#eee);border-radius:2px;cursor:pointer;font-size:12px;color:#333}
-.tms-pg button:hover{border-color:#aaa;background:linear-gradient(#fff,#e1e1e1)}
-.tms-pg button.on{background:#dfe5f6;border-color:#8c9ae4;color:#222;font-weight:bold}
-.tms-pg button:disabled{color:#bbb;cursor:default;background:#f5f5f5;border-color:#ddd}
-.tms-pg button:disabled:hover{background:#f5f5f5;border-color:#ddd}
-`;
-  document.head.appendChild(s);
-}
-
+// ── Legacy 常量：OrderDetail / NewOrderModal 内部样式仍在使用 ──
 const FAM = "'Segoe UI','Microsoft YaHei',Arial,sans-serif";
-
-// legacy constants for OrderDetail / NewOrderModal (旧代码沿用)
 const F = FAM;
 const mono = { fontFamily: "'Consolas','Microsoft YaHei',monospace" };
 const C = {
-  titleBlue: "#42A5F5",
-  titleBlue2: "#1e88e5",
-  topLine: "#1976d2",
+  titleBlue: "#1990FF",
+  titleBlue2: "#0e7fe6",
+  topLine: "#0e7fe6",
   beige: "#fff0e3",
   beigeLine: "#ffd28e",
-  panel: "#c8dfff",
-  panel2: "#b8d3f5",
+  panel: "#e6f4ff",
+  panel2: "#cfe5ff",
   border: "#abadb3",
   grid: "#bbb",
   head1: "#f9f9f9",
@@ -154,10 +55,7 @@ export function OrdersPage({ user, onBack }) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
   const [maxRows, setMaxRows] = useState(300);
-  const [collapsed, setCollapsed] = useState(new Set());
   const [activeTab, setActiveTab] = useState("过滤");
-
-  useEffect(() => { injectStyles(); }, []);
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("shipments").select("*").order("created_at", { ascending: false });
@@ -306,17 +204,8 @@ export function OrdersPage({ user, onBack }) {
   return (
     <div className="tms">
 
-      {/* 标题栏 + 顶部菜单 */}
-      <div className="tms-tb">
-        <span className="tt" onClick={onBack}>作业 / 海运出口</span>
-        <div className="ri">
-          <span className="mi">{user?.profile?.full_name || user?.email || "用户"}<span className="ar"></span></span>
-          <span className="mi">BS（NB）GJ<span className="ar"></span></span>
-          <span className="mi">{role === "admin" ? "管理部" : "操作部"}<span className="ar"></span></span>
-          <span className="mi">简体中文<span className="ar"></span></span>
-          <span className="mi">链接<span className="ar"></span></span>
-        </div>
-      </div>
+      {/* 标题栏 + 顶部菜单（共享组件） */}
+      <TmsTitle title="作业 / 海运出口" user={user} role={role} onClose={onBack} />
 
       {/* 工具栏 */}
       <div className="tms-mn">
@@ -328,9 +217,6 @@ export function OrdersPage({ user, onBack }) {
         <Mi onClick={() => setShowNew(true)} arrow>新建作业</Mi>
         <Mi arrow>显示预览</Mi>
         <Mi>统计模板</Mi>
-        <select style={{ height: 23, border: "1px solid #ccc", borderRadius: 3, fontSize: 12, marginLeft: 4, marginRight: 4, outline: "none" }}>
-          <option></option>
-        </select>
         <Tbl/>
         <Mi onClick={() => setShowFilter(p => !p)}>{showFilter ? "隐藏面板" : "显示面板"}</Mi>
         <Mi arrow>数据范围</Mi>
@@ -365,11 +251,11 @@ export function OrdersPage({ user, onBack }) {
       {/* 筛选面板 */}
       {showFilter && (
         <div className="tms-fp">
-          <ul className="tms-tabs">
-            {["过滤", "动作", "打印", "通知", "查询方案"].map(t => (
-              <li key={t} className={activeTab === t ? "active" : ""} onClick={() => setActiveTab(t)}>{t}</li>
-            ))}
-          </ul>
+          <TmsTabs
+            tabs={["过滤", "动作", "打印", "通知", "查询方案"]}
+            active={activeTab}
+            onChange={setActiveTab}
+          />
           <div className="tms-fg">
             <Fi label="公司">
               <input className="readonly" readOnly value="BS（NB）GJ" />
@@ -383,12 +269,8 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="至">
               <input type="date" value={filters.etd_to || ""} onChange={e => sf("etd_to", e.target.value)} />
             </Fi>
-            <Fi label="实际开航时间">
-              <input disabled />
-            </Fi>
-            <Fi label="至">
-              <input disabled />
-            </Fi>
+            <Fi label="实际开航时间"><input disabled /></Fi>
+            <Fi label="至"><input disabled /></Fi>
 
             <Fi label="船东" refLabel>
               <ComboBox value={filters.carrier || ""} onChange={v => sf("carrier", v)} options={refs.carrier} />
@@ -399,53 +281,27 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="航次">
               <ComboBox value={filters.voyage || ""} onChange={v => sf("voyage", v)} options={refs.voyage} />
             </Fi>
-            <Fi label="订舱代理" refLabel>
-              <input disabled />
-            </Fi>
-            <Fi label="船东参考编号">
-              <input disabled />
-            </Fi>
+            <Fi label="订舱代理" refLabel><input disabled /></Fi>
+            <Fi label="船东参考编号"><input disabled /></Fi>
             <Fi label="委托人" refLabel>
               <ComboBox value={filters.supplier || ""} onChange={v => sf("supplier", v)} options={refs.supplier} />
             </Fi>
 
-            <Fi label="委托部门">
-              <input disabled />
-            </Fi>
-            <Fi label="销售员">
-              <input disabled />
-            </Fi>
-            <Fi label="客服">
-              <input disabled />
-            </Fi>
-            <Fi label="操作员">
-              <input disabled />
-            </Fi>
-            <Fi label="单证">
-              <input disabled />
-            </Fi>
+            <Fi label="委托部门"><input disabled /></Fi>
+            <Fi label="销售员"><input disabled /></Fi>
+            <Fi label="客服"><input disabled /></Fi>
+            <Fi label="操作员"><input disabled /></Fi>
+            <Fi label="单证"><input disabled /></Fi>
             <Fi label="出运状态">
               <select disabled><option>出运</option></select>
             </Fi>
 
-            <Fi label="费用状态">
-              <input disabled />
-            </Fi>
-            <Fi label="费用提交">
-              <input disabled />
-            </Fi>
-            <Fi label="费用审核">
-              <input disabled />
-            </Fi>
-            <Fi label="航线" refLabel>
-              <input disabled />
-            </Fi>
-            <Fi label="航线确认">
-              <input disabled />
-            </Fi>
-            <Fi label="舱单确认">
-              <input disabled />
-            </Fi>
+            <Fi label="费用状态"><input disabled /></Fi>
+            <Fi label="费用提交"><input disabled /></Fi>
+            <Fi label="费用审核"><input disabled /></Fi>
+            <Fi label="航线" refLabel><input disabled /></Fi>
+            <Fi label="航线确认"><input disabled /></Fi>
+            <Fi label="舱单确认"><input disabled /></Fi>
 
             <Fi label="客户编号">
               <input value={filters.po || ""} onChange={e => sf("po", e.target.value)} />
@@ -456,9 +312,7 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="HB/L No.">
               <input value={filters.hbl_no || ""} onChange={e => sf("hbl_no", e.target.value)} />
             </Fi>
-            <Fi label="状态">
-              <input disabled />
-            </Fi>
+            <Fi label="状态"><input disabled /></Fi>
             <Fi label="箱号">
               <input value={filters.container_no || ""} onChange={e => sf("container_no", e.target.value)} />
             </Fi>
@@ -472,38 +326,23 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="起运港" refLabel>
               <ComboBox value={filters.pol || ""} onChange={v => sf("pol", v)} options={refs.pol} />
             </Fi>
-            <Fi label="发货人名称">
-              <input disabled />
-            </Fi>
-            <Fi label="收货人名称">
-              <input disabled />
-            </Fi>
-            <Fi label="清关日期">
-              <input disabled type="date" />
-            </Fi>
-            <Fi label="至">
-              <input disabled type="date" />
-            </Fi>
+            <Fi label="发货人名称"><input disabled /></Fi>
+            <Fi label="收货人名称"><input disabled /></Fi>
+            <Fi label="清关日期"><input disabled type="date" /></Fi>
+            <Fi label="至"><input disabled type="date" /></Fi>
 
-            <Fi label="单证锁定">
-              <input disabled />
-            </Fi>
-            <Fi label="商务">
-              <input disabled />
-            </Fi>
+            <Fi label="单证锁定"><input disabled /></Fi>
+            <Fi label="商务"><input disabled /></Fi>
           </div>
         </div>
       )}
 
       {/* 信息栏 */}
-      <div className="tms-info">
-        <span className="or">数据范围: 分公司</span>
-        <span style={{ marginLeft: 8 }}>
-          行数:<b>{stats.n}</b>
-          TEU:<b>{stats.teu}</b>
-          {stats.ts && <>箱型:<b>{stats.ts}</b></>}
-        </span>
-      </div>
+      <TmsInfoBar scope="分公司">
+        行数:<b>{stats.n}</b>
+        TEU:<b>{stats.teu}</b>
+        {stats.ts && <>箱型:<b>{stats.ts}</b></>}
+      </TmsInfoBar>
 
       {/* 表格 */}
       <div className="tms-list">
@@ -534,7 +373,16 @@ export function OrdersPage({ user, onBack }) {
           <tbody>
             {paged.map((r, i) => {
               if (r.t === "mbl") {
-                return <GroupRow key={"g"+i} r={r} cols={cols} />;
+                return (
+                  <tr key={"g" + i} className="grp">
+                    <td className="center"><input type="checkbox" /></td>
+                    <td colSpan={cols.length - 1} style={{ paddingLeft: 6 }}>
+                      <span style={{ color: "#0e7fe6" }}>{r.mbl}</span>
+                      <span style={{ marginLeft: 12, color: "#666", fontWeight: "normal" }}>合计 {r.n} 票</span>
+                      <span style={{ marginLeft: 12, color: "#666", fontWeight: "normal" }}>船名: {r.d.vessel} / {r.d.voyage}</span>
+                    </td>
+                  </tr>
+                );
               }
               const o = r.d;
               const child = r.t === "hbl";
@@ -574,95 +422,19 @@ export function OrdersPage({ user, onBack }) {
       </div>
 
       {/* 分页 */}
-      <div className="tms-pg">
-        <span style={{ marginRight: 8 }}>共 {groupedRows.length} 条</span>
-        <select value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(0); }}>
-          <option value={20}>20条/页</option>
-          <option value={50}>50条/页</option>
-          <option value={100}>100条/页</option>
-          <option value={200}>200条/页</option>
-        </select>
-        <button disabled={page === 0} onClick={() => setPage(0)}>‹‹</button>
-        <button disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>‹</button>
-        {pagButtons(page, totalPages).map((p, i) =>
-          p === "..." ? (
-            <span key={i} style={{ padding: "0 4px" }}>...</span>
-          ) : (
-            <button key={i} className={p === page ? "on" : ""} onClick={() => setPage(p)}>{p + 1}</button>
-          )
-        )}
-        <button disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>›</button>
-        <button disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>››</button>
-        <span style={{ marginLeft: 4 }}>前往</span>
-        <input style={{ width: 36, textAlign: "center" }}
-          value={page + 1}
-          onChange={e => {
-            const v = parseInt(e.target.value, 10);
-            if (!isNaN(v)) setPage(Math.max(0, Math.min(totalPages - 1, v - 1)));
-          }} />
-        <span>页</span>
-      </div>
+      <TmsPagination
+        total={groupedRows.length}
+        page={page}
+        pageSize={pageSize}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       {showNew && <NewOrderModal onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load(); }} />}
     </div>
   );
 }
-
-// ───── 子组件 ─────
-
-function Mi({ children, onClick, checked, disabled, arrow }) {
-  return (
-    <div className="tms-mi">
-      <div
-        className={"tms-mb" + (checked ? " checked" : "") + (disabled ? " disable" : "")}
-        onClick={disabled ? undefined : onClick}
-      >
-        {children}
-        {arrow && <span className="ar"></span>}
-      </div>
-    </div>
-  );
-}
-
-function Tbl() {
-  return <div className="tms-tbl"><div></div></div>;
-}
-
-function Fi({ label, refLabel, children }) {
-  return (
-    <div className="tms-fi">
-      <label className={refLabel ? "ref" : ""}>{label}</label>
-      <span className="tms-blk">{children}</span>
-    </div>
-  );
-}
-
-function GroupRow({ r, cols }) {
-  return (
-    <tr className="grp">
-      <td className="center"><input type="checkbox" /></td>
-      <td colSpan={cols.length - 1} style={{ paddingLeft: 6 }}>
-        <span style={{ color: "#001ace" }}>{r.mbl}</span>
-        <span style={{ marginLeft: 12, color: "#666", fontWeight: "normal" }}>合计 {r.n} 票</span>
-        <span style={{ marginLeft: 12, color: "#666", fontWeight: "normal" }}>船名: {r.d.vessel} / {r.d.voyage}</span>
-      </td>
-    </tr>
-  );
-}
-
-function pagButtons(cur, total) {
-  const out = [];
-  if (total <= 7) { for (let i = 0; i < total; i++) out.push(i); return out; }
-  out.push(0);
-  if (cur > 3) out.push("...");
-  const s = Math.max(1, cur - 1), e = Math.min(total - 2, cur + 1);
-  for (let i = s; i <= e; i++) out.push(i);
-  if (cur < total - 4) out.push("...");
-  out.push(total - 1);
-  return out;
-}
-
-function TmsRow() { return null; } // legacy stub, 不再使用，保留导出
 
 function OrderDetail({ order, role, user, onBack, onReload }) {
   const [editing, setEditing] = useState(false);
@@ -933,31 +705,6 @@ function NewOrderModal({ onClose, onSaved }) {
 }
 
 /* Components */
-function TmsTitle({ user, role, title, compact }) {
-  return (
-    <div style={{ ...titleBar, height: compact ? 30 : 40 }}>
-      <div style={{ fontWeight: 700, fontSize: compact ? 15 : 22, color: "#fff" }}>
-        {title.includes("/") ? (
-          <>
-            <span>{title.split("/")[0]}</span>
-            <span style={{ color: "#fff" }}> / </span>
-            <span>{title.split("/").slice(1).join("/")}</span>
-          </>
-        ) : title}
-      </div>
-      {!compact && (
-        <div style={titleRight}>
-          <span>{user?.profile?.name || "庚帅翰"}</span><span>⌄</span>
-          <span>BS（NB）GJ</span><span>⌄</span>
-          <span>管理部</span><span>⌄</span>
-          <span>简体中文</span><span>⌄</span>
-          <span>链接</span><span>⌄</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Toolbar({ left, right }) {
   return (
     <div style={toolBar}>

@@ -112,6 +112,7 @@ export default function App() {
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: F, background: "#f0f0f0" }}>
       {/* ── Sidebar ── */}
+      {view !== "sea_export" && (
       <aside style={{ width: 195, background: "#0c1321", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         {/* Logo — small, stable */}
         <div style={{ padding: "14px 14px 12px", borderBottom: "1px solid #1a2332", display: "flex", alignItems: "center", gap: 8 }}>
@@ -193,15 +194,21 @@ export default function App() {
           </button>
         </div>
       </aside>
+      )}
 
       {/* ── Main ── */}
-      <main style={{ flex: 1, overflowY: "auto", background: "#f5f5f5" }}>
-        <div style={{ padding: "16px 20px" }}>
-          {view === "dashboard" && <DashboardPage user={user} onNavigate={setView} />}
-          {view === "sea_export" && <OrdersPage user={user} />}
-          {!["dashboard", "sea_export"].includes(view) && <Placeholder view={view} />}
-        </div>
-      </main>
+      {view === "sea_export" ? (
+        <main style={{ flex: 1, overflow: "hidden", background: "#fff", display: "flex", flexDirection: "column" }}>
+          <OrdersPage user={user} onBack={() => setView("dashboard")} />
+        </main>
+      ) : (
+        <main style={{ flex: 1, overflowY: "auto", background: "#f5f5f5" }}>
+          <div style={{ padding: "16px 20px" }}>
+            {view === "dashboard" && <DashboardPage user={user} onNavigate={setView} />}
+            {!["dashboard", "sea_export"].includes(view) && <Placeholder view={view} />}
+          </div>
+        </main>
+      )}
     </div>
   );
 }

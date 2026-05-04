@@ -7,6 +7,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase.js";
 import { OrdersPage } from "./pages/Orders.jsx";
+import { PartnersPage } from "./pages/Partners.jsx";
 import Portal from "./pages/Portal.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
@@ -14,13 +15,9 @@ import { TmsPlaceholder } from "./components/tms.jsx";
 import "./styles/tms.css";
 
 // ── 路由表（hash → 页面组件） ──
-// 已实现的页面在这里注册；未注册的 hash 会显示占位页
 const ROUTES = {
   "sea_export": { title: "海运出口", component: OrdersPage },
-  // 其他模块逐步添加：
-  // "sea_import":  { title: "海运进口", component: SeaImportPage },
-  // "billing":     { title: "账单管理", component: BillingPage },
-  // ...
+  "partners":   { title: "客商管理", component: PartnersPage },
 };
 
 // 解析当前 hash → 路由 key

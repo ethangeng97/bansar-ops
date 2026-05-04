@@ -16,7 +16,7 @@ const MODULES = [
   { key: "air_export",  zh: "空运出口", icon: "plane",    active: false },
   { key: "air_import",  zh: "空运进口", icon: "plane",    active: false },
   { key: "finance",     zh: "财务管理", icon: "dollar",   active: false },
-  { key: "partners",    zh: "客商管理", icon: "users",    active: false },
+  { key: "partners",    zh: "客商管理", icon: "users",    active: true,  href: "#/partners" },
   { key: "master",      zh: "基础数据", icon: "database", active: false },
   { key: "system",      zh: "系统设置", icon: "gear",     active: false },
 ];
@@ -31,7 +31,7 @@ const STAGES = [
 
 const NODES = {
   1: [
-    { name: "客商录入维护", icon: "users",    href: null },
+    { name: "客商录入维护", icon: "users",    href: "#/partners" },
     { name: "业务类型设置", icon: "tag",      href: null },
     { name: "费用项维护",   icon: "circle",   href: null },
     { name: "汇率设置",     icon: "refresh",  href: null },

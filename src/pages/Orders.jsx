@@ -147,14 +147,27 @@ export function OrdersPage({ user, onBack }) {
     });
 
     const rows = [];
+    // 多票同 booking_no：主拼（order_no 不带 -N）放最上面，其他作为子分票排在下面
     Object.entries(mblG)
       .filter(([, v]) => v.length >= 2)
       .sort((a, b) => (b[1][0].created_at || "").localeCompare(a[1][0].created_at || ""))
       .forEach(([mbl, items]) => {
-        rows.push({ t: "mbl", mbl, d: items[0], ch: items, n: items.length });
-        items.forEach(c => rows.push({ t: "hbl", mbl, d: c }));
+        // 主拼判定：order_no 不含 "-数字" 后缀
+        const isMaster = (o) => o.order_no && !/-\d+$/.test(o.order_no);
+        const master = items.find(isMaster) || items[0];
+        const subs = items.filter(o => o !== master)
+          .sort((a, b) => {
+            // 分票按尾数排序（-1, -2, -3...）
+            const na = parseInt((a.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            const nb = parseInt((b.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            return na - nb;
+          });
+
+        rows.push({ t: "s", d: master });
+        subs.forEach(c => rows.push({ t: "sub", d: c }));
       });
 
+    // 单票订单（无分组）按时间排
     [
       ...Object.entries(mblG).filter(([, v]) => v.length === 1).map(([, v]) => v[0]),
       ...noMbl
@@ -206,8 +219,8 @@ export function OrdersPage({ user, onBack }) {
     />
   );
 
-  // 列定义
-  const cols = [
+  // 列定义（默认宽度）
+  const COLS_DEF = [
     { k: "chk",   w: 30,  label: "" },
     { k: "type",  w: 60,  label: "出运类型", center: true },
     { k: "ord",   w: 130, label: "作业号", link: true },
@@ -224,6 +237,57 @@ export function OrdersPage({ user, onBack }) {
     { k: "qty",   w: 80,  label: "箱型" },
     { k: "hbl",   w: 130, label: "HB/L No.", link: true },
   ];
+  const COL_WIDTHS_KEY = "bansar_orders_col_widths_v1";
+
+  // 列宽 state（从 localStorage 读，没有就用默认）
+  const [colWidths, setColWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY) || "{}");
+      return Object.fromEntries(COLS_DEF.map(c => [c.k, saved[c.k] || c.w]));
+    } catch {
+      return Object.fromEntries(COLS_DEF.map(c => [c.k, c.w]));
+    }
+  });
+
+  // 持久化列宽
+  const persistColWidths = (widths) => {
+    setColWidths(widths);
+    try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+  };
+
+  // 拖动调整列宽：监听 mousedown
+  const startColResize = (colKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidths[colKey];
+    const onMove = (ev) => {
+      const newW = Math.max(40, startW + (ev.clientX - startX));
+      setColWidths(p => ({ ...p, [colKey]: newW }));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      // 用最新值持久化
+      setColWidths(latest => {
+        try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(latest)); } catch {}
+        return latest;
+      });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  // 双击列分隔线 = 重置该列宽度
+  const resetColWidth = (colKey) => {
+    const def = COLS_DEF.find(c => c.k === colKey);
+    if (def) {
+      const next = { ...colWidths, [colKey]: def.w };
+      persistColWidths(next);
+    }
+  };
+
+  const cols = COLS_DEF.map(c => ({ ...c, w: colWidths[c.k] }));
   const totalW = cols.reduce((a, c) => a + c.w, 0);
 
   return (
@@ -394,36 +458,30 @@ export function OrdersPage({ user, onBack }) {
                 <th key={c.k} className={c.link ? "link" : ""}>
                   {c.k === "chk" ? (
                     <input type="checkbox"
-                      checked={paged.length > 0 && paged.every(r => r.t === "mbl" || checkedIds.has(r.d.id))}
+                      checked={paged.length > 0 && paged.every(r => checkedIds.has(r.d.id))}
                       onChange={e => {
                         const n = new Set(checkedIds);
-                        if (e.target.checked) paged.forEach(r => r.t !== "mbl" && n.add(r.d.id));
+                        if (e.target.checked) paged.forEach(r => n.add(r.d.id));
                         else paged.forEach(r => n.delete(r.d.id));
                         setCheckedIds(n);
                       }} />
                   ) : (
                     <span className="ht">{c.label}</span>
                   )}
+                  <span
+                    className="col-resize"
+                    onMouseDown={e => startColResize(c.k, e)}
+                    onDoubleClick={() => resetColWidth(c.k)}
+                    title="拖动调整列宽，双击恢复默认"
+                  />
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {paged.map((r, i) => {
-              if (r.t === "mbl") {
-                return (
-                  <tr key={"g" + i} className="grp-c">
-                    <td colSpan={cols.length}>
-                      <span className="grp-pill">📦 自拼柜</span>
-                      <span className="grp-mbl">MB/L: <b>{r.mbl}</b></span>
-                      <span className="grp-vessel">{r.d.vessel}{r.d.voyage ? ` / ${r.d.voyage}` : ""}</span>
-                      <span className="grp-count">· {r.n} 票</span>
-                    </td>
-                  </tr>
-                );
-              }
               const o = r.d;
-              const child = r.t === "hbl";
+              const child = r.t === "sub";
               const checked = checkedIds.has(o.id);
               const evenOdd = i % 2 === 0 ? "even" : "odd";
               return (

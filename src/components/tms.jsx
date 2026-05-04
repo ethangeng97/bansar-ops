@@ -45,32 +45,40 @@ export function MiDropdown({ children, options = [], disabled }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
 
-  // 点别处自动关闭
+  // 点别处自动关闭（用 click 而不是 mousedown，避免和按钮自身 onClick 冲突）
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
       if (!e.target.closest?.(".tms-mi-dd")) close();
     };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    // 延迟绑定，避免立即被同一次 click 触发关闭
+    const t = setTimeout(() => document.addEventListener("click", onDoc), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", onDoc);
+    };
   }, [open]);
 
   return (
     <div className="tms-mi tms-mi-dd" style={{ position: "relative" }}>
       <div
         className={"tms-mb" + (disabled ? " disable" : "") + (open ? " checked" : "")}
-        onClick={() => !disabled && setOpen(o => !o)}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!disabled) setOpen(o => !o);
+        }}
       >
         {children}
         <span className="ar"></span>
       </div>
       {open && options.length > 0 && (
-        <div className="tms-mb-menu">
+        <div className="tms-mb-menu" onClick={(e) => e.stopPropagation()}>
           {options.map((o, i) => (
             <div
               key={i}
               className={"tms-mb-mi" + (o.disabled ? " disable" : "")}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 if (o.disabled) return;
                 close();
                 o.onClick?.();

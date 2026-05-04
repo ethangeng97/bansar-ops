@@ -108,6 +108,22 @@ export function OrdersPage({ user, onBack }) {
   }, []);
   const sopNode = sopFilter ? SOP_NODES.find(n => n.code === sopFilter) : null;
 
+  // 解析 ?action=new&type=FCL：打开页面后自动弹出新建对话框（来自 Portal "新建作业" 节点）
+  useEffect(() => {
+    const m = window.location.hash.match(/[?&]action=([^&]+)/);
+    const tm = window.location.hash.match(/[?&]type=([^&]+)/);
+    if (m && m[1] === "new") {
+      const t = tm ? decodeURIComponent(tm[1]) : "FCL";
+      if (["FCL", "LCL", "Console"].includes(t)) {
+        setNewType(t);
+      }
+      setShowNew(true);
+      // 清掉 URL 里的 action 参数，刷新不会重弹
+      const cleaned = window.location.hash.replace(/[?&](action|type)=[^&]+/g, "").replace(/\?$/, "");
+      window.history.replaceState(null, "", cleaned || "#/sea_export");
+    }
+  }, []);
+
   // 列宽 state（从 localStorage 读，没有就用默认）
   const [colWidths, setColWidths] = useState(() => {
     try {

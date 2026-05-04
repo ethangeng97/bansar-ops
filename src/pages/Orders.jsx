@@ -411,12 +411,12 @@ export function OrdersPage({ user, onBack }) {
             {paged.map((r, i) => {
               if (r.t === "mbl") {
                 return (
-                  <tr key={"g" + i} className="grp">
-                    <td className="center"><input type="checkbox" /></td>
-                    <td colSpan={cols.length - 1} style={{ paddingLeft: 6 }}>
-                      <span style={{ color: "#0e7fe6" }}>{r.mbl}</span>
-                      <span style={{ marginLeft: 12, color: "#666", fontWeight: "normal" }}>合计 {r.n} 票</span>
-                      <span style={{ marginLeft: 12, color: "#666", fontWeight: "normal" }}>船名: {r.d.vessel} / {r.d.voyage}</span>
+                  <tr key={"g" + i} className="grp-c">
+                    <td colSpan={cols.length}>
+                      <span className="grp-pill">📦 自拼柜</span>
+                      <span className="grp-mbl">MB/L: <b>{r.mbl}</b></span>
+                      <span className="grp-vessel">{r.d.vessel}{r.d.voyage ? ` / ${r.d.voyage}` : ""}</span>
+                      <span className="grp-count">· {r.n} 票</span>
                     </td>
                   </tr>
                 );

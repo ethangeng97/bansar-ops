@@ -1272,21 +1272,21 @@
   opacity: 1;
 }
 
-/* ─── 分票整行视觉缩进（主拼下面） ────────────────── */
+/* ─── 分票整行视觉缩进（主拼下面）方案D 极浅蓝 ─── */
 .tms-list tr.tr-sub td {
-  background: #fafbf2;
+  background: #f5faff;
 }
 .tms-list tr.tr-sub td:first-child {
-  border-left: 3px solid #ffd28e;  /* 左侧橙色细条 */
+  border-left: 3px solid #1990FF;  /* 左侧主题蓝细条 */
 }
 .tms-list tr.tr-sub.even td {
-  background: #fafbf2;
+  background: #f5faff;
 }
 .tms-list tr.tr-sub.odd td {
-  background: #f5f6e8;
+  background: #ebf3ff;
 }
 .tms-list tr.tr-sub:hover td {
-  background: #ecf3eb !important;
+  background: #d6e8fa !important;
 }
 
 /* 汇总字段（黄色高亮 readonly） */

@@ -63,6 +63,19 @@ const COLS_DEF = [
 ];
 const COL_WIDTHS_KEY = "bansar_orders_col_widths_v1";
 
+// 小票表格列定义（主拼详情页"小票" tab 用）
+const TX_COLS_DEF = [
+  { k: "ord", w: 140, label: "业务编号" },
+  { k: "hbl", w: 130, label: "HBL" },
+  { k: "cus", w: 160, label: "委托单位" },
+  { k: "des", w: 200, label: "品名" },
+  { k: "pkg", w: 80,  label: "件数",       align: "right" },
+  { k: "wt",  w: 100, label: "毛重 (KG)",  align: "right" },
+  { k: "vol", w: 90,  label: "体积 (CBM)", align: "right" },
+  { k: "act", w: 60,  label: "操作",       align: "center" },
+];
+const TX_COL_WIDTHS_KEY = "bansar_subtickets_col_widths_v1";
+
 export function OrdersPage({ user, onBack }) {
   const role = user.profile?.role || "operator";
   const [shipments, setShipments] = useState([]);
@@ -588,6 +601,48 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
   const [cargoItems, setCargoItems] = useState([]);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
+
+  // 小票表格列宽 state（独立于订单列表）
+  const [txColWidths, setTxColWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(TX_COL_WIDTHS_KEY) || "{}");
+      return Object.fromEntries(TX_COLS_DEF.map(c => [c.k, saved[c.k] || c.w]));
+    } catch {
+      return Object.fromEntries(TX_COLS_DEF.map(c => [c.k, c.w]));
+    }
+  });
+
+  const startTxColResize = (colKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = txColWidths[colKey];
+    const onMove = (ev) => {
+      const newW = Math.max(40, startW + (ev.clientX - startX));
+      setTxColWidths(p => ({ ...p, [colKey]: newW }));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setTxColWidths(latest => {
+        try { localStorage.setItem(TX_COL_WIDTHS_KEY, JSON.stringify(latest)); } catch {}
+        return latest;
+      });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const resetTxColWidth = (colKey) => {
+    const def = TX_COLS_DEF.find(c => c.k === colKey);
+    if (def) {
+      const next = { ...txColWidths, [colKey]: def.w };
+      setTxColWidths(next);
+      try { localStorage.setItem(TX_COL_WIDTHS_KEY, JSON.stringify(next)); } catch {}
+    }
+  };
+
+  const txCols = TX_COLS_DEF.map(c => ({ ...c, w: txColWidths[c.k] }));
 
   useEffect(() => {
     Promise.all([
@@ -1217,41 +1272,40 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
             </div>
 
             {/* 分票表格 */}
-            <table className="tms-tx-table">
+            <table className="tms-tx-table" style={{ width: txCols.reduce((a, c) => a + c.w, 0) }}>
+              <colgroup>
+                {txCols.map(c => <col key={c.k} style={{ width: c.w }} />)}
+              </colgroup>
               <thead>
                 <tr>
-                  <th style={{ width: 130 }}>业务编号</th>
-                  <th style={{ width: 130 }}>HBL</th>
-                  <th style={{ width: 160 }}>委托单位</th>
-                  <th>品名</th>
-                  <th style={{ width: 80, textAlign: "right" }}>件数</th>
-                  <th style={{ width: 100, textAlign: "right" }}>毛重 (KG)</th>
-                  <th style={{ width: 90, textAlign: "right" }}>体积 (CBM)</th>
-                  <th style={{ width: 60, textAlign: "center" }}>操作</th>
+                  {txCols.map(c => (
+                    <th key={c.k} style={{ textAlign: c.align || "left", position: "relative" }}>
+                      {c.label}
+                      <span
+                        className="col-resize"
+                        onMouseDown={e => startTxColResize(c.k, e)}
+                        onDoubleClick={() => resetTxColWidth(c.k)}
+                        title="拖动调整列宽，双击恢复默认"
+                      />
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {subTickets.length === 0 ? (
-                  <tr><td colSpan={8} style={{ padding: 30, textAlign: "center", color: "#888" }}>
+                  <tr><td colSpan={txCols.length} style={{ padding: 30, textAlign: "center", color: "#888" }}>
                     暂无分票，请点击「+ 新增分票」添加
                   </td></tr>
                 ) : (
                   <>
                     {subTickets.map(s => (
-                      <tr key={s.id} onClick={() => onBack && onReload && (
-                        // 跳到这张分票的详情页：先关当前详情，再设 selectedId
-                        // 由于 OrderDetail 没有直接 setSelected 的能力，简单处理：alert + 用户从列表点
-                        null
-                      )}>
-                        <td><span className="lk" onClick={async () => {
-                          // 触发上层路由切换：通过 onReload 让父组件刷数据，再让用户回列表点开
-                          // 简化：用 hash 直接重定向，但当前没设计 detail URL
-                          // 暂时方案：在新 tab 打开列表页带筛选条件
+                      <tr key={s.id}>
+                        <td><span className="lk" onClick={() => {
                           window.open(`#/sea_export?search=${encodeURIComponent(s.order_no)}`, "_blank");
                         }}>{s.order_no}</span></td>
                         <td>{s.hbl_no || "—"}</td>
                         <td>{s.customer || "—"}</td>
-                        <td style={{ whiteSpace: "pre-wrap", maxWidth: 200 }}>{s.description || "—"}</td>
+                        <td style={{ whiteSpace: "pre-wrap" }}>{s.description || "—"}</td>
                         <td style={{ textAlign: "right" }}>{s.qty_packages || "—"}</td>
                         <td style={{ textAlign: "right" }}>{s.weight || "—"}</td>
                         <td style={{ textAlign: "right" }}>{s.volume || "—"}</td>

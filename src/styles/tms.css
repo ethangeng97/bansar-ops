@@ -1250,9 +1250,10 @@
   color: #bbb;
 }
 
-/* ─── 列宽拖动 handle ─────────────────────────────── */
+/* ─── 列宽拖动 handle（全局：列表 + 小票表格通用） ─── */
 .tms-list thead th { position: relative; }
-.tms-list .col-resize {
+.tms-tx-table thead th { position: relative; }
+.col-resize {
   position: absolute;
   top: 0;
   right: -3px;        /* 跨在右边界上，便于点击 */
@@ -1262,11 +1263,11 @@
   z-index: 10;
   user-select: none;
 }
-.tms-list .col-resize:hover {
+.col-resize:hover {
   background: var(--tms-primary);
   opacity: 0.6;
 }
-.tms-list .col-resize:active {
+.col-resize:active {
   background: var(--tms-primary);
   opacity: 1;
 }

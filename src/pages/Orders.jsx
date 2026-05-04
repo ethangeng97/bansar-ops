@@ -216,7 +216,7 @@ export function OrdersPage({ user, onBack }) {
     { k: "ves",   w: 150, label: "船名", link: true },
     { k: "voy",   w: 60,  label: "航次" },
     { k: "etd",   w: 100, label: "预计开航时间" },
-    { k: "sup",   w: 180, label: "委托人" },
+    { k: "sup",   w: 180, label: "委托单位" },
     { k: "agt",   w: 140, label: "海外代理" },
     { k: "pol",   w: 110, label: "起运港名称" },
     { k: "pod",   w: 110, label: "卸货港名称" },
@@ -312,7 +312,7 @@ export function OrdersPage({ user, onBack }) {
             </Fi>
             <Fi label="订舱代理" refLabel><input disabled /></Fi>
             <Fi label="船东参考编号"><input disabled /></Fi>
-            <Fi label="委托人" refLabel>
+            <Fi label="委托单位" refLabel>
               <ComboBox value={filters.customer || ""} onChange={v => sf("customer", v)} options={refs.customer} />
             </Fi>
 
@@ -479,6 +479,50 @@ export function OrdersPage({ user, onBack }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// OrderNoField - 作业号字段
+// 主拼号主体（如 BSOEC260100001）永远 readonly
+// 仅自拼分票场景下，"-N" 后缀可编辑
+// 保存校验由 OrderDetail save() 调用 validateOrderNo() 处理
+// ═══════════════════════════════════════════════════════════════
+function OrderNoField({ order, editing, onChange }) {
+  const orderNo = order.order_no || "";
+  const isConsole = order.shipment_type === "Console";
+  const dashIdx = orderNo.lastIndexOf("-");
+  const hasSubSuffix = dashIdx > 0 && /^\d+$/.test(orderNo.substring(dashIdx + 1));
+
+  // 非自拼柜 / 自拼主拼：完全 readonly
+  if (!isConsole || !hasSubSuffix) {
+    return <input value={orderNo} disabled className="readonly" />;
+  }
+
+  // 自拼分票：拆成主体 + 尾数
+  const main = orderNo.substring(0, dashIdx);  // BSOEC260100001
+  const tail = orderNo.substring(dashIdx + 1); // 1 / 23 / 99...
+
+  if (!editing) {
+    return <input value={orderNo} disabled className="readonly" />;
+  }
+
+  // 编辑模式：主体 readonly，尾数可改
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 0, width: "100%" }}>
+      <input value={main + "-"} disabled className="readonly" style={{ flex: 1, minWidth: 0, borderRight: "none", borderTopRightRadius: 0, borderBottomRightRadius: 0 }} />
+      <input
+        value={tail}
+        onChange={e => {
+          const v = e.target.value.replace(/\D/g, "");  // 仅数字
+          onChange("order_no", v ? main + "-" + v : main);
+        }}
+        style={{ width: 60, borderLeft: "none", borderTopLeftRadius: 0, borderBottomLeftRadius: 0, textAlign: "center", fontWeight: "bold", color: "#1990FF" }}
+        placeholder="N"
+        title="分票尾数（仅数字，同主拼下唯一）"
+      />
+    </div>
+  );
+}
+
+
 function OrderDetail({ order, role, user, onBack, onReload }) {
   const [editing, setEditing] = useState(false);
   const [ed, setEd] = useState({});
@@ -517,6 +561,37 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
         changes[k] = ed[k] === "" ? null : ed[k];
       }
     }
+
+    // 校验：order_no 改动后，同主拼下尾数不能重复
+    if (changes.order_no && changes.order_no !== order.order_no) {
+      const newNo = changes.order_no;
+      // 检查全库唯一性
+      const { data: dup } = await supabase.from("shipments")
+        .select("id")
+        .eq("order_no", newNo)
+        .neq("id", order.id)
+        .limit(1);
+      if (dup && dup.length > 0) {
+        // 自动建议下一个空位
+        const dashIdx = newNo.lastIndexOf("-");
+        if (dashIdx > 0) {
+          const main = newNo.substring(0, dashIdx);
+          const { data: siblings } = await supabase.from("shipments")
+            .select("order_no")
+            .like("order_no", main + "-%");
+          const usedNumbers = new Set((siblings || [])
+            .map(s => parseInt(s.order_no.substring(main.length + 1)))
+            .filter(n => !Number.isNaN(n)));
+          let next = 1;
+          while (usedNumbers.has(next)) next++;
+          alert(`尾数 ${newNo.substring(dashIdx + 1)} 已被使用。建议使用 ${next}（即 ${main}-${next}）`);
+          return;
+        }
+        alert(`作业号 ${newNo} 已被使用，请改其他号`);
+        return;
+      }
+    }
+
     if (Object.keys(changes).length) {
       const { error } = await supabase.from("shipments").update(changes).eq("id", order.id);
       if (error) { alert(error.message); return; }
@@ -549,6 +624,58 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const titlePrefix = order.shipment_type === "LCL" ? "拼箱" : order.shipment_type === "Console" ? "自拼" : "整箱";
   const isLocked = order.lifecycle === "已完结" || order.lifecycle === "已关闭";
 
+  // 主拼判定：自拼柜 且 order_no 不含 -N 后缀
+  const isMaster = order.shipment_type === "Console"
+    && order.order_no
+    && !/-\d+$/.test(order.order_no);
+
+  // 创建分票
+  const createSubTicket = async () => {
+    if (!isMaster) return;
+    // 找已用的尾数
+    const { data: siblings } = await supabase.from("shipments")
+      .select("order_no")
+      .like("order_no", order.order_no + "-%");
+    const usedNumbers = new Set((siblings || [])
+      .map(s => parseInt(s.order_no.substring(order.order_no.length + 1)))
+      .filter(n => !Number.isNaN(n)));
+
+    // 找下一个空位
+    let suggested = 1;
+    while (usedNumbers.has(suggested)) suggested++;
+
+    const input = prompt(`新建分票尾数（数字，留空使用 ${suggested}）：`, suggested);
+    if (input === null) return;  // 取消
+    const tail = String(input).trim() || String(suggested);
+    if (!/^\d+$/.test(tail)) { alert("尾数必须是数字"); return; }
+    if (usedNumbers.has(parseInt(tail))) {
+      alert(`尾数 ${tail} 已被使用，请改其他号`);
+      return;
+    }
+
+    const newOrderNo = order.order_no + "-" + tail;
+    // 复制主拼的关键字段创建分票
+    const newRow = {
+      order_no: newOrderNo,
+      shipment_type: "Console",
+      booking_no: order.booking_no,
+      vessel: order.vessel,
+      voyage: order.voyage,
+      pol: order.pol,
+      pod: order.pod,
+      destination: order.destination,
+      etd: order.etd,
+      carrier: order.carrier,
+      overseas_agent: order.overseas_agent,
+      solicit_type: order.solicit_type,
+      lifecycle: '处理中',
+    };
+    const { error } = await supabase.from("shipments").insert(newRow);
+    if (error) { alert("新建失败：" + error.message); return; }
+    alert(`分票 ${newOrderNo} 已创建。请在列表中找到并完善其他信息。`);
+    onReload();
+  };
+
   const cargoFromContainerItems = cargoItems;
 
   return (
@@ -561,6 +688,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
         <Tbl/>
         <Mi disabled={isLocked}>新建</Mi>
         <Mi disabled={isLocked}>复制</Mi>
+        {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
         <Mi disabled={isLocked}>删除</Mi>
         <Tbl/>
         <Mi disabled={isLocked}>舱单确认</Mi>
@@ -640,8 +768,8 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
             <div className="tms-detail-section">基本信息</div>
             <div className="tms-detail-panel">
               <div className="tms-detail-grid">
-                <Df label="作业号"><input value={v("order_no")} onChange={e => ch("order_no", e.target.value)} disabled={!editing} className="readonly" /></Df>
-                <Df label="委托人" required>
+                <Df label="作业号"><OrderNoField order={order} editing={editing} onChange={ch} /></Df>
+                <Df label="委托单位" required>
                   {editing
                     ? <ComboBox value={v("customer")} onChange={val => ch("customer", val)} options={refData.customers} />
                     : <input value={v("customer")} disabled className="notnull" />}

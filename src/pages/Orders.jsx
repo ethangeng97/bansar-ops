@@ -485,7 +485,7 @@ export function OrdersPage({ user, onBack }) {
               const evenOdd = i % 2 === 0 ? "even" : "odd";
               return (
                 <tr key={o.id}
-                  className={(checked ? "current " : "") + evenOdd}
+                  className={(checked ? "current " : "") + evenOdd + (child ? " tr-sub" : "")}
                   onClick={() => setSelectedId(o.id)}>
                   <td className="center" onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={checked} onChange={() => togChk(o.id)} />
@@ -587,6 +587,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const [subtab, setSubtab] = useState("托单信息");
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
   const [cargoItems, setCargoItems] = useState([]);
+  const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
 
   useEffect(() => {
     Promise.all([
@@ -606,6 +607,25 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
           ? supabase.from("container_items").select("*").eq("customer_po", String(order.customer_po))
           : supabase.from("container_items").select("*").eq("po", order.po);
       q.then(({ data }) => setCargoItems(data || []));
+    }
+
+    // 主拼：加载所有分票
+    const isMasterCheck = order.shipment_type === "Console"
+      && order.order_no
+      && !/-\d+$/.test(order.order_no);
+    if (isMasterCheck && order.booking_no) {
+      supabase.from("shipments")
+        .select("*")
+        .eq("booking_no", order.booking_no)
+        .like("order_no", order.order_no + "-%")
+        .then(({ data }) => {
+          const sorted = (data || []).sort((a, b) => {
+            const na = parseInt((a.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            const nb = parseInt((b.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            return na - nb;
+          });
+          setSubTickets(sorted);
+        });
     }
   }, [order.id]);
 
@@ -729,9 +749,48 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
     };
     const { error } = await supabase.from("shipments").insert(newRow);
     if (error) { alert("新建失败：" + error.message); return; }
-    alert(`分票 ${newOrderNo} 已创建。请在列表中找到并完善其他信息。`);
-    onReload();
+    // 重新加载分票列表
+    const { data: refreshed } = await supabase.from("shipments")
+      .select("*")
+      .eq("booking_no", order.booking_no)
+      .like("order_no", order.order_no + "-%");
+    if (refreshed) {
+      setSubTickets(refreshed.sort((a, b) => {
+        const na = parseInt((a.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+        const nb = parseInt((b.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+        return na - nb;
+      }));
+    }
+    alert(`分票 ${newOrderNo} 已创建。`);
   };
+
+  // 删除分票
+  const deleteSubTicket = async (subTicket) => {
+    if (!confirm(`确定删除分票 ${subTicket.order_no} ？此操作不可恢复。`)) return;
+    const { error } = await supabase.from("shipments").delete().eq("id", subTicket.id);
+    if (error) { alert("删除失败：" + error.message); return; }
+    setSubTickets(prev => prev.filter(s => s.id !== subTicket.id));
+  };
+
+  // 主拼汇总数据（仅自拼主拼有意义）
+  const masterSummary = useMemo(() => {
+    if (!isMaster || subTickets.length === 0) return null;
+    let totalPkg = 0, totalWt = 0, totalVol = 0;
+    const descriptions = [];
+    subTickets.forEach(s => {
+      totalPkg += parseFloat(s.qty_packages) || 0;
+      totalWt  += parseFloat(s.weight) || 0;
+      totalVol += parseFloat(s.volume) || 0;
+      if (s.description && !descriptions.includes(s.description)) descriptions.push(s.description);
+    });
+    return {
+      n: subTickets.length,
+      qty_packages: totalPkg || null,
+      weight: totalWt ? totalWt.toFixed(3) : null,
+      volume: totalVol ? totalVol.toFixed(3) : null,
+      description: descriptions.join("\n") || null,
+    };
+  }, [isMaster, subTickets]);
 
   const cargoFromContainerItems = cargoItems;
 
@@ -777,7 +836,10 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
 
       {/* 大 tab：作业 / 装箱 / 费用 / 凭证 / 代理对账单 / 附件 / SOP 进度 */}
       <div className="tms-bigtabs">
-        {["作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"].map(t => (
+        {(isMaster
+          ? ["作业", "小票", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+          : ["作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+        ).map(t => (
           <div key={t} className={"bt " + (tab === t ? "act" : "")} onClick={() => setTab(t)}>
             {t === "SOP 进度" && (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -826,8 +888,10 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
             <div className="tms-detail-panel">
               <div className="tms-detail-grid">
                 <Df label="作业号"><OrderNoField order={order} editing={editing} onChange={ch} /></Df>
-                <Df label="委托单位" required>
-                  {editing
+                <Df label="委托单位" required={!isMaster}>
+                  {isMaster ? (
+                    <input value={order.customer || "（多客户拼柜，详见小票）"} disabled className="placeholder-italic" />
+                  ) : editing
                     ? <ComboBox value={v("customer")} onChange={val => ch("customer", val)} options={refData.customers} />
                     : <input value={v("customer")} disabled className="notnull" />}
                 </Df>
@@ -923,6 +987,23 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
 
                 <Df label="操作备注" span={3}><textarea value={v("operator_note")} onChange={e => ch("operator_note", e.target.value)} disabled={!editing} /></Df>
                 <Df label="内部备注" span={3}><textarea value={v("internal_note")} onChange={e => ch("internal_note", e.target.value)} disabled={!editing} /></Df>
+
+                {isMaster && masterSummary && (
+                  <>
+                    <Df label="合计件数" span={1}>
+                      <input value={masterSummary.qty_packages || ""} disabled className="calc" title="所有分票汇总" />
+                    </Df>
+                    <Df label="合计毛重" span={1}>
+                      <input value={masterSummary.weight ? `${masterSummary.weight} KG` : ""} disabled className="calc" title="所有分票汇总" />
+                    </Df>
+                    <Df label="合计体积" span={1}>
+                      <input value={masterSummary.volume ? `${masterSummary.volume} CBM` : ""} disabled className="calc" title="所有分票汇总" />
+                    </Df>
+                    <Df label="合计品名" span={3}>
+                      <textarea value={masterSummary.description || ""} disabled className="calc" style={{ minHeight: 40 }} title="所有分票汇总（多品名换行）" />
+                    </Df>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1109,6 +1190,96 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
               )}
             </div>
           </>
+        )}
+
+        {tab === "小票" && isMaster && (
+          <div>
+            {/* 顶部汇总条 */}
+            <div className="tms-tx-summary">
+              <span><span className="lbl">总票数:</span><span className="val">{masterSummary?.n || 0}</span></span>
+              <span><span className="lbl">合计件数:</span><span className="val">{masterSummary?.qty_packages || "—"}</span></span>
+              <span><span className="lbl">合计毛重:</span><span className="val">{masterSummary?.weight ? `${masterSummary.weight} KG` : "—"}</span></span>
+              <span><span className="lbl">合计体积:</span><span className="val">{masterSummary?.volume ? `${masterSummary.volume} CBM` : "—"}</span></span>
+              {masterSummary?.description && (
+                <span style={{ flexBasis: "100%", marginTop: 4, paddingTop: 6, borderTop: "1px dashed #c8dfff" }}>
+                  <span className="lbl">品名:</span>
+                  <span className="val" style={{ fontSize: 12, fontWeight: "normal", whiteSpace: "pre-line" }}>{masterSummary.description}</span>
+                </span>
+              )}
+            </div>
+
+            {/* 工具栏 */}
+            <div className="tms-tx-toolbar">
+              <button className="primary" disabled={isLocked} onClick={createSubTicket}>+ 新增分票</button>
+              <button disabled title="点击下方表格中分票号即可编辑">编辑分票</button>
+              <button disabled title="开发中">加入分票</button>
+              <button disabled title="开发中">移除分票</button>
+            </div>
+
+            {/* 分票表格 */}
+            <table className="tms-tx-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 130 }}>业务编号</th>
+                  <th style={{ width: 130 }}>HBL</th>
+                  <th style={{ width: 160 }}>委托单位</th>
+                  <th>品名</th>
+                  <th style={{ width: 80, textAlign: "right" }}>件数</th>
+                  <th style={{ width: 100, textAlign: "right" }}>毛重 (KG)</th>
+                  <th style={{ width: 90, textAlign: "right" }}>体积 (CBM)</th>
+                  <th style={{ width: 60, textAlign: "center" }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subTickets.length === 0 ? (
+                  <tr><td colSpan={8} style={{ padding: 30, textAlign: "center", color: "#888" }}>
+                    暂无分票，请点击「+ 新增分票」添加
+                  </td></tr>
+                ) : (
+                  <>
+                    {subTickets.map(s => (
+                      <tr key={s.id} onClick={() => onBack && onReload && (
+                        // 跳到这张分票的详情页：先关当前详情，再设 selectedId
+                        // 由于 OrderDetail 没有直接 setSelected 的能力，简单处理：alert + 用户从列表点
+                        null
+                      )}>
+                        <td><span className="lk" onClick={async () => {
+                          // 触发上层路由切换：通过 onReload 让父组件刷数据，再让用户回列表点开
+                          // 简化：用 hash 直接重定向，但当前没设计 detail URL
+                          // 暂时方案：在新 tab 打开列表页带筛选条件
+                          window.open(`#/sea_export?search=${encodeURIComponent(s.order_no)}`, "_blank");
+                        }}>{s.order_no}</span></td>
+                        <td>{s.hbl_no || "—"}</td>
+                        <td>{s.customer || "—"}</td>
+                        <td style={{ whiteSpace: "pre-wrap", maxWidth: 200 }}>{s.description || "—"}</td>
+                        <td style={{ textAlign: "right" }}>{s.qty_packages || "—"}</td>
+                        <td style={{ textAlign: "right" }}>{s.weight || "—"}</td>
+                        <td style={{ textAlign: "right" }}>{s.volume || "—"}</td>
+                        <td style={{ textAlign: "center" }}>
+                          <span className="delete-btn" onClick={(e) => {
+                            e.stopPropagation();
+                            deleteSubTicket(s);
+                          }}>删除</span>
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="sum-row">
+                      <td colSpan={3} style={{ textAlign: "right" }}>合计:</td>
+                      <td>{(() => {
+                        const descs = subTickets.map(s => s.description).filter(Boolean);
+                        const uniq = [...new Set(descs)];
+                        return uniq.length > 0 ? `${uniq.length} 种品名` : "—";
+                      })()}</td>
+                      <td style={{ textAlign: "right" }}>{masterSummary?.qty_packages || "—"}</td>
+                      <td style={{ textAlign: "right" }}>{masterSummary?.weight || "—"}</td>
+                      <td style={{ textAlign: "right" }}>{masterSummary?.volume || "—"}</td>
+                      <td></td>
+                    </tr>
+                  </>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {tab === "装箱" && (

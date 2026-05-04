@@ -80,7 +80,10 @@ export function OrdersPage({ user, onBack }) {
   const role = user.profile?.role || "operator";
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(() => {
+    const m = window.location.hash.match(/[?&]id=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  });
   const [showNew, setShowNew] = useState(false);
   const [newType, setNewType] = useState("FCL");
   const [checkedIds, setCheckedIds] = useState(new Set());
@@ -123,6 +126,11 @@ export function OrdersPage({ user, onBack }) {
       window.history.replaceState(null, "", cleaned || "#/sea_export");
     }
   }, []);
+
+  // 列表页 / 详情页 title 由 OrderDetail 内部维护；列表态用通用名
+  useEffect(() => {
+    if (!selectedId) document.title = "海运出口 - Bansar OPS";
+  }, [selectedId]);
 
   // 列宽 state（从 localStorage 读，没有就用默认）
   const [colWidths, setColWidths] = useState(() => {
@@ -305,12 +313,34 @@ export function OrdersPage({ user, onBack }) {
   const selOrder = shipments.find(o => o.id === selectedId);
 
   if (loading) return <Spinner />;
+
+  // 从外部 URL ?id=xxx 进来但找不到该订单 → 显示提示
+  if (selectedId && !selOrder) return (
+    <div style={{ padding: 50, textAlign: "center", color: "#999" }}>
+      <div style={{ fontSize: 16, marginBottom: 12 }}>订单未找到</div>
+      <div style={{ fontSize: 12, marginBottom: 20 }}>该订单可能已被删除，或您没有访问权限</div>
+      <button onClick={() => { setSelectedId(null); window.history.replaceState(null, "", "#/sea_export"); }}
+        style={{ padding: "6px 16px", background: "#1990FF", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer" }}>
+        返回列表
+      </button>
+    </div>
+  );
+
   if (selOrder) return (
     <OrderDetail
       order={selOrder}
       role={role}
       user={user}
-      onBack={() => { setSelectedId(null); load(); }}
+      onBack={() => {
+        // 如果是新标签打开（URL 有 ?id=），关闭标签；否则回列表
+        const fromUrlId = window.location.hash.match(/[?&]id=/);
+        if (fromUrlId && window.history.length <= 1) {
+          window.close();  // 浏览器不一定允许，失败时回列表
+        }
+        setSelectedId(null);
+        window.history.replaceState(null, "", "#/sea_export");
+        load();
+      }}
       onReload={load}
     />
   );
@@ -332,9 +362,9 @@ export function OrdersPage({ user, onBack }) {
         <Mi onClick={() => setShowFilter(p => !p)}>搜索</Mi>
         <Tbl/>
         <MiDropdown options={[
-          { label: "整箱", onClick: () => { setNewType("FCL"); setShowNew(true); } },
-          { label: "自拼", onClick: () => { setNewType("Console"); setShowNew(true); } },
-          { label: "拼箱", onClick: () => { setNewType("LCL"); setShowNew(true); } },
+          { label: "整箱", onClick: () => window.open("#/sea_export?action=new&type=FCL", "_blank") },
+          { label: "自拼", onClick: () => window.open("#/sea_export?action=new&type=Console", "_blank") },
+          { label: "拼箱", onClick: () => window.open("#/sea_export?action=new&type=LCL", "_blank") },
         ]}>新建作业</MiDropdown>
         <Mi arrow>显示预览</Mi>
         <Mi>统计模板</Mi>
@@ -514,9 +544,8 @@ export function OrdersPage({ user, onBack }) {
               const evenOdd = i % 2 === 0 ? "even" : "odd";
               return (
                 <tr key={o.id}
-                  className={(checked ? "current " : "") + evenOdd + (child ? " tr-sub" : "")}
-                  onClick={() => setSelectedId(o.id)}>
-                  <td className="center" onClick={e => e.stopPropagation()}>
+                  className={(checked ? "current " : "") + evenOdd + (child ? " tr-sub" : "")}>
+                  <td className="center">
                     <input type="checkbox" checked={checked} onChange={() => togChk(o.id)} />
                   </td>
                   <td className="center">{
@@ -526,11 +555,11 @@ export function OrdersPage({ user, onBack }) {
                   }</td>
                   <td>
                     {child && <span className="ind">└</span>}
-                    <span className="lk">{o.order_no || ""}</span>
+                    <a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.order_no || ""}</a>
                   </td>
                   <td>{o.po || o.customer_po || ""}</td>
-                  <td><span className="lk">{o.booking_no || ""}</span></td>
-                  <td><span className="lk">{o.vessel || ""}</span></td>
+                  <td><a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.booking_no || ""}</a></td>
+                  <td><a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.vessel || ""}</a></td>
                   <td>{o.voyage || ""}</td>
                   <td>{o.etd || ""}</td>
                   <td>{o.customer || ""}</td>
@@ -539,7 +568,7 @@ export function OrdersPage({ user, onBack }) {
                   <td>{cleanPort(o.pod)}</td>
                   <td>{o.destination || cleanPort(o.pod)}</td>
                   <td>{o.qty_container || ""}</td>
-                  <td><span className="lk">{o.hbl_no || ""}</span></td>
+                  <td><a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.hbl_no || ""}</a></td>
                 </tr>
               );
             })}
@@ -628,6 +657,13 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
   const [cargoItems, setCargoItems] = useState([]);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
+
+  // 设置浏览器标签页标题（方便多标签场景识别）
+  useEffect(() => {
+    const t = order?.order_no || order?.booking_no || "订单";
+    document.title = `${t} - 海运出口`;
+    return () => { document.title = "Bansar OPS"; };
+  }, [order?.order_no, order?.booking_no]);
 
   // 小票表格列宽 state（独立于订单列表）
   const [txColWidths, setTxColWidths] = useState(() => {
@@ -1327,9 +1363,7 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                   <>
                     {subTickets.map(s => (
                       <tr key={s.id}>
-                        <td><span className="lk" onClick={() => {
-                          window.open(`#/sea_export?search=${encodeURIComponent(s.order_no)}`, "_blank");
-                        }}>{s.order_no}</span></td>
+                        <td><a href={`#/sea_export?id=${s.id}`} target="_blank" rel="noopener" className="lk">{s.order_no}</a></td>
                         <td>{s.hbl_no || "—"}</td>
                         <td>{s.customer || "—"}</td>
                         <td style={{ whiteSpace: "pre-wrap" }}>{s.description || "—"}</td>

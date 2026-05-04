@@ -43,6 +43,26 @@ const C = {
   hover: "#ecf3eb",
 };
 
+// 列定义（OrdersPage 共用，组件外避免每次渲染重建）
+const COLS_DEF = [
+  { k: "chk",   w: 30,  label: "" },
+  { k: "type",  w: 60,  label: "出运类型", center: true },
+  { k: "ord",   w: 130, label: "作业号", link: true },
+  { k: "po",    w: 140, label: "客户编号" },
+  { k: "mbl",   w: 130, label: "MB/L No.", link: true },
+  { k: "ves",   w: 150, label: "船名", link: true },
+  { k: "voy",   w: 60,  label: "航次" },
+  { k: "etd",   w: 100, label: "预计开航时间" },
+  { k: "sup",   w: 180, label: "委托单位" },
+  { k: "agt",   w: 140, label: "海外代理" },
+  { k: "pol",   w: 110, label: "起运港名称" },
+  { k: "pod",   w: 110, label: "卸货港名称" },
+  { k: "dest",  w: 110, label: "目的地名称" },
+  { k: "qty",   w: 80,  label: "箱型" },
+  { k: "hbl",   w: 130, label: "HB/L No.", link: true },
+];
+const COL_WIDTHS_KEY = "bansar_orders_col_widths_v1";
+
 export function OrdersPage({ user, onBack }) {
   const role = user.profile?.role || "operator";
   const [shipments, setShipments] = useState([]);
@@ -74,6 +94,53 @@ export function OrdersPage({ user, onBack }) {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
   const sopNode = sopFilter ? SOP_NODES.find(n => n.code === sopFilter) : null;
+
+  // 列宽 state（从 localStorage 读，没有就用默认）
+  const [colWidths, setColWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY) || "{}");
+      return Object.fromEntries(COLS_DEF.map(c => [c.k, saved[c.k] || c.w]));
+    } catch {
+      return Object.fromEntries(COLS_DEF.map(c => [c.k, c.w]));
+    }
+  });
+
+  // 持久化列宽
+  const persistColWidths = (widths) => {
+    setColWidths(widths);
+    try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+  };
+
+  // 拖动调整列宽
+  const startColResize = (colKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidths[colKey];
+    const onMove = (ev) => {
+      const newW = Math.max(40, startW + (ev.clientX - startX));
+      setColWidths(p => ({ ...p, [colKey]: newW }));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setColWidths(latest => {
+        try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(latest)); } catch {}
+        return latest;
+      });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  // 双击列分隔线 = 重置该列
+  const resetColWidth = (colKey) => {
+    const def = COLS_DEF.find(c => c.k === colKey);
+    if (def) {
+      const next = { ...colWidths, [colKey]: def.w };
+      persistColWidths(next);
+    }
+  };
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("shipments").select("*").order("created_at", { ascending: false });
@@ -218,74 +285,6 @@ export function OrdersPage({ user, onBack }) {
       onReload={load}
     />
   );
-
-  // 列定义（默认宽度）
-  const COLS_DEF = [
-    { k: "chk",   w: 30,  label: "" },
-    { k: "type",  w: 60,  label: "出运类型", center: true },
-    { k: "ord",   w: 130, label: "作业号", link: true },
-    { k: "po",    w: 140, label: "客户编号" },
-    { k: "mbl",   w: 130, label: "MB/L No.", link: true },
-    { k: "ves",   w: 150, label: "船名", link: true },
-    { k: "voy",   w: 60,  label: "航次" },
-    { k: "etd",   w: 100, label: "预计开航时间" },
-    { k: "sup",   w: 180, label: "委托单位" },
-    { k: "agt",   w: 140, label: "海外代理" },
-    { k: "pol",   w: 110, label: "起运港名称" },
-    { k: "pod",   w: 110, label: "卸货港名称" },
-    { k: "dest",  w: 110, label: "目的地名称" },
-    { k: "qty",   w: 80,  label: "箱型" },
-    { k: "hbl",   w: 130, label: "HB/L No.", link: true },
-  ];
-  const COL_WIDTHS_KEY = "bansar_orders_col_widths_v1";
-
-  // 列宽 state（从 localStorage 读，没有就用默认）
-  const [colWidths, setColWidths] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY) || "{}");
-      return Object.fromEntries(COLS_DEF.map(c => [c.k, saved[c.k] || c.w]));
-    } catch {
-      return Object.fromEntries(COLS_DEF.map(c => [c.k, c.w]));
-    }
-  });
-
-  // 持久化列宽
-  const persistColWidths = (widths) => {
-    setColWidths(widths);
-    try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
-  };
-
-  // 拖动调整列宽：监听 mousedown
-  const startColResize = (colKey, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startW = colWidths[colKey];
-    const onMove = (ev) => {
-      const newW = Math.max(40, startW + (ev.clientX - startX));
-      setColWidths(p => ({ ...p, [colKey]: newW }));
-    };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      // 用最新值持久化
-      setColWidths(latest => {
-        try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(latest)); } catch {}
-        return latest;
-      });
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  };
-
-  // 双击列分隔线 = 重置该列宽度
-  const resetColWidth = (colKey) => {
-    const def = COLS_DEF.find(c => c.k === colKey);
-    if (def) {
-      const next = { ...colWidths, [colKey]: def.w };
-      persistColWidths(next);
-    }
-  };
 
   const cols = COLS_DEF.map(c => ({ ...c, w: colWidths[c.k] }));
   const totalW = cols.reduce((a, c) => a + c.w, 0);

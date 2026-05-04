@@ -544,7 +544,18 @@ export function OrdersPage({ user, onBack }) {
         onPageSizeChange={setPageSize}
       />
 
-      {showNew && <NewOrderModal defaultType={newType} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load(); }} />}
+      {showNew && <NewOrderModal
+        defaultType={newType}
+        onClose={() => setShowNew(false)}
+        onSaved={async (newId) => {
+          setShowNew(false);
+          await load();
+          // 如果传了 id（保存并继续编辑），打开详情页
+          if (newId) {
+            setSelectedId(newId);
+          }
+        }}
+      />}
     </div>
   );
 }
@@ -1374,77 +1385,270 @@ const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, w
 
 function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {
   const [form, setForm] = useState({
-    po: "", customer_po: "", supplier: "", customer: "", carrier: "", carrier_agent: "",
-    vessel: "", pol: "", pod: "", etd: "", incoterms: "FOB", booking_no: "", shipment_type: defaultType
+    shipment_type: defaultType,
+    customer: "", overseas_agent: "Keplin", solicit_type: "代理货",
+    carrier: "", vessel: "", voyage: "", booking_no: "",
+    etd: "", eta: "",
+    pol: "", pod: "", destination: "",
+    incoterms: "FOB",
+    po: "", customer_po: "",
+    qty_container: "", qty_packages: "", weight: "", volume: "",
+    description: "",
   });
-  const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
+  const [refData, setRefData] = useState({ customers: [], agents: [], carriers: [], ports: [] });
   const [saving, setSaving] = useState(false);
 
+  // 加载客商分类
   useEffect(() => {
-    Promise.all([
-      supabase.from("suppliers").select("name").order("name"),
-      supabase.from("customers").select("name").order("name"),
-      supabase.from("ports").select("name").order("name")
-    ]).then(([s, c, p]) => setRefData({
-      suppliers: (s.data || []).map(r => r.name),
-      customers: (c.data || []).map(r => r.name),
-      ports: (p.data || []).map(r => r.name),
-    }));
+    supabase.from("customers")
+      .select("name, partner_type, active")
+      .eq("active", true)
+      .then(({ data }) => {
+        const all = data || [];
+        setRefData({
+          customers: all.filter(c => c.partner_type === "客户").map(c => c.name),
+          agents:    all.filter(c => c.partner_type === "海外代理").map(c => c.name),
+          carriers:  all.filter(c => c.partner_type === "船东").map(c => c.name),
+          ports: [],  // 港口暂时手输
+        });
+      });
   }, []);
 
   const set = (k, val) => setForm(p => ({ ...p, [k]: val }));
 
-  const save = async () => {
-    if (!form.po && !form.customer_po) {
-      alert("PO or Customer PO required");
-      return;
+  const isConsole = form.shipment_type === "Console";
+
+  const buildPayload = () => {
+    const data = { ...form, lifecycle: "处理中", finance_status: "未创建" };
+    // 自拼主拼空壳：清空票级字段
+    if (isConsole) {
+      data.customer = null;
+      data.po = null;
+      data.customer_po = null;
+      data.qty_packages = null;
+      data.weight = null;
+      data.volume = null;
+      data.description = null;
     }
-    setSaving(true);
-    const data = { ...form };
-    Object.keys(data).forEach(k => { if (data[k] === "") data[k] = null; });
-    const { error } = await supabase.from("shipments").insert(data);
-    if (error) {
-      alert(error.message);
-      setSaving(false);
-      return;
-    }
-    setSaving(false);
-    onSaved();
+    // 数字字段：空字符串 → null（avoid Postgres invalid input syntax）
+    ["qty_packages", "weight", "volume"].forEach(k => {
+      if (data[k] === "" || data[k] === undefined) data[k] = null;
+    });
+    // 其他空字符串也转 null
+    Object.keys(data).forEach(k => {
+      if (data[k] === "") data[k] = null;
+    });
+    return data;
   };
 
+  const validate = () => {
+    if (!form.shipment_type) { alert("请选择出运类型"); return false; }
+    if (!isConsole && !form.customer?.trim()) { alert("委托单位 必填"); return false; }
+    if (!form.booking_no?.trim()) { alert("MB/L No. 必填"); return false; }
+    return true;
+  };
+
+  // 保存（关闭弹窗）
+  const saveAndClose = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    const { error } = await supabase.from("shipments").insert(buildPayload());
+    setSaving(false);
+    if (error) { alert("保存失败：" + error.message); return; }
+    onSaved();  // 父组件会刷新列表
+  };
+
+  // 保存并继续编辑（保存后自动跳转到详情页）
+  const saveAndEdit = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    const { data, error } = await supabase.from("shipments").insert(buildPayload()).select().single();
+    setSaving(false);
+    if (error) { alert("保存失败：" + error.message); return; }
+    if (data?.id) {
+      onSaved(data.id);  // 父组件会跳转到这条订单的详情
+    } else {
+      onSaved();
+    }
+  };
+
+  const typeLabel = isConsole ? "自拼主拼" : form.shipment_type === "LCL" ? "拼箱" : "整柜";
+
   return (
-    <div style={modalMask}>
-      <div style={modalBox}>
-        <TmsTitle title="新建作业 / 海运出口" compact />
-        <div style={{ padding: 10, background: C.panel }}>
-          <DetailGrid>
-            <DL req>PO#</DL><FI value={form.po} onChange={e => set("po", e.target.value)} />
-            <DL>Customer PO#</DL><FI value={form.customer_po} onChange={e => set("customer_po", e.target.value)} />
-            <DL>出运类型</DL><ComboBox value={form.shipment_type} onChange={v => set("shipment_type", v)} options={SHIPMENT_TYPES.map(t => t.key)} style={{ height: 22 }} />
-            <DL>Booking No</DL><FI value={form.booking_no} onChange={e => set("booking_no", e.target.value)} />
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 5, width: 720, maxHeight: "90vh", overflow: "auto",
+        boxShadow: "0 10px 40px rgba(0,0,0,0.2)",
+      }}>
+        {/* 蓝色标题条 */}
+        <div style={{
+          padding: "10px 16px", background: "linear-gradient(#1990FF,#0e7fe6)", color: "#fff",
+          fontSize: 14, fontWeight: "bold", display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span>新建作业 — {typeLabel}</span>
+          <span style={{ cursor: "pointer", fontSize: 18 }} onClick={onClose}>×</span>
+        </div>
 
-            <DL>委托方</DL><ComboBox value={form.supplier} onChange={v => set("supplier", v)} options={refData.suppliers} style={{ height: 22 }} />
-            <DL>客户</DL><ComboBox value={form.customer} onChange={v => set("customer", v)} options={refData.customers} style={{ height: 22 }} />
-            <DL>船公司</DL><FI value={form.carrier} onChange={e => set("carrier", e.target.value)} />
-            <DL>订舱代理</DL><FI value={form.carrier_agent} onChange={e => set("carrier_agent", e.target.value)} />
+        {isConsole && (
+          <div style={{ padding: "8px 16px", background: "#fff7e6", borderBottom: "1px solid #ffd28e", fontSize: 12, color: "#c66800" }}>
+            ⓘ 自拼柜模式：当前新建主拼（整柜数据壳），保存后请进入主拼详情页的「小票」tab 添加各票分票。
+          </div>
+        )}
 
-            <DL>船名</DL><FI value={form.vessel} onChange={e => set("vessel", e.target.value)} />
-            <DL>ETD</DL><FI type="date" value={form.etd} onChange={e => set("etd", e.target.value)} />
-            <DL>起运港</DL><ComboBox value={form.pol} onChange={v => set("pol", v)} options={refData.ports} style={{ height: 22 }} />
-            <DL>卸货港</DL><ComboBox value={form.pod} onChange={v => set("pod", v)} options={refData.ports} style={{ height: 22 }} />
+        <div style={{ padding: 16 }}>
+          {/* ── 作业基本信息 ── */}
+          <div style={sectionTitle}>作业基本信息</div>
+          <div className="tms-detail-panel" style={{ margin: "4px 0 12px" }}>
+            <div className="tms-detail-grid" style={{ gap: "8px 12px" }}>
+              <div className="tms-df"><label>出运类型</label><div className="tms-df-blk">
+                <select value={form.shipment_type} onChange={e => set("shipment_type", e.target.value)}>
+                  <option value="FCL">整柜</option>
+                  <option value="LCL">拼箱</option>
+                  <option value="Console">自拼柜（主拼）</option>
+                </select>
+              </div></div>
+              <div className="tms-df"><label>作业号</label><div className="tms-df-blk">
+                <input value="（保存后自动生成）" disabled className="readonly" style={{ fontStyle: "italic", color: "#999" }} />
+              </div></div>
+              <div className="tms-df"><label>揽货类型</label><div className="tms-df-blk">
+                <select value={form.solicit_type} onChange={e => set("solicit_type", e.target.value)}>
+                  <option>代理货</option>
+                  <option>自揽货</option>
+                  <option>待订舱</option>
+                </select>
+              </div></div>
 
-            <DL>贸易条款</DL><ComboBox value={form.incoterms} onChange={v => set("incoterms", v)} options={TRADE_TERMS} style={{ height: 22 }} />
-          </DetailGrid>
+              {!isConsole && (
+                <div className="tms-df full2"><label className="req">委托单位</label><div className="tms-df-blk">
+                  <ComboBox value={form.customer} onChange={v => set("customer", v)} options={refData.customers} />
+                </div></div>
+              )}
+              {isConsole && <div className="tms-df full2" style={{ visibility: "hidden" }}></div>}
+              <div className="tms-df"><label>海外代理</label><div className="tms-df-blk">
+                <ComboBox value={form.overseas_agent} onChange={v => set("overseas_agent", v)} options={refData.agents} />
+              </div></div>
+            </div>
+          </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 10 }}>
-            <button onClick={onClose} style={grayBtn}>取消</button>
-            <button onClick={save} disabled={saving} style={primaryBtn}>{saving ? "保存中..." : "保存"}</button>
+          {/* ── 船期信息 ── */}
+          <div style={sectionTitle}>船期信息</div>
+          <div className="tms-detail-panel-light" style={{ margin: "4px 0 12px" }}>
+            <div className="tms-detail-grid" style={{ gap: "8px 12px" }}>
+              <div className="tms-df"><label>船东</label><div className="tms-df-blk">
+                <ComboBox value={form.carrier} onChange={v => set("carrier", v)} options={refData.carriers} />
+              </div></div>
+              <div className="tms-df full2"><label>船名</label><div className="tms-df-blk">
+                <input value={form.vessel} onChange={e => set("vessel", e.target.value)} placeholder="例如 EMMA MAERSK" />
+              </div></div>
+              <div className="tms-df"><label>航次</label><div className="tms-df-blk">
+                <input value={form.voyage} onChange={e => set("voyage", e.target.value)} placeholder="例如 619W" />
+              </div></div>
+              <div className="tms-df full2"><label className="req">MB/L No.</label><div className="tms-df-blk">
+                <input value={form.booking_no} onChange={e => set("booking_no", e.target.value)} className="notnull" />
+              </div></div>
+              <div className="tms-df"><label>预计开航</label><div className="tms-df-blk">
+                <input type="date" value={form.etd} onChange={e => set("etd", e.target.value)} />
+              </div></div>
+              <div className="tms-df"><label>预计到港</label><div className="tms-df-blk">
+                <input type="date" value={form.eta} onChange={e => set("eta", e.target.value)} />
+              </div></div>
+            </div>
+          </div>
+
+          {/* ── 港口信息 ── */}
+          <div style={sectionTitle}>港口信息</div>
+          <div className="tms-detail-panel" style={{ margin: "4px 0 12px" }}>
+            <div className="tms-detail-grid" style={{ gap: "8px 12px" }}>
+              <div className="tms-df"><label>起运港</label><div className="tms-df-blk">
+                <input value={form.pol} onChange={e => set("pol", e.target.value)} placeholder="例如 Ningbo" />
+              </div></div>
+              <div className="tms-df"><label>卸货港</label><div className="tms-df-blk">
+                <input value={form.pod} onChange={e => set("pod", e.target.value)} placeholder="例如 London Gateway" />
+              </div></div>
+              <div className="tms-df"><label>目的地</label><div className="tms-df-blk">
+                <input value={form.destination} onChange={e => set("destination", e.target.value)} />
+              </div></div>
+              <div className="tms-df"><label>贸易条款</label><div className="tms-df-blk">
+                <select value={form.incoterms} onChange={e => set("incoterms", e.target.value)}>
+                  <option value="">—</option>
+                  {TRADE_TERMS.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div></div>
+              <div className="tms-df full2"><label>箱型箱量</label><div className="tms-df-blk">
+                <input value={form.qty_container} onChange={e => set("qty_container", e.target.value)} placeholder="例如 1*40HQ 或 2*20GP,1*40HQ" />
+              </div></div>
+            </div>
+          </div>
+
+          {/* ── 货物概要（自拼主拼隐藏） ── */}
+          {!isConsole && (
+            <>
+              <div style={sectionTitle}>货物概要</div>
+              <div className="tms-detail-panel-light" style={{ margin: "4px 0 12px" }}>
+                <div className="tms-detail-grid" style={{ gap: "8px 12px" }}>
+                  <div className="tms-df"><label>客户编号(PO)</label><div className="tms-df-blk">
+                    <input value={form.po} onChange={e => set("po", e.target.value)} />
+                  </div></div>
+                  <div className="tms-df"><label>客户 PO#</label><div className="tms-df-blk">
+                    <input value={form.customer_po} onChange={e => set("customer_po", e.target.value)} />
+                  </div></div>
+                  <div className="tms-df"><label>件数</label><div className="tms-df-blk">
+                    <input type="number" value={form.qty_packages} onChange={e => set("qty_packages", e.target.value)} />
+                  </div></div>
+                  <div className="tms-df"><label>毛重 (KG)</label><div className="tms-df-blk">
+                    <input type="number" value={form.weight} onChange={e => set("weight", e.target.value)} step="0.01" />
+                  </div></div>
+                  <div className="tms-df"><label>体积 (CBM)</label><div className="tms-df-blk">
+                    <input type="number" value={form.volume} onChange={e => set("volume", e.target.value)} step="0.001" />
+                  </div></div>
+                  <div className="tms-df full3"><label>品名货描</label><div className="tms-df-blk">
+                    <textarea value={form.description} onChange={e => set("description", e.target.value)} rows={2} />
+                  </div></div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* 提示 */}
+          <div style={{ padding: 8, background: "#f0f7ff", border: "1px solid #c8dfff", borderRadius: 3, fontSize: 11, color: "#666", marginBottom: 12 }}>
+            <b>* 红色标记字段必填</b>。其他字段可在保存后进入详情页继续完善（如收发货人、HBL、装箱、SOP 等）。
+          </div>
+
+          {/* 保存按钮组 */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button onClick={onClose} disabled={saving} style={btnGray}>取消</button>
+            <button onClick={saveAndClose} disabled={saving} style={btnGhost}>
+              {saving ? "保存中..." : "保存并关闭"}
+            </button>
+            <button onClick={saveAndEdit} disabled={saving} style={btnPrimary}>
+              {saving ? "保存中..." : "保存并继续编辑 →"}
+            </button>
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+const sectionTitle = {
+  fontSize: 12, fontWeight: "bold", color: "#1990FF",
+  padding: "4px 0", borderBottom: "1px solid #c8dfff", marginBottom: 4,
+};
+const btnPrimary = {
+  padding: "6px 16px", background: "#1990FF", color: "#fff",
+  border: "none", borderRadius: 3, cursor: "pointer", fontSize: 13,
+};
+const btnGhost = {
+  padding: "6px 16px", background: "#fff", color: "#1990FF",
+  border: "1px solid #1990FF", borderRadius: 3, cursor: "pointer", fontSize: 13,
+};
+const btnGray = {
+  padding: "6px 16px", background: "#f5f5f5", color: "#666",
+  border: "1px solid #ddd", borderRadius: 3, cursor: "pointer", fontSize: 13,
+};
 
 /* Components */
 function Toolbar({ left, right }) {

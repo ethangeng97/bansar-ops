@@ -84,8 +84,6 @@ export function OrdersPage({ user, onBack }) {
     const m = window.location.hash.match(/[?&]id=([^&]+)/);
     return m ? decodeURIComponent(m[1]) : null;
   });
-  const [showNew, setShowNew] = useState(false);
-  const [newType, setNewType] = useState("FCL");
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [search, setSearch] = useState("");
   const [showFilter, setShowFilter] = useState(true);
@@ -111,21 +109,16 @@ export function OrdersPage({ user, onBack }) {
   }, []);
   const sopNode = sopFilter ? SOP_NODES.find(n => n.code === sopFilter) : null;
 
-  // 解析 ?action=new&type=FCL：打开页面后自动弹出新建对话框（来自 Portal "新建作业" 节点）
-  useEffect(() => {
+  // 创建模式状态（来自 ?action=new&type=xxx）
+  const [createMode, setCreateMode] = useState(() => {
     const m = window.location.hash.match(/[?&]action=([^&]+)/);
-    const tm = window.location.hash.match(/[?&]type=([^&]+)/);
     if (m && m[1] === "new") {
+      const tm = window.location.hash.match(/[?&]type=([^&]+)/);
       const t = tm ? decodeURIComponent(tm[1]) : "FCL";
-      if (["FCL", "LCL", "Console"].includes(t)) {
-        setNewType(t);
-      }
-      setShowNew(true);
-      // 清掉 URL 里的 action 参数，刷新不会重弹
-      const cleaned = window.location.hash.replace(/[?&](action|type)=[^&]+/g, "").replace(/\?$/, "");
-      window.history.replaceState(null, "", cleaned || "#/sea_export");
+      return ["FCL", "LCL", "Console"].includes(t) ? t : "FCL";
     }
-  }, []);
+    return null;
+  });
 
   // 列表页 / 详情页 title 由 OrderDetail 内部维护；列表态用通用名
   useEffect(() => {
@@ -325,6 +318,48 @@ export function OrdersPage({ user, onBack }) {
       </button>
     </div>
   );
+
+  // 创建模式：渲染空白订单详情页（OrderDetail 用 createMode prop）
+  if (createMode) {
+    const blankOrder = {
+      id: null,
+      shipment_type: createMode,
+      lifecycle: "处理中",
+      finance_status: "未创建",
+      qc_status: "未启动",
+      space_status: "未启动",
+      mbl_status: "未启动",
+      hbl_status: "未启动",
+      has_hbl: false,
+      overseas_agent: "Keplin",
+      solicit_type: "代理货",
+    };
+    return (
+      <OrderDetail
+        order={blankOrder}
+        role={role}
+        user={user}
+        createMode={createMode}
+        onBack={() => {
+          // 关闭新建标签，或回列表
+          if (window.history.length <= 1) {
+            window.close();
+          }
+          window.history.replaceState(null, "", "#/sea_export");
+          setCreateMode(null);
+          load();
+        }}
+        onCreated={(newId) => {
+          // 保存成功后跳转到该订单详情态（同标签内切换 mode）
+          setCreateMode(null);
+          setSelectedId(newId);
+          window.history.replaceState(null, "", `#/sea_export?id=${newId}`);
+          load();
+        }}
+        onReload={load}
+      />
+    );
+  }
 
   if (selOrder) return (
     <OrderDetail
@@ -588,19 +623,6 @@ export function OrdersPage({ user, onBack }) {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
       />
-
-      {showNew && <NewOrderModal
-        defaultType={newType}
-        onClose={() => setShowNew(false)}
-        onSaved={async (newId) => {
-          setShowNew(false);
-          await load();
-          // 如果传了 id（保存并继续编辑），打开详情页
-          if (newId) {
-            setSelectedId(newId);
-          }
-        }}
-      />}
     </div>
   );
 }
@@ -649,9 +671,11 @@ function OrderNoField({ order, editing, onChange }) {
 }
 
 
-function OrderDetail({ order, role, user, onBack, onReload }) {
-  const [editing, setEditing] = useState(false);
-  const [ed, setEd] = useState({});
+function OrderDetail({ order, role, user, onBack, onReload, createMode = null, onCreated = null }) {
+  const isCreating = !!createMode;
+  // 创建模式：editing 默认 true，初始 ed 已填默认值
+  const [editing, setEditing] = useState(isCreating);
+  const [ed, setEd] = useState(isCreating ? { ...order } : {});
   const [tab, setTab] = useState("作业");
   const [subtab, setSubtab] = useState("托单信息");
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
@@ -660,10 +684,15 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
 
   // 设置浏览器标签页标题（方便多标签场景识别）
   useEffect(() => {
-    const t = order?.order_no || order?.booking_no || "订单";
-    document.title = `${t} - 海运出口`;
+    if (isCreating) {
+      const t = createMode === "Console" ? "新建自拼" : createMode === "LCL" ? "新建拼箱" : "新建整柜";
+      document.title = `${t} - 海运出口`;
+    } else {
+      const t = order?.order_no || order?.booking_no || "订单";
+      document.title = `${t} - 海运出口`;
+    }
     return () => { document.title = "Bansar OPS"; };
-  }, [order?.order_no, order?.booking_no]);
+  }, [order?.order_no, order?.booking_no, isCreating, createMode]);
 
   // 小票表格列宽 state（独立于订单列表）
   const [txColWidths, setTxColWidths] = useState(() => {
@@ -750,6 +779,43 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const startEdit = () => { setEd({ ...order }); setEditing(true); };
   const cancel = () => setEditing(false);
   const save = async () => {
+    // ── 创建模式：INSERT 新订单 ──
+    if (isCreating) {
+      const isConsole = createMode === "Console";
+      // 校验
+      if (!isConsole && !ed.customer?.trim()) { alert("委托单位 必填"); return; }
+      if (!ed.booking_no?.trim()) { alert("MB/L No. 必填"); return; }
+
+      const payload = { ...ed };
+      // 自拼主拼空壳：清空票级字段
+      if (isConsole) {
+        payload.customer = null;
+        payload.po = null;
+        payload.customer_po = null;
+        payload.qty_packages = null;
+        payload.weight = null;
+        payload.volume = null;
+        payload.description = null;
+      }
+      // 数字字段空字符串 → null
+      ["qty_packages", "weight", "volume"].forEach(k => {
+        if (payload[k] === "" || payload[k] === undefined) payload[k] = null;
+      });
+      // 其他空字符串 → null
+      Object.keys(payload).forEach(k => {
+        if (payload[k] === "") payload[k] = null;
+        if (k === "id" && payload[k] === null) delete payload[k];  // 让 Postgres 自己生成 id
+      });
+
+      const { data, error } = await supabase.from("shipments").insert(payload).select().single();
+      if (error) { alert("创建失败：" + error.message); return; }
+      if (data?.id && onCreated) {
+        onCreated(data.id);
+      }
+      return;
+    }
+
+    // ── 编辑现有订单：UPDATE ──
     const changes = {};
     for (const k of Object.keys(ed)) {
       if (ed[k] !== order[k] && !["id", "created_at", "updated_at"].includes(k)) {
@@ -760,14 +826,12 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
     // 校验：order_no 改动后，同主拼下尾数不能重复
     if (changes.order_no && changes.order_no !== order.order_no) {
       const newNo = changes.order_no;
-      // 检查全库唯一性
       const { data: dup } = await supabase.from("shipments")
         .select("id")
         .eq("order_no", newNo)
         .neq("id", order.id)
         .limit(1);
       if (dup && dup.length > 0) {
-        // 自动建议下一个空位
         const dashIdx = newNo.lastIndexOf("-");
         if (dashIdx > 0) {
           const main = newNo.substring(0, dashIdx);
@@ -823,6 +887,9 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
   const isMaster = order.shipment_type === "Console"
     && order.order_no
     && !/-\d+$/.test(order.order_no);
+
+  // 创建模式下的主拼判定（订单还没保存，order_no 为空）
+  const isCreatingMaster = isCreating && createMode === "Console";
 
   // 创建分票
   const createSubTicket = async () => {
@@ -918,45 +985,72 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
 
       {/* 第一行工具栏：主操作（白底） */}
       <div className="tms-dtb1">
-        <Mi onClick={onBack}>返回</Mi>
+        <Mi onClick={onBack}>{isCreating ? "取消" : "返回"}</Mi>
         <Tbl/>
-        <Mi disabled={isLocked}>新建</Mi>
-        <Mi disabled={isLocked}>复制</Mi>
-        {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
-        <Mi disabled={isLocked}>删除</Mi>
-        <Tbl/>
-        <Mi disabled={isLocked}>舱单确认</Mi>
-        <Mi disabled={isLocked}>航线确认</Mi>
-        <Mi disabled={isLocked}>订舱确认</Mi>
-        <Mi disabled={isLocked}>放舱确认</Mi>
-        <Mi disabled={isLocked}>放箱确认</Mi>
-        <Mi disabled={isLocked}>开船确认</Mi>
-        <Mi disabled={isLocked}>单证锁定</Mi>
-        <Tbl/>
-        <Mi disabled={order.lifecycle === "已关闭"} onClick={() => {
-          if (confirm("确定关闭此作业？")) setLifecycle("已关闭");
-        }}>关闭作业</Mi>
-        <Mi disabled={order.lifecycle === "已完结" || order.lifecycle === "已关闭"} onClick={() => {
-          if (confirm("确定完结此作业？完结后只能查看，不能编辑。")) setLifecycle("已完结");
-        }}>完结作业</Mi>
-        {(order.lifecycle === "已完结" || order.lifecycle === "已关闭") && (
-          <Mi onClick={() => setLifecycle("处理中")}>恢复处理中</Mi>
+        {isCreating ? (
+          <>
+            <Mi onClick={save} className="primary">保存创建</Mi>
+            <Tbl/>
+            <Mi onClick={onBack}>关闭</Mi>
+          </>
+        ) : (
+          <>
+            <Mi disabled={isLocked}>新建</Mi>
+            <Mi disabled={isLocked}>复制</Mi>
+            {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
+            <Mi disabled={isLocked}>删除</Mi>
+            <Tbl/>
+            <Mi disabled={isLocked}>舱单确认</Mi>
+            <Mi disabled={isLocked}>航线确认</Mi>
+            <Mi disabled={isLocked}>订舱确认</Mi>
+            <Mi disabled={isLocked}>放舱确认</Mi>
+            <Mi disabled={isLocked}>放箱确认</Mi>
+            <Mi disabled={isLocked}>开船确认</Mi>
+            <Mi disabled={isLocked}>单证锁定</Mi>
+            <Tbl/>
+            <Mi disabled={order.lifecycle === "已关闭"} onClick={() => {
+              if (confirm("确定关闭此作业？")) setLifecycle("已关闭");
+            }}>关闭作业</Mi>
+            <Mi disabled={order.lifecycle === "已完结" || order.lifecycle === "已关闭"} onClick={() => {
+              if (confirm("确定完结此作业？完结后只能查看，不能编辑。")) setLifecycle("已完结");
+            }}>完结作业</Mi>
+            {(order.lifecycle === "已完结" || order.lifecycle === "已关闭") && (
+              <Mi onClick={() => setLifecycle("处理中")}>恢复处理中</Mi>
+            )}
+            <Tbl/>
+            <Mi>内部利润分析</Mi>
+            <Mi arrow>动作</Mi>
+            <Mi arrow>打印</Mi>
+            <Mi disabled>上行</Mi>
+            <Mi disabled>下行</Mi>
+            <Tbl/>
+            <Mi onClick={onBack}>关闭</Mi>
+          </>
         )}
-        <Tbl/>
-        <Mi>内部利润分析</Mi>
-        <Mi arrow>动作</Mi>
-        <Mi arrow>打印</Mi>
-        <Mi disabled>上行</Mi>
-        <Mi disabled>下行</Mi>
-        <Tbl/>
-        <Mi onClick={onBack}>关闭</Mi>
       </div>
+
+      {/* 创建模式提示 */}
+      {isCreating && (
+        <div style={{
+          padding: "8px 16px",
+          background: isCreatingMaster ? "#fff7e6" : "#e6f4ff",
+          borderBottom: `1px solid ${isCreatingMaster ? "#ffd28e" : "#c8dfff"}`,
+          color: isCreatingMaster ? "#c66800" : "#0e7fe6",
+          fontSize: 12,
+        }}>
+          ⓘ 当前正在新建{createMode === "Console" ? "自拼柜（主拼）" : createMode === "LCL" ? "拼箱" : "整柜"}作业。
+          填写必填字段（委托单位、MB/L No.）后点 <b>「保存创建」</b>，作业号会自动生成。
+          {isCreatingMaster && " 自拼主拼为整柜数据壳，不录入委托单位/件数等票级字段。"}
+        </div>
+      )}
 
       {/* 大 tab：作业 / 装箱 / 费用 / 凭证 / 代理对账单 / 附件 / SOP 进度 */}
       <div className="tms-bigtabs">
-        {(isMaster
-          ? ["作业", "小票", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
-          : ["作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+        {(isCreating
+          ? ["作业"]
+          : isMaster
+            ? ["作业", "小票", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+            : ["作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
         ).map(t => (
           <div key={t} className={"bt " + (tab === t ? "act" : "")} onClick={() => setTab(t)}>
             {t === "SOP 进度" && (
@@ -1006,9 +1100,9 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
             <div className="tms-detail-panel">
               <div className="tms-detail-grid">
                 <Df label="作业号"><OrderNoField order={order} editing={editing} onChange={ch} /></Df>
-                <Df label="委托单位" required={!isMaster}>
-                  {isMaster ? (
-                    <input value={order.customer || "（多客户拼柜，详见小票）"} disabled className="placeholder-italic" />
+                <Df label="委托单位" required={!isMaster && !isCreatingMaster}>
+                  {(isMaster || isCreatingMaster) ? (
+                    <input value={isCreatingMaster ? "（自拼主拼，无委托单位）" : (order.customer || "（多客户拼柜，详见小票）")} disabled className="placeholder-italic" />
                   ) : editing
                     ? <ComboBox value={v("customer")} onChange={val => ch("customer", val)} options={refData.customers} />
                     : <input value={v("customer")} disabled className="notnull" />}

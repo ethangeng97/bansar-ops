@@ -217,6 +217,7 @@ export function OrdersPage({ user, onBack }) {
     { k: "voy",   w: 60,  label: "航次" },
     { k: "etd",   w: 100, label: "预计开航时间" },
     { k: "sup",   w: 180, label: "委托人" },
+    { k: "agt",   w: 140, label: "海外代理" },
     { k: "pol",   w: 110, label: "起运港名称" },
     { k: "pod",   w: 110, label: "卸货港名称" },
     { k: "dest",  w: 110, label: "目的地名称" },
@@ -312,7 +313,7 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="订舱代理" refLabel><input disabled /></Fi>
             <Fi label="船东参考编号"><input disabled /></Fi>
             <Fi label="委托人" refLabel>
-              <ComboBox value={filters.supplier || ""} onChange={v => sf("supplier", v)} options={refs.supplier} />
+              <ComboBox value={filters.customer || ""} onChange={v => sf("customer", v)} options={refs.customer} />
             </Fi>
 
             <Fi label="委托部门"><input disabled /></Fi>
@@ -446,7 +447,8 @@ export function OrdersPage({ user, onBack }) {
                   <td><span className="lk">{o.vessel || ""}</span></td>
                   <td>{o.voyage || ""}</td>
                   <td>{o.etd || ""}</td>
-                  <td>{o.supplier || ""}</td>
+                  <td>{o.customer || ""}</td>
+                  <td>{o.overseas_agent || ""}</td>
                   <td>{cleanPort(o.pol)}</td>
                   <td>{cleanPort(o.pod)}</td>
                   <td>{o.destination || cleanPort(o.pod)}</td>
@@ -641,8 +643,8 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                 <Df label="作业号"><input value={v("order_no")} onChange={e => ch("order_no", e.target.value)} disabled={!editing} className="readonly" /></Df>
                 <Df label="委托人" required>
                   {editing
-                    ? <ComboBox value={v("supplier")} onChange={val => ch("supplier", val)} options={refData.suppliers} />
-                    : <input value={v("supplier")} disabled className="notnull" />}
+                    ? <ComboBox value={v("customer")} onChange={val => ch("customer", val)} options={refData.customers} />
+                    : <input value={v("customer")} disabled className="notnull" />}
                 </Df>
                 <Df label="订舱代理"><input value={v("booking_agent")} onChange={e => ch("booking_agent", e.target.value)} disabled={!editing} /></Df>
                 <Df label="操作员"><input value={v("operator")} onChange={e => ch("operator", e.target.value)} disabled={!editing} /></Df>
@@ -689,16 +691,19 @@ function OrderDetail({ order, role, user, onBack, onReload }) {
                 <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
                 <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
                 <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", e.target.value)} disabled={!editing} className="notnull" /></Df>
-                <Df label="揽货方式">
-                  <select value={v("solicitation_type") || ""} onChange={e => ch("solicitation_type", e.target.value)} disabled={!editing}>
-                    <option value=""></option>
-                    <option>本地自揽货</option>
-                    <option>国外揽货</option>
-                    <option>合作揽货</option>
+                <Df label="揽货类型">
+                  <select value={v("solicit_type") || "代理货"} onChange={e => ch("solicit_type", e.target.value)} disabled={!editing}>
+                    <option>自揽货</option>
+                    <option>代理货</option>
+                    <option>待订舱</option>
                   </select>
                 </Df>
                 <Df label="揽货代理"><input value={v("solicitation_agent")} onChange={e => ch("solicitation_agent", e.target.value)} disabled={!editing} /></Df>
-                <Df label="海外代理"><input value={v("overseas_agent")} onChange={e => ch("overseas_agent", e.target.value)} disabled={!editing} /></Df>
+                <Df label="海外代理">
+                  {editing
+                    ? <ComboBox value={v("overseas_agent")} onChange={val => ch("overseas_agent", val)} options={refData.customers} />
+                    : <input value={v("overseas_agent")} disabled />}
+                </Df>
 
                 <Df label="HB/L No." optional>
                   <input value={v("hbl_no")} onChange={e => ch("hbl_no", e.target.value)} disabled={!editing} placeholder={!order.has_hbl ? "未签 HBL" : ""} />

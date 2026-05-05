@@ -13,6 +13,9 @@ import BillDetail from "./pages/BillDetail.jsx";
 import BookingConfirmation from "./pages/docs/BookingConfirmation.jsx";
 import DraftBL from "./pages/docs/DraftBL.jsx";
 import BLCopy from "./pages/docs/BLCopy.jsx";
+import TelexRelease from "./pages/docs/TelexRelease.jsx";
+import ReleaseNotice from "./pages/docs/ReleaseNotice.jsx";
+import Statement from "./pages/docs/Statement.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -165,6 +168,52 @@ export default function App() {
     return (
       <BLCopy
         shipmentId={shipmentId}
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：单证 - 电放件 #/docs/telex/:id
+  if (route.startsWith("docs/telex/")) {
+    const shipmentId = route.slice("docs/telex/".length);
+    return (
+      <TelexRelease
+        shipmentId={shipmentId}
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：单证 - 放舱信息 #/docs/release/:id
+  if (route.startsWith("docs/release/")) {
+    const shipmentId = route.slice("docs/release/".length);
+    return (
+      <ReleaseNotice
+        shipmentId={shipmentId}
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：单票对账单 #/docs/stmt/:shipmentId
+  if (route.startsWith("docs/stmt/")) {
+    const shipmentId = route.slice("docs/stmt/".length);
+    return (
+      <Statement
+        shipmentId={shipmentId}
+        mode="single"
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：多票合并对账单 #/statements/:id
+  if (route.startsWith("statements/")) {
+    const statementId = route.slice("statements/".length);
+    return (
+      <Statement
+        statementId={statementId}
+        mode="batch"
         onBack={() => { window.history.back(); }}
       />
     );

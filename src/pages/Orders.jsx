@@ -1556,7 +1556,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
         )}
 
         {tab === "凭证" && (
-          <DocsPanel shipmentId={order.id} canPrint={!!order.id} />
+          <DocsPanel shipmentId={order.id} canPrint={!!order.id} blType={order.bl_type} />
         )}
 
         {tab === "代理对账单" && (
@@ -1759,33 +1759,40 @@ function ChargeItemCombo({ value, onChange, options, onCreateNew, disabled }) {
 }
 
 // DocsPanel — 单证管理面板（订单详情 → 凭证 tab）
-// 列出 5 类单证，每个都用新 tab 打开（target="_blank"）方便用户对比和打印
-function DocsPanel({ shipmentId, canPrint }) {
+// 列出可用单证，每个都用新 tab 打开方便对比和打印
+function DocsPanel({ shipmentId, canPrint, blType }) {
   if (!canPrint) {
     return <div style={{ padding: 30, color: "#888", textAlign: "center" }}>请先保存订单后再生成单证</div>;
   }
+  const isTelex = blType === "电放";
   const docs = [
     { key: "booking",  name: "订舱委托书",   en: "Booking Confirmation", desc: "发船公司/订舱代理，确认舱位",  ready: true },
     { key: "draft_bl", name: "提单确认件",   en: "Draft B/L",            desc: "发客户确认提单内容",            ready: true },
     { key: "bl_copy",  name: "提单 Copy",    en: "B/L Copy",             desc: "提单副本，签发后用",            ready: true },
-    { key: "release",  name: "放舱信息",     en: "Release Notice",       desc: "舱位确认后通知发货方",          ready: false },
-    { key: "stmt",     name: "对账单",       en: "Statement",            desc: "基于已开票账单聚合",            ready: false },
+    ...(isTelex
+      ? [{ key: "telex", name: "电放件", en: "Telex Release", desc: "电放票专用，替代正本提单", ready: true, highlight: true }]
+      : []),
+    { key: "release",  name: "放舱信息",     en: "Release Notice",       desc: "舱位确认后通知发货方",          ready: true },
+    { key: "stmt",     name: "对账单（单票）", en: "Statement (Single)", desc: "本票的费用对账",                ready: true },
   ];
   return (
     <div style={{ padding: 16 }}>
       <div style={{ marginBottom: 12, fontSize: 13, color: "#444" }}>
         点击下方按钮在新标签页打开单证，可直接打印或另存为 PDF。
+        {isTelex && <span style={{ marginLeft: 12, color: "#fa541c", fontWeight: 600 }}>· 本票为电放票</span>}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
         {docs.map(d => (
           <div key={d.key} style={{
-            border: "1px solid #e0e0e0", borderRadius: 5, padding: 14,
-            background: d.ready ? "#fff" : "#fafafa",
+            border: d.highlight ? "2px solid #fa541c" : "1px solid #e0e0e0",
+            borderRadius: 5, padding: 14,
+            background: d.ready ? (d.highlight ? "#fff7e6" : "#fff") : "#fafafa",
             opacity: d.ready ? 1 : 0.6,
           }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
               {d.name}
               {!d.ready && <span style={{ marginLeft: 8, fontSize: 10, color: "#999", fontWeight: 400 }}>开发中</span>}
+              {d.highlight && <span style={{ marginLeft: 8, fontSize: 10, color: "#fa541c", fontWeight: 700 }}>★</span>}
             </div>
             <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{d.en}</div>
             <div style={{ fontSize: 11, color: "#666", marginBottom: 10 }}>{d.desc}</div>
@@ -1795,7 +1802,7 @@ function DocsPanel({ shipmentId, canPrint }) {
                 target="_blank" rel="noreferrer"
                 style={{
                   display: "inline-block", padding: "5px 14px",
-                  background: "#1990FF", color: "#fff",
+                  background: d.highlight ? "#fa541c" : "#1990FF", color: "#fff",
                   textDecoration: "none", borderRadius: 3, fontSize: 12,
                 }}
               >生成 / 打开 →</a>

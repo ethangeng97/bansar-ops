@@ -112,6 +112,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
 
   const isDraft = mode === "draft";
   const isCopy  = mode === "copy";
+  const isTelex = mode === "telex";
 
   const freightTermStr = String(s.freight_term || "").toUpperCase();
   const isPrepaid = freightTermStr.includes("PREPAID") || (s.freight_term || "").includes("预付");
@@ -200,7 +201,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }}>
         <button onClick={onBack} style={btn}>← 返回</button>
         <span style={{ fontSize: 13, color: "#666" }}>
-          {isDraft ? "提单确认件 Draft B/L" : "提单副本 B/L Copy"} · {s.order_no} · {blNo}
+          {isDraft ? "提单确认件 Draft B/L" :
+           isTelex ? "电放件 Telex Release" :
+           "提单副本 B/L Copy"} · {s.order_no} · {blNo}
           <span style={{ marginLeft: 8, color: "#999" }}>· 共 {totalPages} 页</span>
         </span>
         <div style={{ flex: 1 }} />
@@ -213,7 +216,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           pageIdx={pageIdx} totalPages={totalPages}
           isFirstPage={pageIdx === 0} isLastCargoPage={pageIdx === totalCargoPages - 1}
           rows={pageRows} totalPkg={totalPkg} totalWt={totalWt} totalCbm={totalCbm}
-          isDraft={isDraft} isCopy={isCopy}
+          isDraft={isDraft} isCopy={isCopy} isTelex={isTelex}
           s={s} co={co} blNo={blNo} onBoardDate={onBoardDate} issueDate={issueDate}
           isPrepaid={isPrepaid} isCollect={isCollect}
           numOriginals={numOriginals} blType={blType} carrierName={carrierName}
@@ -232,7 +235,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
 function CargoPage({
   pageIdx, totalPages, isFirstPage, isLastCargoPage,
   rows, totalPkg, totalWt, totalCbm,
-  isDraft, isCopy,
+  isDraft, isCopy, isTelex,
   s, co, blNo, onBoardDate, issueDate,
   isPrepaid, isCollect, numOriginals, blType, carrierName,
 }) {
@@ -240,6 +243,7 @@ function CargoPage({
     <div className="hbl-page">
       {isDraft && <div className="hbl-watermark">DRAFT</div>}
       {isCopy && <div className="hbl-watermark">COPY</div>}
+      {isTelex && <div className="hbl-watermark" style={{ fontSize: 70, letterSpacing: 8 }}>TELEX RELEASE</div>}
 
       {/* 顶部抬头 */}
       <header style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 8, position: "relative", zIndex: 2 }}>
@@ -298,6 +302,13 @@ function CargoPage({
                 COPY NON-NEGOTIABLE
               </div>
             )}
+            {isTelex && (
+              <div style={{ display: "inline-block", padding: "3px 14px",
+                            background: STAMP_RED, color: "#fff",
+                            fontSize: 12, fontWeight: 800, letterSpacing: 3 }}>
+                TELEX RELEASE
+              </div>
+            )}
           </div>
         </div>
 
@@ -323,7 +334,7 @@ function CargoPage({
           minHeight: 90,
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          {blType === "电放" && (
+          {blType === "电放" && !isTelex && (
             <div style={{
               border: `2.5px solid ${STAMP_RED}`, color: STAMP_RED,
               padding: "6px 22px", fontSize: 18, fontWeight: 800, letterSpacing: 3,

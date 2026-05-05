@@ -11,6 +11,8 @@ import { PartnersPage } from "./pages/Partners.jsx";
 import Portal from "./pages/Portal.jsx";
 import BillDetail from "./pages/BillDetail.jsx";
 import BookingConfirmation from "./pages/docs/BookingConfirmation.jsx";
+import DraftBL from "./pages/docs/DraftBL.jsx";
+import BLCopy from "./pages/docs/BLCopy.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -140,6 +142,28 @@ export default function App() {
     const shipmentId = route.slice("docs/booking/".length);
     return (
       <BookingConfirmation
+        shipmentId={shipmentId}
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：单证 - 提单确认件 #/docs/draft_bl/:id
+  if (route.startsWith("docs/draft_bl/")) {
+    const shipmentId = route.slice("docs/draft_bl/".length);
+    return (
+      <DraftBL
+        shipmentId={shipmentId}
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：单证 - 提单副本 #/docs/bl_copy/:id
+  if (route.startsWith("docs/bl_copy/")) {
+    const shipmentId = route.slice("docs/bl_copy/".length);
+    return (
+      <BLCopy
         shipmentId={shipmentId}
         onBack={() => { window.history.back(); }}
       />

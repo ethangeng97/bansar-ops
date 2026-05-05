@@ -173,10 +173,34 @@ export function OrdersPage({ user, onBack }) {
   };
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from("shipments").select("*").order("created_at", { ascending: false });
+    let query = supabase.from("shipments").select("*").order("created_at", { ascending: false });
+
+    // 权限过滤：admin / finance 看全部；operator 看自己操作；sales 看自己销售；agent 看自己代理
+    const userId = user?.id;
+    const userFullName = user?.profile?.full_name;
+    if (role === "operator") {
+      query = query.eq("operator_id", userId);
+    } else if (role === "sales") {
+      query = query.eq("salesperson_id", userId);
+    } else if (role === "customer" || role === "agent") {
+      // 海外代理/客户：用 user_profiles_view 关联的 customer_name 过滤
+      // user.profile.customer_name 来自 user_profiles_view JOIN customers 后的 c.name
+      const customerName = user?.profile?.customer_name;
+      if (customerName) {
+        // overseas_agent 字段匹配（如 "Keplin"）
+        query = query.eq("overseas_agent", customerName);
+      } else {
+        // 兜底：什么都看不到（未关联到 customer）
+        query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+      }
+    }
+    // admin / finance：不加过滤
+
+    const { data, error } = await query;
+    if (error) console.error("load shipments error:", error);
     setShipments(data || []);
     setLoading(false);
-  }, []);
+  }, [role, user?.id, user?.profile?.full_name]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -678,7 +702,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
   const [ed, setEd] = useState(isCreating ? { ...order } : {});
   const [tab, setTab] = useState("作业");
   const [subtab, setSubtab] = useState("托单信息");
-  const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [] });
+  const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [], staff: [] });
   const [cargoItems, setCargoItems] = useState([]);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
 
@@ -741,10 +765,12 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
       supabase.from("suppliers").select("name").order("name"),
       supabase.from("customers").select("name").order("name"),
       supabase.from("ports").select("name").order("name"),
-    ]).then(([s, c, p]) => setRefData({
+      supabase.from("user_profiles_view").select("id, email, role, full_name, display_name, active").eq("active", true),
+    ]).then(([s, c, p, st]) => setRefData({
       suppliers: (s.data || []).map(r => r.name),
       customers: (c.data || []).map(r => r.name),
       ports: (p.data || []).map(r => r.name),
+      staff: st.data || [],
     }));
 
     if (order.po || order.customer_po) {
@@ -1108,8 +1134,36 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                     : <input value={v("customer")} disabled className="notnull" />}
                 </Df>
                 <Df label="订舱代理"><input value={v("booking_agent")} onChange={e => ch("booking_agent", e.target.value)} disabled={!editing} /></Df>
-                <Df label="操作员"><input value={v("operator")} onChange={e => ch("operator", e.target.value)} disabled={!editing} /></Df>
-                <Df label="销售员"><input value={v("salesperson")} onChange={e => ch("salesperson", e.target.value)} disabled={!editing} /></Df>
+                <Df label="操作员">
+                  {editing ? (
+                    <select value={v("operator_id") || ""} onChange={e => ch("operator_id", e.target.value || null)}>
+                      <option value="">— 未指派 —</option>
+                      {refData.staff.filter(u => u.role === "operator" || u.role === "admin").map(u => (
+                        <option key={u.id} value={u.id}>{u.display_name || u.full_name || u.email}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input value={(() => {
+                      const u = refData.staff.find(u => u.id === v("operator_id"));
+                      return u ? (u.display_name || u.full_name || u.email) : (v("operator") || "");
+                    })()} disabled />
+                  )}
+                </Df>
+                <Df label="销售员">
+                  {editing ? (
+                    <select value={v("salesperson_id") || ""} onChange={e => ch("salesperson_id", e.target.value || null)}>
+                      <option value="">— 未指派 —</option>
+                      {refData.staff.filter(u => u.role === "sales" || u.role === "admin").map(u => (
+                        <option key={u.id} value={u.id}>{u.display_name || u.full_name || u.email}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input value={(() => {
+                      const u = refData.staff.find(u => u.id === v("salesperson_id"));
+                      return u ? (u.display_name || u.full_name || u.email) : (v("salesperson") || "");
+                    })()} disabled />
+                  )}
+                </Df>
                 <Df label="客服"><input value={v("cs")} onChange={e => ch("cs", e.target.value)} disabled={!editing} /></Df>
 
                 <Df label="出运类型">

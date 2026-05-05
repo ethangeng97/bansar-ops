@@ -159,29 +159,12 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
           5. 注意条码有效期，过期需重新申请
         </div>
 
-        {/* 签章区 */}
-        <div style={{ display: "flex", justifyContent: "space-between",
-                      alignItems: "flex-end" }}>
-          <div style={{ fontSize: 10, color: "#444" }}>
-            <div>Operator / 操作:</div>
-            <div style={{ marginTop: 24, borderTop: "1px solid #888", paddingTop: 4, minWidth: 200, fontSize: 10 }}>
-              {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
-            </div>
-          </div>
-          <div style={{ position: "relative", width: 160, height: 130 }}>
-            {co.stamp_url ? (
-              <img src={co.stamp_url} alt="stamp"
-                   style={{ position: "absolute", right: 10, top: 0,
-                            maxWidth: 150, maxHeight: 120, opacity: 0.9 }} />
-            ) : (
-              <div style={{ width: 130, height: 100, border: "2px dashed #cdd9ec",
-                            borderRadius: "50%",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            color: "#888", fontSize: 9, textAlign: "center" }}>
-                Company<br/>Stamp
-              </div>
-            )}
-          </div>
+        {/* 签章区 (放舱信息属于内部操作通知，不需要章) */}
+        <div style={{ marginTop: 24, paddingTop: 8, borderTop: "1px solid #ddd",
+                      fontSize: 10, color: "#444", textAlign: "right" }}>
+          Operator / 操作: <b style={{ color: "#000" }}>
+            {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
+          </b>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between",

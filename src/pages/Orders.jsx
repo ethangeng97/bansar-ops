@@ -1769,9 +1769,7 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
     { key: "booking",  name: "订舱委托书",   en: "Booking Confirmation", desc: "发船公司/订舱代理，确认舱位",  ready: true },
     { key: "draft_bl", name: "提单确认件",   en: "Draft B/L",            desc: "发客户确认提单内容",            ready: true },
     { key: "bl_copy",  name: "提单 Copy",    en: "B/L Copy",             desc: "提单副本，签发后用",            ready: true },
-    ...(isTelex
-      ? [{ key: "telex", name: "电放件", en: "Telex Release", desc: "电放票专用，替代正本提单", ready: true, highlight: true }]
-      : []),
+    { key: "telex",    name: "电放件",       en: "Telex Release",        desc: "电放票专用，替代正本提单",      ready: true, highlight: isTelex },
     { key: "release",  name: "放舱信息",     en: "Release Notice",       desc: "舱位确认后通知发货方",          ready: true },
     { key: "stmt",     name: "对账单（单票）", en: "Statement (Single)", desc: "本票的费用对账",                ready: true },
   ];

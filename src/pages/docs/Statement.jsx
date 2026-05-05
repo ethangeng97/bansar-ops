@@ -285,8 +285,8 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
                   <div style={{ marginBottom: 8 }}>{statement.notes}</div>
                 )}
                 <div style={{ position: "relative", minHeight: 100 }}>
-                  {co.stamp_url ? (
-                    <img src={co.stamp_url} alt="stamp"
+                  {co.seal_url ? (
+                    <img src={co.seal_url} alt="seal"
                          style={{ position: "absolute", right: 4, top: 4,
                                   maxWidth: 130, maxHeight: 100, opacity: 0.9 }} />
                   ) : (
@@ -295,7 +295,7 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
                                   borderRadius: "50%",
                                   display: "flex", alignItems: "center", justifyContent: "center",
                                   color: "#888", fontSize: 9, textAlign: "center" }}>
-                      Finance<br/>Stamp
+                      公章<br/>Company<br/>Seal
                     </div>
                   )}
                 </div>

@@ -630,7 +630,7 @@ function HBLPage({
             </div>
           </div>
 
-          <div className="fld" style={{ borderTop: 0, padding: "6px 8px", minHeight: 130, position: "relative" }}>
+          <div className="fld" style={{ borderTop: 0, padding: "6px 8px", minHeight: 170, position: "relative" }}>
             <span className="fld-num">28.</span>
             <div className="fld-label">Signed for the Carrier / As Agent</div>
             <div style={{ marginLeft: 14, marginTop: 4, fontSize: 10 }}>
@@ -641,20 +641,20 @@ function HBLPage({
                 as Agent for and on behalf of the Carrier
               </div>
 
-              <div style={{ position: "relative", marginTop: 16, minHeight: 60, paddingRight: 110 }}>
+              <div style={{ position: "relative", marginTop: 16, minHeight: 140, paddingRight: 220 }}>
                 {co.signature_url && (
                   <img src={co.signature_url} alt="signature"
-                       style={{ position: "absolute", left: 20, top: 0,
-                                maxWidth: 180, maxHeight: 50, opacity: 0.9 }} />
+                       style={{ position: "absolute", left: 20, top: 20,
+                                maxWidth: 200, maxHeight: 70, opacity: 0.9 }} />
                 )}
                 {co.stamp_url ? (
                   <img src={co.stamp_url} alt="stamp"
-                       style={{ position: "absolute", right: 0, top: -6,
-                                maxWidth: 100, maxHeight: 80, opacity: 0.85 }} />
+                       style={{ position: "absolute", right: 0, top: -10,
+                                maxWidth: 210, maxHeight: 160, opacity: 0.9 }} />
                 ) : (
                   <div style={{
-                    position: "absolute", right: 0, top: -6,
-                    width: 90, height: 70, border: "1.5px dashed #bbb",
+                    position: "absolute", right: 0, top: -10,
+                    width: 200, height: 150, border: "1.5px dashed #bbb",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     color: "#aaa", fontSize: 9, textAlign: "center", lineHeight: 1.3,
                     borderRadius: 4,

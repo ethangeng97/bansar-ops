@@ -10,12 +10,15 @@ import { OrdersPage } from "./pages/Orders.jsx";
 import { PartnersPage } from "./pages/Partners.jsx";
 import Portal from "./pages/Portal.jsx";
 import BillDetail from "./pages/BillDetail.jsx";
+import BillsList from "./pages/BillsList.jsx";
 import BookingConfirmation from "./pages/docs/BookingConfirmation.jsx";
 import DraftBL from "./pages/docs/DraftBL.jsx";
 import BLCopy from "./pages/docs/BLCopy.jsx";
 import TelexRelease from "./pages/docs/TelexRelease.jsx";
 import ReleaseNotice from "./pages/docs/ReleaseNotice.jsx";
 import Statement from "./pages/docs/Statement.jsx";
+import StatementsList from "./pages/StatementsList.jsx";
+import StatementNew from "./pages/StatementNew.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -129,6 +132,11 @@ export default function App() {
     return <Portal user={user} onLogout={logout} />;
   }
 
+  // 静态路由：账单管理列表 #/bills
+  if (route === "bills") {
+    return <BillsList onBack={() => { window.location.hash = ""; }} />;
+  }
+
   // 动态路由：账单详情 #/bills/:id
   if (route.startsWith("bills/")) {
     const billId = route.slice("bills/".length);
@@ -203,6 +211,24 @@ export default function App() {
         shipmentId={shipmentId}
         mode="single"
         onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：新建对账单 #/statements/new
+  if (route === "statements/new" || route.startsWith("statements/new?")) {
+    return (
+      <StatementNew
+        onBack={() => { window.location.hash = "#/statements"; }}
+      />
+    );
+  }
+
+  // 动态路由：对账单列表 #/statements
+  if (route === "statements") {
+    return (
+      <StatementsList
+        onBack={() => { window.location.hash = ""; }}
       />
     );
   }

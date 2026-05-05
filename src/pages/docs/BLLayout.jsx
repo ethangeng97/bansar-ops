@@ -242,24 +242,24 @@ function CargoPage({
       {isCopy && <div className="hbl-watermark">COPY</div>}
 
       {/* 顶部抬头 */}
-      <header style={{ display: "flex", alignItems: "center", gap: 14, paddingBottom: 8, position: "relative", zIndex: 2 }}>
-        <div style={{ display: "flex", gap: 14, flex: 1, alignItems: "center", minWidth: 0 }}>
-          <div style={{ flex: "0 0 auto", width: 70 }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 8, position: "relative", zIndex: 2 }}>
+        <div style={{ display: "flex", gap: 12, flex: 1, alignItems: "center", minWidth: 0 }}>
+          <div style={{ flex: "0 0 auto", width: 75 }}>
             {co.logo_url
-              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 70, maxHeight: 54 }} />
-              : <div style={{ width: 70, height: 54, border: "1px dashed #ccc",
+              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 75, maxHeight: 60 }} />
+              : <div style={{ width: 75, height: 60, border: "1px dashed #ccc",
                               display: "flex", alignItems: "center", justifyContent: "center",
                               color: "#999", fontSize: 9 }}>LOGO</div>}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: BRAND, letterSpacing: 0.3, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ fontSize: 13.5, fontWeight: 800, color: BRAND, letterSpacing: 0.2, lineHeight: 1.25, whiteSpace: "nowrap" }}>
               {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
             </div>
           </div>
         </div>
-        <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 12 }}>
-          <div style={{ fontSize: 9, color: "#444" }}>B/L No.</div>
-          <div style={{ fontSize: 11, fontWeight: 800, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.5 }}>
+        <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 8 }}>
+          <div style={{ fontSize: 8, color: "#444" }}>B/L No.</div>
+          <div style={{ fontSize: 9.5, fontWeight: 700, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.3 }}>
             {blNo}
           </div>
         </div>
@@ -598,28 +598,30 @@ function TermsPage({ co, blNo, totalPages }) {
   const terms = TERMS_LIST;
   return (
     <div className="hbl-page">
-      <div style={{ display: "flex", alignItems: "center", gap: 14, paddingBottom: 8,
-                    borderBottom: `2px solid ${BRAND}`, marginBottom: 10 }}>
-        <div style={{ flex: "0 0 auto", width: 60 }}>
-          {co.logo_url
-            ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 60, maxHeight: 44 }} />
-            : <div style={{ width: 60, height: 44, border: "1px dashed #ccc",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            color: "#999", fontSize: 9 }}>LOGO</div>}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: BRAND,
-                        letterSpacing: 0.3, lineHeight: 1.2,
-                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, paddingBottom: 10,
+                    borderBottom: `2px solid ${BRAND}`, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 12, flex: 1, alignItems: "center", minWidth: 0 }}>
+          <div style={{ flex: "0 0 auto", width: 75 }}>
+            {co.logo_url
+              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 75, maxHeight: 60 }} />
+              : <div style={{ width: 75, height: 60, border: "1px dashed #ccc",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              color: "#999", fontSize: 9 }}>LOGO</div>}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 800, color: BRAND,
+                          letterSpacing: 0.2, lineHeight: 1.25, whiteSpace: "nowrap" }}>
+              {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
+            </div>
           </div>
         </div>
-        <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: BRAND, letterSpacing: 0.5 }}>
+        <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 8 }}>
+          <div style={{ fontSize: 8, color: "#444" }}>B/L No.</div>
+          <div style={{ fontSize: 9.5, fontWeight: 700, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.3 }}>
+            {blNo}
+          </div>
+          <div style={{ fontSize: 8.5, color: "#888", marginTop: 10, letterSpacing: 0.4 }}>
             TERMS AND CONDITIONS
-          </div>
-          <div style={{ fontSize: 8.5, color: "#666", marginTop: 3 }}>
-            B/L No.: <b style={{ fontFamily: "'Consolas',monospace" }}>{blNo}</b>
           </div>
         </div>
       </div>

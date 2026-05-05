@@ -1580,73 +1580,234 @@ const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, w
 
 
 // ═══════════════════════════════════════════════════════════════
-// ChargesPanel — 费用管理面板（应收/应付/利润）
+// ChargesPanel — 费用管理面板 v2（多行批量编辑+计费单位+税率+拖拽）
 // ═══════════════════════════════════════════════════════════════
 
+const UNIT_SUGGESTIONS = ["票", "40HQ", "40GP", "20GP", "45HQ", "CBM", "KGS", "day", "次"];
+const CURRENCIES = ["CNY", "USD", "EUR", "HKD", "JPY"];
+
 function ChargesPanel({ order, role, user, isLocked }) {
-  const [charges, setCharges] = useState([]);
+  const [arRows, setArRows] = useState([]);   // 应收（含已存+草稿）
+  const [apRows, setApRows] = useState([]);   // 应付（含已存+草稿）
   const [chargeItems, setChargeItems] = useState([]);
   const [partners, setPartners] = useState([]);
-  const [rates, setRates] = useState({});  // {USD: 7.2, EUR: 7.8, ...}
+  const [rates, setRates] = useState({});
   const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState(null);  // 当前正在编辑的费用行 id（"new-AR"/"new-AP" 表示新增行）
-  const [editRow, setEditRow] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [selectedAr, setSelectedAr] = useState(new Set());
+  const [selectedAp, setSelectedAp] = useState(new Set());
+  const [draggingId, setDraggingId] = useState(null);
 
   const isAdmin = role === "admin" || role === "finance";
-  // 权限：admin/finance/operator 可录入；其他角色只读
-  // 锁单后只有 admin/finance 可以改
-  const canEdit = !isLocked
-    ? (isAdmin || role === "operator")
-    : isAdmin;
-  // 销售只能看不能改自己单的费用
+  const canEdit = !isLocked ? (isAdmin || role === "operator") : isAdmin;
   const canViewProfit = isAdmin || role === "sales";
 
   const load = useCallback(async () => {
     if (!order?.id) {
-      setCharges([]);
-      setLoading(false);
+      setArRows([]); setApRows([]); setLoading(false);
       return;
     }
     const [{ data: ch }, { data: ci }, { data: cu }, { data: er }] = await Promise.all([
-      supabase.from("charges").select("*").eq("shipment_id", order.id).order("created_at", { ascending: true }),
-      supabase.from("charge_items").select("id, code, name_zh, name_en, category, sort").eq("active", true).order("sort"),
+      supabase.from("charges").select("*").eq("shipment_id", order.id).order("sort_order").order("created_at"),
+      supabase.from("charge_items").select("id, code, name_zh, name_en, sort").eq("active", true).order("sort"),
       supabase.from("customers").select("id, code, name, partner_type").eq("active", true),
       supabase.from("exchange_rates").select("*"),
     ]);
-    setCharges(ch || []);
     setChargeItems(ci || []);
     setPartners(cu || []);
-    // 取每个币种最新（按 effective_from desc 取第一）的汇率
     const rateMap = {};
     (er || []).sort((a, b) => (b.effective_from || "").localeCompare(a.effective_from || ""))
-      .forEach(r => {
-        if (!rateMap[r.currency]) rateMap[r.currency] = parseFloat(r.rate_to_cny);
-      });
+      .forEach(r => { if (!rateMap[r.currency]) rateMap[r.currency] = parseFloat(r.rate_to_cny); });
     rateMap["CNY"] = 1;
     setRates(rateMap);
+    setArRows((ch || []).filter(c => c.direction === "应收"));
+    setApRows((ch || []).filter(c => c.direction === "应付"));
     setLoading(false);
   }, [order?.id]);
 
   useEffect(() => { load(); }, [load]);
 
-  // 应收 / 应付 拆分
-  const arCharges = useMemo(() => charges.filter(c => c.direction === "应收"), [charges]);
-  const apCharges = useMemo(() => charges.filter(c => c.direction === "应付"), [charges]);
+  // 添加空白行
+  const addBlankRow = (direction) => {
+    const blank = {
+      _draft: true,                    // 标记是草稿（未保存）
+      _id: "draft-" + Date.now() + "-" + Math.random(),
+      direction,
+      charge_item_id: "",
+      partner_id: "",
+      partner_name: "",
+      unit: "票",
+      quantity: 1,
+      unit_price: "",
+      tax_rate: 0,
+      currency: "CNY",
+      exchange_rate: 1,
+      remark: "",
+      status: "草稿",
+    };
+    if (direction === "应收") setArRows(p => [...p, blank]);
+    else setApRows(p => [...p, blank]);
+  };
 
-  // 利润计算（按币种分 + 折 CNY 总）
+  // 修改某行
+  const updateRow = (direction, rowId, patch) => {
+    const setter = direction === "应收" ? setArRows : setApRows;
+    setter(prev => prev.map(r => {
+      const id = r.id || r._id;
+      if (id !== rowId) return r;
+      const next = { ...r, ...patch };
+      // 币种变化时自动填汇率
+      if (patch.currency && patch.currency !== r.currency) {
+        next.exchange_rate = rates[patch.currency] || 1;
+      }
+      return next;
+    }));
+  };
+
+  // 复制行
+  const copyRow = (direction, row) => {
+    const blank = {
+      ...row,
+      _draft: true,
+      _id: "draft-" + Date.now() + "-" + Math.random(),
+      id: undefined,
+    };
+    if (direction === "应收") setArRows(p => [...p, blank]);
+    else setApRows(p => [...p, blank]);
+  };
+
+  // 删除行
+  const deleteRows = async (direction, ids) => {
+    if (!ids.length) return;
+    if (!confirm(`确定删除选中的 ${ids.length} 条费用？`)) return;
+    const setter = direction === "应收" ? setArRows : setApRows;
+    const setSelected = direction === "应收" ? setSelectedAr : setSelectedAp;
+    // 已保存的删数据库
+    const dbIds = [];
+    setter(prev => prev.filter(r => {
+      const id = r.id || r._id;
+      if (!ids.includes(id)) return true;
+      if (r.id) dbIds.push(r.id);
+      return false;
+    }));
+    if (dbIds.length) {
+      const { error } = await supabase.from("charges").delete().in("id", dbIds);
+      if (error) { alert("删除失败：" + error.message); load(); return; }
+    }
+    setSelected(new Set());
+  };
+
+  // 切换勾选
+  const toggleSelect = (direction, rowId) => {
+    const setter = direction === "应收" ? setSelectedAr : setSelectedAp;
+    setter(prev => {
+      const n = new Set(prev);
+      if (n.has(rowId)) n.delete(rowId);
+      else n.add(rowId);
+      return n;
+    });
+  };
+
+  const toggleSelectAll = (direction) => {
+    const rows = direction === "应收" ? arRows : apRows;
+    const selected = direction === "应收" ? selectedAr : selectedAp;
+    const setter = direction === "应收" ? setSelectedAr : setSelectedAp;
+    if (selected.size === rows.length) {
+      setter(new Set());
+    } else {
+      setter(new Set(rows.map(r => r.id || r._id)));
+    }
+  };
+
+  // 拖拽排序
+  const onDragStart = (rowId) => setDraggingId(rowId);
+  const onDragOver = (e) => e.preventDefault();
+  const onDrop = (direction, targetRowId) => {
+    if (!draggingId || draggingId === targetRowId) { setDraggingId(null); return; }
+    const setter = direction === "应收" ? setArRows : setApRows;
+    setter(prev => {
+      const arr = [...prev];
+      const fromIdx = arr.findIndex(r => (r.id || r._id) === draggingId);
+      const toIdx = arr.findIndex(r => (r.id || r._id) === targetRowId);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      return arr;
+    });
+    setDraggingId(null);
+  };
+
+  // 保存所有未保存行 + 排序变化
+  const saveAll = async () => {
+    setSaving(true);
+
+    // 处理应收 + 应付
+    for (const direction of ["应收", "应付"]) {
+      const rows = direction === "应收" ? arRows : apRows;
+      const inserts = [];
+      const updates = [];
+
+      rows.forEach((r, idx) => {
+        // 校验
+        if (r._draft && (!r.charge_item_id || !r.unit_price)) return;  // 跳过空草稿
+
+        const partnerObj = partners.find(p => p.id === r.partner_id);
+        const payload = {
+          shipment_id: order.id,
+          charge_item_id: r.charge_item_id,
+          direction,
+          partner_id: r.partner_id || null,
+          partner_name: partnerObj?.name || r.partner_name || null,
+          unit: r.unit || "票",
+          quantity: parseFloat(r.quantity) || 0,
+          unit_price: parseFloat(r.unit_price) || 0,
+          tax_rate: parseFloat(r.tax_rate) || 0,
+          currency: r.currency || "CNY",
+          exchange_rate: parseFloat(r.exchange_rate) || 1,
+          remark: r.remark || null,
+          status: r.status || "草稿",
+          sort_order: idx,
+        };
+        if (r._draft) {
+          payload.created_by = user.id;
+          inserts.push(payload);
+        } else {
+          updates.push({ id: r.id, ...payload });
+        }
+      });
+
+      if (inserts.length) {
+        const { error } = await supabase.from("charges").insert(inserts);
+        if (error) { setSaving(false); alert("保存失败：" + error.message); return; }
+      }
+      // updates 用 upsert 一次性
+      if (updates.length) {
+        const { error } = await supabase.from("charges").upsert(updates, { onConflict: "id" });
+        if (error) { setSaving(false); alert("保存失败：" + error.message); return; }
+      }
+    }
+
+    setSaving(false);
+    await load();
+    alert("保存成功");
+  };
+
+  // 利润分析
   const profit = useMemo(() => {
+    const all = [...arRows, ...apRows];
     const byCurrency = {};
     const total = { ar: 0, ap: 0, gross: 0 };
-    charges.forEach(c => {
+    all.forEach(c => {
+      if (c._draft) return;  // 草稿不计入
       const cur = c.currency || "CNY";
       if (!byCurrency[cur]) byCurrency[cur] = { ar: 0, ap: 0, gross: 0 };
-      const amt = parseFloat(c.amount) || 0;
+      const total_orig = parseFloat(c.amount_total) || 0;
       const cny = parseFloat(c.amount_cny) || 0;
       if (c.direction === "应收") {
-        byCurrency[cur].ar += amt;
+        byCurrency[cur].ar += total_orig;
         total.ar += cny;
       } else {
-        byCurrency[cur].ap += amt;
+        byCurrency[cur].ap += total_orig;
         total.ap += cny;
       }
     });
@@ -1655,233 +1816,275 @@ function ChargesPanel({ order, role, user, isLocked }) {
     });
     total.gross = total.ar - total.ap;
     return { byCurrency, total };
-  }, [charges]);
+  }, [arRows, apRows]);
 
-  const startNew = (direction) => {
-    setEditingId("new-" + direction);
-    setEditRow({
-      direction,
-      charge_item_id: "",
-      partner_id: "",
-      amount: "",
-      currency: "CNY",
-      exchange_rate: 1,
-      remark: "",
-      status: "草稿",
-    });
-  };
-
-  const startEdit = (charge) => {
-    setEditingId(charge.id);
-    setEditRow({ ...charge });
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditRow({});
-  };
-
-  // 自动汇率：选币种时填默认汇率
-  const onCurrencyChange = (cur) => {
-    setEditRow(p => ({ ...p, currency: cur, exchange_rate: rates[cur] || 1 }));
-  };
-
-  const saveRow = async () => {
-    if (!editRow.charge_item_id) { alert("请选择费用项"); return; }
-    if (!editRow.amount || parseFloat(editRow.amount) <= 0) { alert("金额必须大于 0"); return; }
-
-    const partnerObj = partners.find(p => p.id === editRow.partner_id);
-    const payload = {
-      shipment_id: order.id,
-      charge_item_id: editRow.charge_item_id,
-      direction: editRow.direction,
-      partner_id: editRow.partner_id || null,
-      partner_name: partnerObj?.name || null,
-      amount: parseFloat(editRow.amount),
-      currency: editRow.currency || "CNY",
-      exchange_rate: parseFloat(editRow.exchange_rate) || 1,
-      remark: editRow.remark || null,
-      status: editRow.status || "草稿",
-      created_by: user.id,
-    };
-
-    if (editingId.startsWith("new-")) {
-      const { error } = await supabase.from("charges").insert(payload);
-      if (error) { alert("保存失败：" + error.message); return; }
-    } else {
-      const { error } = await supabase.from("charges").update(payload).eq("id", editingId);
-      if (error) { alert("保存失败：" + error.message); return; }
-    }
-    setEditingId(null);
-    setEditRow({});
-    load();
-  };
-
-  const deleteRow = async (id) => {
-    if (!confirm("确定删除此费用？")) return;
-    const { error } = await supabase.from("charges").delete().eq("id", id);
-    if (error) { alert("删除失败：" + error.message); return; }
-    load();
-  };
+  const hasUnsaved = useMemo(() => {
+    return arRows.some(r => r._draft) || apRows.some(r => r._draft);
+  }, [arRows, apRows]);
 
   if (!order?.id) {
     return <div style={{ padding: 30, color: "#888", textAlign: "center" }}>请先保存订单后再录入费用</div>;
   }
-
   if (loading) {
     return <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>;
   }
 
-  // 渲染单个费用区块（应收 or 应付）
-  const renderSection = (title, list, direction, color) => (
-    <div style={{ margin: "12px 12px 16px" }}>
-      <div style={{
-        padding: "8px 14px",
-        background: color.bg,
-        border: `1px solid ${color.border}`,
-        borderRadius: "5px 5px 0 0",
-        borderBottom: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-      }}>
-        <span style={{ fontSize: 13, fontWeight: "bold", color: color.text }}>{title}</span>
-        <span style={{ fontSize: 11, color: "#666" }}>({list.length} 项)</span>
-        {canEdit && editingId !== ("new-" + direction) && (
-          <button
-            onClick={() => startNew(direction)}
-            disabled={editingId !== null}
-            style={{
-              marginLeft: "auto",
-              padding: "3px 12px",
-              background: editingId !== null ? "#ccc" : color.text,
-              color: "#fff",
-              border: "none",
-              borderRadius: 3,
-              cursor: editingId !== null ? "not-allowed" : "pointer",
-              fontSize: 12,
-            }}
-          >+ 新增{direction}</button>
-        )}
-      </div>
+  // 渲染单个区块
+  const renderSection = (title, rows, direction, color) => {
+    const selected = direction === "应收" ? selectedAr : selectedAp;
+    const partnerLabel = direction === "应收" ? "客户" : "供应商";
+    const partnerFilter = direction === "应收" ? ["客户"] : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"];
+    const partnerOptions = partners.filter(p => partnerFilter.includes(p.partner_type));
+    const totalCny = rows.reduce((s, c) => s + (parseFloat(c.amount_cny) || 0), 0);
 
-      <table className="tms-tx-table" style={{ margin: 0, width: "100%", borderRadius: 0 }}>
-        <thead>
-          <tr>
-            <th style={{ width: 130 }}>费用项</th>
-            <th style={{ width: 160 }}>{direction === "应收" ? "客户" : "供应商"}</th>
-            <th style={{ width: 100, textAlign: "right" }}>金额</th>
-            <th style={{ width: 60, textAlign: "center" }}>币种</th>
-            <th style={{ width: 70, textAlign: "right" }}>汇率</th>
-            <th style={{ width: 110, textAlign: "right" }}>折 CNY</th>
-            <th>备注</th>
-            <th style={{ width: 70, textAlign: "center" }}>状态</th>
-            <th style={{ width: 80, textAlign: "center" }}>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {/* 已有行 */}
-          {list.map(c => editingId === c.id ? (
-            <RenderEditRow
-              key={c.id}
-              row={editRow}
-              setRow={setEditRow}
-              chargeItems={chargeItems}
-              partners={partners}
-              rates={rates}
-              onCurrencyChange={onCurrencyChange}
-              onSave={saveRow}
-              onCancel={cancelEdit}
-              partnerLabel={direction === "应收" ? "客户" : "供应商"}
-              partnerFilter={direction === "应收" ? ["客户"] : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"]}
-            />
-          ) : (
-            <tr key={c.id}>
-              <td>{chargeItems.find(i => i.id === c.charge_item_id)?.name_zh || "—"}</td>
-              <td>{c.partner_name || "—"}</td>
-              <td style={{ textAlign: "right" }}>{parseFloat(c.amount).toFixed(2)}</td>
-              <td style={{ textAlign: "center" }}>{c.currency}</td>
-              <td style={{ textAlign: "right", color: "#666" }}>{parseFloat(c.exchange_rate).toFixed(4)}</td>
-              <td style={{ textAlign: "right", fontWeight: "bold" }}>{parseFloat(c.amount_cny).toFixed(2)}</td>
-              <td style={{ color: "#666", fontSize: 11 }}>{c.remark || ""}</td>
-              <td style={{ textAlign: "center" }}>
-                <span style={{
-                  padding: "1px 6px", borderRadius: 8, fontSize: 10,
-                  background: c.status === "草稿" ? "#f0f0f0" : c.status === "已确认" ? "#e6f4ff" : c.status === "已开票" ? "#fff7e6" : "#f6ffed",
-                  color: c.status === "草稿" ? "#888" : c.status === "已确认" ? "#1990FF" : c.status === "已开票" ? "#fa8c16" : "#52c41a",
-                }}>{c.status}</span>
-              </td>
-              <td style={{ textAlign: "center" }}>
-                {canEdit && (
+    return (
+      <div style={{ margin: "12px 12px 16px" }}>
+        {/* 区块标题栏 */}
+        <div style={{
+          padding: "8px 14px",
+          background: color.bg,
+          border: `1px solid ${color.border}`,
+          borderRadius: "5px 5px 0 0",
+          borderBottom: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}>
+          <span style={{ fontSize: 13, fontWeight: "bold", color: color.text }}>{title}</span>
+          <span style={{ fontSize: 11, color: "#666" }}>({rows.length} 项 / 合计 {totalCny.toFixed(2)} CNY)</span>
+
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            {canEdit && (
+              <>
+                <button onClick={() => addBlankRow(direction)} style={btnSmallPrimary(color.text)}>+ 费用名称</button>
+                {selected.size > 0 && (
                   <>
-                    <span className="lk" style={{ marginRight: 8 }} onClick={() => startEdit(c)}>编辑</span>
-                    <span className="delete-btn" onClick={() => deleteRow(c.id)}>删</span>
+                    <button onClick={() => deleteRows(direction, [...selected])} style={btnSmallDanger}>
+                      删除 ({selected.size})
+                    </button>
                   </>
                 )}
-              </td>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* 表格 */}
+        <table className="tms-tx-table" style={{ margin: 0, width: "100%", borderRadius: 0, fontSize: 11 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 30, textAlign: "center" }}>
+                {canEdit && (
+                  <input type="checkbox"
+                    checked={rows.length > 0 && selected.size === rows.length}
+                    onChange={() => toggleSelectAll(direction)} />
+                )}
+              </th>
+              <th style={{ width: 30, textAlign: "center" }}>#</th>
+              <th style={{ width: 130 }}>费用名称</th>
+              <th style={{ width: 140 }}>{partnerLabel}</th>
+              <th style={{ width: 70 }}>计费单位</th>
+              <th style={{ width: 60, textAlign: "right" }}>数量</th>
+              <th style={{ width: 60, textAlign: "center" }}>币种</th>
+              <th style={{ width: 65, textAlign: "right" }}>汇率</th>
+              <th style={{ width: 90, textAlign: "right" }}>单价</th>
+              <th style={{ width: 100, textAlign: "right" }}>总价</th>
+              <th style={{ width: 70, textAlign: "right" }}>税率%</th>
+              <th style={{ width: 110, textAlign: "right" }}>折 CNY</th>
+              <th style={{ width: 70, textAlign: "center" }}>状态</th>
+              <th>备注</th>
+              <th style={{ width: 70, textAlign: "center" }}>操作</th>
             </tr>
-          ))}
-
-          {/* 新增行 */}
-          {editingId === ("new-" + direction) && (
-            <RenderEditRow
-              row={editRow}
-              setRow={setEditRow}
-              chargeItems={chargeItems}
-              partners={partners}
-              rates={rates}
-              onCurrencyChange={onCurrencyChange}
-              onSave={saveRow}
-              onCancel={cancelEdit}
-              partnerLabel={direction === "应收" ? "客户" : "供应商"}
-              partnerFilter={direction === "应收" ? ["客户"] : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"]}
-            />
-          )}
-
-          {list.length === 0 && editingId !== ("new-" + direction) && (
-            <tr><td colSpan={9} style={{ textAlign: "center", padding: 20, color: "#999" }}>暂无{direction}</td></tr>
-          )}
-
-          {/* 合计行 */}
-          {list.length > 0 && (
-            <tr style={{ background: color.bgLight, fontWeight: "bold" }}>
-              <td colSpan={5} style={{ textAlign: "right", color: color.text }}>{direction}合计 (CNY):</td>
-              <td style={{ textAlign: "right", color: color.text, fontSize: 13 }}>
-                {list.reduce((s, c) => s + parseFloat(c.amount_cny || 0), 0).toFixed(2)}
-              </td>
-              <td colSpan={3}></td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr><td colSpan={15} style={{ textAlign: "center", padding: 20, color: "#999" }}>
+                暂无{direction}，点上方「+ 费用名称」添加
+              </td></tr>
+            ) : rows.map((r, idx) => {
+              const rowId = r.id || r._id;
+              const isSelected = selected.has(rowId);
+              const isDraft = !!r._draft;
+              return (
+                <tr key={rowId}
+                  draggable={canEdit && !isDraft}
+                  onDragStart={() => onDragStart(rowId)}
+                  onDragOver={onDragOver}
+                  onDrop={() => onDrop(direction, rowId)}
+                  style={{
+                    background: isDraft ? "#fff8e9" : isSelected ? "#e6f4ff" : undefined,
+                    cursor: canEdit && !isDraft ? "move" : undefined,
+                  }}>
+                  <td style={{ textAlign: "center" }}>
+                    {canEdit && (
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(direction, rowId)} />
+                    )}
+                  </td>
+                  <td style={{ textAlign: "center", color: "#888", fontWeight: "bold" }}>{idx + 1}</td>
+                  {/* 费用名称 */}
+                  <td>
+                    {canEdit ? (
+                      <select value={r.charge_item_id || ""} onChange={e => updateRow(direction, rowId, { charge_item_id: e.target.value })} style={inlineInput}>
+                        <option value="">— 选择 —</option>
+                        {chargeItems.map(i => <option key={i.id} value={i.id}>{i.name_zh}</option>)}
+                      </select>
+                    ) : (chargeItems.find(i => i.id === r.charge_item_id)?.name_zh || "—")}
+                  </td>
+                  {/* 客户/供应商 */}
+                  <td>
+                    {canEdit ? (
+                      <select value={r.partner_id || ""} onChange={e => updateRow(direction, rowId, { partner_id: e.target.value })} style={inlineInput}>
+                        <option value="">—</option>
+                        {partnerOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    ) : (r.partner_name || "—")}
+                  </td>
+                  {/* 单位 */}
+                  <td>
+                    {canEdit ? (
+                      <input list="unit-suggestions" value={r.unit || ""} onChange={e => updateRow(direction, rowId, { unit: e.target.value })} style={inlineInput} placeholder="票" />
+                    ) : (r.unit || "—")}
+                  </td>
+                  {/* 数量 */}
+                  <td>
+                    {canEdit ? (
+                      <input type="number" step="0.01" value={r.quantity ?? ""} onChange={e => updateRow(direction, rowId, { quantity: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} />
+                    ) : <span style={{ display: "block", textAlign: "right" }}>{r.quantity || 0}</span>}
+                  </td>
+                  {/* 币种 */}
+                  <td>
+                    {canEdit ? (
+                      <select value={r.currency || "CNY"} onChange={e => updateRow(direction, rowId, { currency: e.target.value })} style={inlineInput}>
+                        {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                      </select>
+                    ) : <span style={{ display: "block", textAlign: "center" }}>{r.currency}</span>}
+                  </td>
+                  {/* 汇率 */}
+                  <td>
+                    {canEdit ? (
+                      <input type="number" step="0.0001" value={r.exchange_rate ?? 1} onChange={e => updateRow(direction, rowId, { exchange_rate: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} disabled={r.currency === "CNY"} />
+                    ) : <span style={{ display: "block", textAlign: "right", color: "#666" }}>{parseFloat(r.exchange_rate || 1).toFixed(4)}</span>}
+                  </td>
+                  {/* 单价 */}
+                  <td>
+                    {canEdit ? (
+                      <input type="number" step="0.01" value={r.unit_price ?? ""} onChange={e => updateRow(direction, rowId, { unit_price: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} />
+                    ) : <span style={{ display: "block", textAlign: "right" }}>{parseFloat(r.unit_price || 0).toFixed(2)}</span>}
+                  </td>
+                  {/* 总价（自动算）*/}
+                  <td style={{ textAlign: "right", fontWeight: "bold", color: "#333" }}>
+                    {(() => {
+                      const total = (parseFloat(r.quantity) || 0) * (parseFloat(r.unit_price) || 0) * (1 + (parseFloat(r.tax_rate) || 0) / 100);
+                      return total.toFixed(2);
+                    })()}
+                  </td>
+                  {/* 税率 */}
+                  <td>
+                    {canEdit ? (
+                      <input type="number" step="0.01" value={r.tax_rate ?? 0} onChange={e => updateRow(direction, rowId, { tax_rate: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} />
+                    ) : <span style={{ display: "block", textAlign: "right" }}>{parseFloat(r.tax_rate || 0).toFixed(2)}</span>}
+                  </td>
+                  {/* 折 CNY */}
+                  <td style={{ textAlign: "right", fontWeight: "bold", color: color.text }}>
+                    {(() => {
+                      const total = (parseFloat(r.quantity) || 0) * (parseFloat(r.unit_price) || 0) * (1 + (parseFloat(r.tax_rate) || 0) / 100);
+                      const cny = total * (parseFloat(r.exchange_rate) || 1);
+                      return cny.toFixed(2);
+                    })()}
+                  </td>
+                  {/* 状态 */}
+                  <td style={{ textAlign: "center" }}>
+                    {canEdit ? (
+                      <select value={r.status || "草稿"} onChange={e => updateRow(direction, rowId, { status: e.target.value })} style={inlineInput}>
+                        <option>草稿</option><option>已确认</option><option>已开票</option><option>已结清</option>
+                      </select>
+                    ) : <span style={{ fontSize: 10, color: "#888" }}>{r.status}</span>}
+                  </td>
+                  {/* 备注 */}
+                  <td>
+                    {canEdit ? (
+                      <input value={r.remark || ""} onChange={e => updateRow(direction, rowId, { remark: e.target.value })} style={inlineInput} />
+                    ) : (r.remark || "")}
+                  </td>
+                  {/* 操作 */}
+                  <td style={{ textAlign: "center" }}>
+                    {canEdit && (
+                      <>
+                        <span className="lk" style={{ marginRight: 6 }} onClick={() => copyRow(direction, r)}>复制</span>
+                        <span className="delete-btn" onClick={() => deleteRows(direction, [rowId])}>删</span>
+                      </>
+                    )}
+                    {isDraft && <span style={{ marginLeft: 6, fontSize: 9, color: "#fa8c16", fontWeight: "bold" }}>未保存</span>}
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length > 0 && (
+              <tr style={{ background: color.bgLight, fontWeight: "bold" }}>
+                <td colSpan={11} style={{ textAlign: "right", color: color.text }}>合计 (CNY):</td>
+                <td style={{ textAlign: "right", color: color.text, fontSize: 13 }}>{totalCny.toFixed(2)}</td>
+                <td colSpan={3}></td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <div>
-      {renderSection("应收（来自客户）", arCharges, "应收", { bg: "#e6f4ff", bgLight: "#f0f7ff", border: "#91d5ff", text: "#0050b3" })}
-      {renderSection("应付（给供应商）", apCharges, "应付", { bg: "#fff7e6", bgLight: "#fffaf0", border: "#ffd591", text: "#ad4e00" })}
+      {/* 顶部全局保存按钮 */}
+      {canEdit && (
+        <div style={{
+          margin: "12px 12px 0",
+          padding: "8px 14px",
+          background: hasUnsaved ? "#fff8e9" : "#f5f5f5",
+          border: `1px solid ${hasUnsaved ? "#ffd28e" : "#ddd"}`,
+          borderRadius: 5,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+        }}>
+          {hasUnsaved
+            ? <span style={{ fontSize: 12, color: "#c66800", fontWeight: "bold" }}>⚠ 有未保存的费用，请点击右侧保存</span>
+            : <span style={{ fontSize: 12, color: "#888" }}>所有费用已保存</span>}
+          <button
+            onClick={saveAll}
+            disabled={saving || !hasUnsaved}
+            style={{
+              marginLeft: "auto",
+              padding: "5px 18px",
+              background: saving || !hasUnsaved ? "#ccc" : "#1990FF",
+              color: "#fff",
+              border: "none",
+              borderRadius: 3,
+              cursor: saving || !hasUnsaved ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontWeight: "bold",
+            }}>
+            {saving ? "保存中..." : "保存所有费用"}
+          </button>
+        </div>
+      )}
+
+      {/* 单位建议 datalist */}
+      <datalist id="unit-suggestions">
+        {UNIT_SUGGESTIONS.map(u => <option key={u} value={u} />)}
+      </datalist>
+
+      {renderSection("应收（来自客户）", arRows, "应收", { bg: "#e6f4ff", bgLight: "#f0f7ff", border: "#91d5ff", text: "#0050b3" })}
+      {renderSection("应付（给供应商）", apRows, "应付", { bg: "#fff7e6", bgLight: "#fffaf0", border: "#ffd591", text: "#ad4e00" })}
 
       {/* 利润分析 */}
-      {canViewProfit && charges.length > 0 && (
+      {canViewProfit && (arRows.filter(r => !r._draft).length + apRows.filter(r => !r._draft).length > 0) && (
         <div style={{ margin: "12px 12px 16px" }}>
-          <div style={{
-            padding: "8px 14px",
-            background: "#fff8e9",
-            border: "1px solid #ffd28e",
-            borderRadius: "5px 5px 0 0",
-            borderBottom: "none",
-          }}>
+          <div style={{ padding: "8px 14px", background: "#fff8e9", border: "1px solid #ffd28e", borderRadius: "5px 5px 0 0", borderBottom: "none" }}>
             <span style={{ fontSize: 13, fontWeight: "bold", color: "#c66800" }}>💰 利润分析</span>
-            <span style={{ fontSize: 11, color: "#999", marginLeft: 8 }}>（仅管理员/财务/销售可见）</span>
+            <span style={{ fontSize: 11, color: "#999", marginLeft: 8 }}>（仅管理员/财务/销售可见，仅含已保存费用）</span>
           </div>
-          <div style={{
-            padding: 14,
-            background: "#fffbe6",
-            border: "1px solid #ffd28e",
-            borderRadius: "0 0 5px 5px",
-          }}>
-            {/* 总折 CNY */}
+          <div style={{ padding: 14, background: "#fffbe6", border: "1px solid #ffd28e", borderRadius: "0 0 5px 5px" }}>
             <div style={{ display: "flex", gap: 30, marginBottom: 12, paddingBottom: 12, borderBottom: "1px dashed #ffd28e" }}>
               <div>
                 <div style={{ fontSize: 11, color: "#888" }}>应收合计 (CNY)</div>
@@ -1904,23 +2107,13 @@ function ChargesPanel({ order, role, user, isLocked }) {
                 </div>
               </div>
             </div>
-
-            {/* 分币种 */}
             <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>分币种毛利：</div>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
               {Object.entries(profit.byCurrency).map(([cur, p]) => (
-                <div key={cur} style={{
-                  padding: "6px 12px",
-                  background: "#fff",
-                  border: "1px solid #ffd28e",
-                  borderRadius: 4,
-                  fontSize: 12,
-                }}>
+                <div key={cur} style={{ padding: "6px 12px", background: "#fff", border: "1px solid #ffd28e", borderRadius: 4, fontSize: 12 }}>
                   <b style={{ color: "#666" }}>{cur}</b>:&nbsp;
-                  <span style={{ color: "#0050b3" }}>+{p.ar.toFixed(2)}</span>
-                  &nbsp;-&nbsp;
-                  <span style={{ color: "#ad4e00" }}>{p.ap.toFixed(2)}</span>
-                  &nbsp;=&nbsp;
+                  <span style={{ color: "#0050b3" }}>+{p.ar.toFixed(2)}</span>&nbsp;-&nbsp;
+                  <span style={{ color: "#ad4e00" }}>{p.ap.toFixed(2)}</span>&nbsp;=&nbsp;
                   <span style={{ color: p.gross >= 0 ? "#52c41a" : "#cf1322", fontWeight: "bold" }}>
                     {p.gross >= 0 ? "+" : ""}{p.gross.toFixed(2)}
                   </span>
@@ -1940,69 +2133,9 @@ function ChargesPanel({ order, role, user, isLocked }) {
   );
 }
 
-// ─── 费用编辑行（新增/编辑用同一个） ─────────────────────────
-function RenderEditRow({ row, setRow, chargeItems, partners, rates, onCurrencyChange, onSave, onCancel, partnerLabel, partnerFilter }) {
-  const partnerOptions = partners.filter(p => partnerFilter.includes(p.partner_type));
-  const inputStyle = { width: "100%", height: 22, padding: "1px 4px", border: "1px solid #1990FF", borderRadius: 2, fontSize: 12 };
-  return (
-    <tr style={{ background: "#fff8e9" }}>
-      <td>
-        <select value={row.charge_item_id || ""} onChange={e => setRow(p => ({ ...p, charge_item_id: e.target.value }))} style={inputStyle}>
-          <option value="">— 选择费用项 —</option>
-          {chargeItems.map(i => (
-            <option key={i.id} value={i.id}>{i.code} - {i.name_zh}</option>
-          ))}
-        </select>
-      </td>
-      <td>
-        <select value={row.partner_id || ""} onChange={e => setRow(p => ({ ...p, partner_id: e.target.value }))} style={inputStyle}>
-          <option value="">— 选择{partnerLabel} —</option>
-          {partnerOptions.map(p => (
-            <option key={p.id} value={p.id}>{p.code ? `${p.code} ` : ""}{p.name}</option>
-          ))}
-        </select>
-      </td>
-      <td>
-        <input type="number" step="0.01" value={row.amount || ""}
-          onChange={e => setRow(p => ({ ...p, amount: e.target.value }))}
-          style={{ ...inputStyle, textAlign: "right" }} />
-      </td>
-      <td>
-        <select value={row.currency || "CNY"} onChange={e => onCurrencyChange(e.target.value)} style={inputStyle}>
-          <option>CNY</option>
-          <option>USD</option>
-          <option>EUR</option>
-          <option>HKD</option>
-          <option>JPY</option>
-        </select>
-      </td>
-      <td>
-        <input type="number" step="0.0001" value={row.exchange_rate || 1}
-          onChange={e => setRow(p => ({ ...p, exchange_rate: e.target.value }))}
-          style={{ ...inputStyle, textAlign: "right" }}
-          disabled={row.currency === "CNY"} />
-      </td>
-      <td style={{ textAlign: "right", fontWeight: "bold", color: "#666" }}>
-        {((parseFloat(row.amount) || 0) * (parseFloat(row.exchange_rate) || 0)).toFixed(2)}
-      </td>
-      <td>
-        <input value={row.remark || ""} onChange={e => setRow(p => ({ ...p, remark: e.target.value }))} style={inputStyle} />
-      </td>
-      <td>
-        <select value={row.status || "草稿"} onChange={e => setRow(p => ({ ...p, status: e.target.value }))} style={inputStyle}>
-          <option>草稿</option>
-          <option>已确认</option>
-          <option>已开票</option>
-          <option>已结清</option>
-        </select>
-      </td>
-      <td style={{ textAlign: "center" }}>
-        <span className="lk" style={{ marginRight: 8, fontWeight: "bold" }} onClick={onSave}>保存</span>
-        <span className="delete-btn" onClick={onCancel}>取消</span>
-      </td>
-    </tr>
-  );
-}
+const inlineInput = { width: "100%", height: 22, padding: "1px 4px", border: "1px solid #ddd", borderRadius: 2, fontSize: 11, background: "#fff" };
+const btnSmallPrimary = (color) => ({ padding: "3px 10px", background: color, color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontSize: 11 });
+const btnSmallDanger = { padding: "3px 10px", background: "#ff4d4f", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontSize: 11 };
 
 
 function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {

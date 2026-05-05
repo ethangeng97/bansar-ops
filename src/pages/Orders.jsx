@@ -1556,7 +1556,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
         )}
 
         {tab === "凭证" && (
-          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>凭证管理功能开发中</div>
+          <DocsPanel shipmentId={order.id} canPrint={!!order.id} />
         )}
 
         {tab === "代理对账单" && (
@@ -1754,6 +1754,60 @@ function ChargeItemCombo({ value, onChange, options, onCreateNew, disabled }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// DocsPanel — 单证管理面板（订单详情 → 凭证 tab）
+// 列出 5 类单证，每个都用新 tab 打开（target="_blank"）方便用户对比和打印
+function DocsPanel({ shipmentId, canPrint }) {
+  if (!canPrint) {
+    return <div style={{ padding: 30, color: "#888", textAlign: "center" }}>请先保存订单后再生成单证</div>;
+  }
+  const docs = [
+    { key: "booking",  name: "订舱委托书",   en: "Booking Confirmation", desc: "发船公司/订舱代理，确认舱位",  ready: true },
+    { key: "draft_bl", name: "提单确认件",   en: "Draft B/L",            desc: "发客户确认提单内容",            ready: false },
+    { key: "bl_copy",  name: "提单 Copy",    en: "B/L Copy",             desc: "提单副本，签发后用",            ready: false },
+    { key: "release",  name: "放舱信息",     en: "Release Notice",       desc: "舱位确认后通知发货方",          ready: false },
+    { key: "stmt",     name: "对账单",       en: "Statement",            desc: "基于已开票账单聚合",            ready: false },
+  ];
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ marginBottom: 12, fontSize: 13, color: "#444" }}>
+        点击下方按钮在新标签页打开单证，可直接打印或另存为 PDF。
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+        {docs.map(d => (
+          <div key={d.key} style={{
+            border: "1px solid #e0e0e0", borderRadius: 5, padding: 14,
+            background: d.ready ? "#fff" : "#fafafa",
+            opacity: d.ready ? 1 : 0.6,
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+              {d.name}
+              {!d.ready && <span style={{ marginLeft: 8, fontSize: 10, color: "#999", fontWeight: 400 }}>开发中</span>}
+            </div>
+            <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{d.en}</div>
+            <div style={{ fontSize: 11, color: "#666", marginBottom: 10 }}>{d.desc}</div>
+            {d.ready ? (
+              <a
+                href={`#/docs/${d.key}/${shipmentId}`}
+                target="_blank" rel="noreferrer"
+                style={{
+                  display: "inline-block", padding: "5px 14px",
+                  background: "#1990FF", color: "#fff",
+                  textDecoration: "none", borderRadius: 3, fontSize: 12,
+                }}
+              >生成 / 打开 →</a>
+            ) : (
+              <button disabled style={{
+                padding: "5px 14px", background: "#ccc", color: "#fff",
+                border: "none", borderRadius: 3, fontSize: 12, cursor: "not-allowed",
+              }}>开发中</button>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

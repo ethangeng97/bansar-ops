@@ -10,6 +10,7 @@ import { OrdersPage } from "./pages/Orders.jsx";
 import { PartnersPage } from "./pages/Partners.jsx";
 import Portal from "./pages/Portal.jsx";
 import BillDetail from "./pages/BillDetail.jsx";
+import BookingConfirmation from "./pages/docs/BookingConfirmation.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -129,6 +130,17 @@ export default function App() {
     return (
       <BillDetail
         billId={billId}
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：单证 - 委托书 #/docs/booking/:id
+  if (route.startsWith("docs/booking/")) {
+    const shipmentId = route.slice("docs/booking/".length);
+    return (
+      <BookingConfirmation
+        shipmentId={shipmentId}
         onBack={() => { window.history.back(); }}
       />
     );

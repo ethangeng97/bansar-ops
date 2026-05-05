@@ -268,43 +268,32 @@ function HBLPage({
       {isCopy && <div className="hbl-watermark" style={{ fontSize: 130, letterSpacing: 12 }}>COPY</div>}
 
       {/* ─── 顶部抬头区 ─── */}
-      <header style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 8, position: "relative", zIndex: 2 }}>
-        <div style={{ display: "flex", gap: 12, flex: 1.5, alignItems: "flex-start" }}>
-          <div style={{ flex: "0 0 auto", width: 70, paddingTop: 2 }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8, position: "relative", zIndex: 2 }}>
+        <div style={{ display: "flex", gap: 12, flex: 1.5, alignItems: "center" }}>
+          <div style={{ flex: "0 0 auto", width: 80, paddingTop: 2 }}>
             {co.logo_url
-              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 70, maxHeight: 60 }} />
-              : <div style={{ width: 70, height: 60, border: "1px dashed #ccc",
+              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 80, maxHeight: 60 }} />
+              : <div style={{ width: 80, height: 60, border: "1px dashed #ccc",
                               display: "flex", alignItems: "center", justifyContent: "center",
                               color: "#999", fontSize: 9 }}>LOGO</div>}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: BRAND, letterSpacing: 0.5 }}>
-              {co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD."}
+            <div style={{ fontSize: 16, fontWeight: 800, color: BRAND, letterSpacing: 0.5 }}>
+              {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
             </div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: BRAND, marginTop: 1, letterSpacing: 2 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: BRAND, marginTop: 2, letterSpacing: 2 }}>
               {co.name_zh || "班萨（宁波）国际货运代理有限公司"}
-            </div>
-            <div style={{ fontSize: 9, color: "#444", marginTop: 4, lineHeight: 1.5 }}>
-              {co.address_zh && <div>📍 {co.address_zh}</div>}
-              <div style={{ display: "flex", gap: 12, marginTop: 1, flexWrap: "wrap" }}>
-                {co.tel && <span>📞 {co.tel}</span>}
-                {co.email && <span>✉ {co.email}</span>}
-                {co.website && <span>🌐 {co.website}</span>}
-              </div>
             </div>
           </div>
         </div>
 
         <div style={{ flex: "0 0 220px", textAlign: "right" }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: BRAND, letterSpacing: 1, lineHeight: 1.1 }}>
-            HOUSE BILL OF LADING
-          </div>
-          <div style={{ fontSize: 11, fontStyle: "italic", color: "#444", marginTop: 2, marginBottom: 6 }}>
-            Ocean Freight Forwarder B/L
+          <div style={{ fontSize: 24, fontWeight: 800, color: BRAND, letterSpacing: 2, lineHeight: 1.1 }}>
+            BILL OF LADING
           </div>
           <div style={{
             border: `2px solid ${BRAND}`, padding: "5px 10px",
-            display: "inline-block", textAlign: "left",
+            display: "inline-block", textAlign: "left", marginTop: 8,
           }}>
             <div style={{ fontSize: 9, color: BRAND, fontWeight: 700 }}>B/L No.</div>
             <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Consolas',monospace", color: "#000" }}>
@@ -498,9 +487,78 @@ function HBLPage({
         </table>
       </div>
 
-      {/* ─── 末页底部 22-28 ─── */}
+      {/* ─── 末页底部 17 集装箱明细 + 22-28 ─── */}
       {isLastPage && (
         <div style={{ position: "relative", zIndex: 2 }}>
+          {/* 17. Container No. / Seal No. / Pieces / Wt / CBM */}
+          <div className="fld" style={{ borderTop: 0, padding: "5px 8px" }}>
+            <span className="fld-num">17.</span>
+            <div className="fld-label">Container No. / Seal No. / Size / Pieces / Gross Weight / Measurement</div>
+            <div style={{ marginLeft: 14, marginTop: 4 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10, fontFamily: "'Consolas','Microsoft YaHei',monospace" }}>
+                <thead>
+                  <tr style={{ background: BRAND_BG }}>
+                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "left" }}>Container No.</th>
+                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "left" }}>Seal No.</th>
+                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "center", width: 60 }}>Size</th>
+                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "right", width: 80 }}>Pieces</th>
+                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "right", width: 90 }}>G.W. (KGS)</th>
+                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "right", width: 80 }}>CBM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    // 解析集装箱信息：优先用 container_no/seal_no（多个用 / 或换行分隔）
+                    // 否则按 qty_container 字段（如 "2x40HQ"）展开成占位行
+                    const containerNos = (s.container_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+                    const sealNos = (s.seal_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+                    const containerRows = [];
+
+                    if (containerNos.length > 0) {
+                      // 有具体箱号：每箱一行
+                      const perBoxPkg = totalPkg && containerNos.length ? Math.floor(totalPkg / containerNos.length) : 0;
+                      const perBoxWt = totalWt && containerNos.length ? totalWt / containerNos.length : 0;
+                      const perBoxCbm = totalCbm && containerNos.length ? totalCbm / containerNos.length : 0;
+                      containerNos.forEach((cn, i) => {
+                        containerRows.push({
+                          cn,
+                          seal: sealNos[i] || "",
+                          size: s.qty_container || "",
+                          pkgs: perBoxPkg ? `${perBoxPkg} CTNS` : "—",
+                          gw: perBoxWt ? perBoxWt.toFixed(3) : "—",
+                          cbm: perBoxCbm ? perBoxCbm.toFixed(3) : "—",
+                        });
+                      });
+                    } else if (s.qty_container) {
+                      // 没箱号但有"2x40HQ"信息：占位一行
+                      containerRows.push({
+                        cn: "—", seal: "—",
+                        size: s.qty_container,
+                        pkgs: totalPkg ? `${totalPkg} CTNS` : "—",
+                        gw: totalWt ? totalWt.toFixed(3) : "—",
+                        cbm: totalCbm ? totalCbm.toFixed(3) : "—",
+                      });
+                    }
+
+                    if (containerRows.length === 0) {
+                      return <tr><td colSpan={6} style={{ padding: 10, textAlign: "center", color: "#999", border: `0.5px solid ${BRAND_BORDER}` }}>—</td></tr>;
+                    }
+                    return containerRows.map((cr, i) => (
+                      <tr key={i}>
+                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}` }}>{cr.cn}</td>
+                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}` }}>{cr.seal}</td>
+                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "center" }}>{cr.size}</td>
+                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "right" }}>{cr.pkgs}</td>
+                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "right" }}>{cr.gw}</td>
+                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "right" }}>{cr.cbm}</td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div style={{ display: "flex" }}>
             <div className="fld" style={{ flex: 1.5, borderTop: 0, borderRight: 0, minHeight: 80 }}>
               <span className="fld-num">22.</span>
@@ -577,7 +635,7 @@ function HBLPage({
             <div className="fld-label">Signed for the Carrier / As Agent</div>
             <div style={{ marginLeft: 14, marginTop: 4, fontSize: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 2 }}>
-                {co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD."}
+                {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
               </div>
               <div style={{ fontStyle: "italic", color: "#444", fontSize: 9.5 }}>
                 as Agent for and on behalf of the Carrier

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
 import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
@@ -1586,94 +1586,6 @@ const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, w
 const UNIT_SUGGESTIONS = ["票", "40HQ", "40GP", "20GP", "45HQ", "CBM", "KGS", "day", "次"];
 const CURRENCIES = ["CNY", "USD", "EUR", "HKD", "JPY"];
 
-// PartnerCombo — 输入+下拉合一，无候选时支持 + 新增
-// props:
-//   value: partner.id (uuid 或 "") | onChange(id)
-//   options: [{id, code, name, partner_type}]（已按方向过滤过）
-//   onCreateNew(name) → Promise<id>  父组件负责持久化并刷新 partners
-//   defaultPartnerType: 当 + 新增时记入哪种 partner_type（中文枚举："客户" / "供应商"）
-//   disabled
-function PartnerCombo({ value, onChange, options, onCreateNew, defaultPartnerType, disabled }) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const wrapRef = useRef(null);
-
-  // 同步外部 value → 显示名
-  useEffect(() => {
-    if (!value) { setText(""); return; }
-    const p = options.find(x => x.id === value);
-    if (p) setText(p.name);
-  }, [value, options]);
-
-  // 点外部关闭
-  useEffect(() => {
-    const fn = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", fn);
-    return () => document.removeEventListener("mousedown", fn);
-  }, []);
-
-  const q = text.trim().toLowerCase();
-  const matched = !q ? options.slice(0, 50)
-    : options.filter(p =>
-        (p.name || "").toLowerCase().includes(q) ||
-        (p.code || "").toLowerCase().includes(q)
-      ).slice(0, 50);
-
-  const canCreate = !!q && !options.some(p => (p.name || "").trim().toLowerCase() === q);
-
-  return (
-    <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
-      <input
-        type="text"
-        value={text}
-        disabled={disabled}
-        onFocus={() => setOpen(true)}
-        onChange={e => { setText(e.target.value); setOpen(true); if (!e.target.value) onChange(""); }}
-        placeholder="—"
-        style={inlineInput}
-      />
-      {open && !disabled && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100,
-          background: "#fff", border: "1px solid #d9d9d9", borderRadius: 3,
-          maxHeight: 220, overflowY: "auto", boxShadow: "0 2px 8px rgba(0,0,0,.12)",
-          fontSize: 11,
-        }}>
-          {matched.map(p => (
-            <div key={p.id}
-              onClick={() => { onChange(p.id); setText(p.name); setOpen(false); }}
-              style={{ padding: "4px 8px", cursor: "pointer",
-                       background: value === p.id ? "#e6f7ff" : "#fff" }}
-              onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
-              onMouseLeave={e => e.currentTarget.style.background = value === p.id ? "#e6f7ff" : "#fff"}
-            >
-              <span style={{ color: "#999", marginRight: 6 }}>{p.code}</span>
-              {p.name}
-              <span style={{ marginLeft: 6, color: "#bbb", fontSize: 10 }}>{p.partner_type}</span>
-            </div>
-          ))}
-          {canCreate && (
-            <div
-              onClick={async () => {
-                const newName = text.trim();
-                const id = await onCreateNew(newName, defaultPartnerType);
-                if (id) { onChange(id); setText(newName); setOpen(false); }
-              }}
-              style={{ padding: "6px 8px", cursor: "pointer", color: "#fa8c16",
-                       background: "#fff7e6", borderTop: "1px solid #f0f0f0", fontWeight: 500 }}
-            >
-              + 新增「{text.trim()}」为{defaultPartnerType}
-            </div>
-          )}
-          {matched.length === 0 && !canCreate && (
-            <div style={{ padding: 8, textAlign: "center", color: "#999" }}>无匹配</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ChargesPanel({ order, role, user, isLocked }) {
   const [arRows, setArRows] = useState([]);   // 应收（含已存+草稿）
   const [apRows, setApRows] = useState([]);   // 应付（含已存+草稿）
@@ -1685,41 +1597,24 @@ function ChargesPanel({ order, role, user, isLocked }) {
   const [selectedAr, setSelectedAr] = useState(new Set());
   const [selectedAp, setSelectedAp] = useState(new Set());
   const [draggingId, setDraggingId] = useState(null);
-  const [bills, setBills] = useState([]);   // 本票相关账单（用于显示账单号）
 
   const isAdmin = role === "admin" || role === "finance";
   const canEdit = !isLocked ? (isAdmin || role === "operator") : isAdmin;
   const canViewProfit = isAdmin || role === "sales";
 
-  // bill_id → bill 字典，方便行内查
-  const billMap = useMemo(() => {
-    const m = {};
-    bills.forEach(b => { m[b.id] = b; });
-    return m;
-  }, [bills]);
-
-  // 判断某行是否被已开票/已结算账单锁定
-  const isRowLockedByBill = (r) => {
-    if (!r.bill_id) return false;
-    const b = billMap[r.bill_id];
-    return !!b && (b.status === "issued" || b.status === "paid");
-  };
-
   const load = useCallback(async () => {
     if (!order?.id) {
-      setArRows([]); setApRows([]); setBills([]); setLoading(false);
+      setArRows([]); setApRows([]); setLoading(false);
       return;
     }
-    const [{ data: ch }, { data: ci }, { data: cu }, { data: er }, { data: bs }] = await Promise.all([
+    const [{ data: ch }, { data: ci }, { data: cu }, { data: er }] = await Promise.all([
       supabase.from("charges").select("*").eq("shipment_id", order.id).order("sort_order").order("created_at"),
       supabase.from("charge_items").select("id, code, name_zh, name_en, sort").eq("active", true).order("sort"),
       supabase.from("customers").select("id, code, name, partner_type").eq("active", true),
       supabase.from("exchange_rates").select("*"),
-      supabase.from("bills").select("*").eq("shipment_id", order.id),
     ]);
     setChargeItems(ci || []);
     setPartners(cu || []);
-    setBills(bs || []);
     const rateMap = {};
     (er || []).sort((a, b) => (b.effective_from || "").localeCompare(a.effective_from || ""))
       .forEach(r => { if (!rateMap[r.currency]) rateMap[r.currency] = parseFloat(r.rate_to_cny); });
@@ -1897,65 +1792,6 @@ function ChargesPanel({ order, role, user, isLocked }) {
     alert("保存成功");
   };
 
-  // 新建结算单位（PartnerCombo 触发）
-  // partnerType: 中文枚举 "客户" | "供应商" | "海外代理" 等
-  const handleCreatePartner = async (name, partnerType) => {
-    const { data, error } = await supabase.rpc("ensure_partner_quick_create", {
-      p_name: name,
-      p_partner_type: partnerType,
-    });
-    if (error) { alert("新建结算单位失败：" + error.message); return null; }
-    // 刷新 partners
-    const { data: cu } = await supabase
-      .from("customers").select("id, code, name, partner_type").eq("active", true);
-    setPartners(cu || []);
-    return data;
-  };
-
-  // 创建账单（基于已选行）
-  const createBill = async (direction) => {
-    const selected = direction === "应收" ? selectedAr : selectedAp;
-    const rows = direction === "应收" ? arRows : apRows;
-    const ids = [...selected].filter(id => !String(id).startsWith("draft-"));
-    if (ids.length === 0) { alert("请先保存草稿后再勾选创建账单"); return; }
-
-    const sel = rows.filter(r => ids.includes(r.id));
-    const pids = new Set(sel.map(r => r.partner_id));
-    const ccys = new Set(sel.map(r => r.currency || "CNY"));
-    const bound = sel.filter(r => r.bill_id);
-
-    if (bound.length > 0) { alert(`有 ${bound.length} 条已绑定账单，请先解绑`); return; }
-    if (sel.some(r => !r.partner_id)) { alert("存在未填结算单位的费用"); return; }
-    if (pids.size > 1) { alert("所选费用必须属于同一结算单位"); return; }
-    if (ccys.size > 1) { alert("所选费用币种不一致，请分别开账单"); return; }
-
-    if (!confirm(`确认创建账单？包含 ${sel.length} 条费用，币种 ${[...ccys][0]}`)) return;
-
-    const { data, error } = await supabase.rpc("create_bill_from_charges", {
-      p_charge_ids: ids,
-    });
-    if (error) { alert("创建账单失败：" + error.message); return; }
-    const result = data?.[0];
-    if (result) alert(`账单创建成功：${result.bill_no}`);
-    if (direction === "应收") setSelectedAr(new Set()); else setSelectedAp(new Set());
-    await load();
-  };
-
-  // 解绑账单
-  const unbindBill = async (direction) => {
-    const selected = direction === "应收" ? selectedAr : selectedAp;
-    const rows = direction === "应收" ? arRows : apRows;
-    const ids = [...selected].filter(id => !String(id).startsWith("draft-"));
-    if (ids.length === 0) return;
-    const sel = rows.filter(r => ids.includes(r.id) && r.bill_id);
-    if (sel.length === 0) { alert("所选费用没有绑定账单"); return; }
-    if (!confirm(`确认解绑 ${sel.length} 条费用与账单的关系？`)) return;
-    const { error } = await supabase.rpc("unbind_charges_from_bill", { p_charge_ids: ids });
-    if (error) { alert("解绑失败：" + error.message); return; }
-    if (direction === "应收") setSelectedAr(new Set()); else setSelectedAp(new Set());
-    await load();
-  };
-
   // 利润分析
   const profit = useMemo(() => {
     const all = [...arRows, ...apRows];
@@ -1996,20 +1832,10 @@ function ChargesPanel({ order, role, user, isLocked }) {
   // 渲染单个区块
   const renderSection = (title, rows, direction, color) => {
     const selected = direction === "应收" ? selectedAr : selectedAp;
-    // v3：列头统一叫"结算单位"
-    const partnerLabel = "结算单位";
-    // 应收过滤：客户 + 海外代理（部分应收来自代理）；应付过滤：供应商类
-    const partnerFilter = direction === "应收"
-      ? ["客户", "海外代理"]
-      : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"];
+    const partnerLabel = direction === "应收" ? "客户" : "供应商";
+    const partnerFilter = direction === "应收" ? ["客户"] : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"];
     const partnerOptions = partners.filter(p => partnerFilter.includes(p.partner_type));
-    // 默认新增的 partner_type
-    const defaultPartnerType = direction === "应收" ? "客户" : "供应商";
     const totalCny = rows.reduce((s, c) => s + (parseFloat(c.amount_cny) || 0), 0);
-    const selectedHasBound = [...selected].some(id => {
-      const r = rows.find(x => (x.id || x._id) === id);
-      return r && r.bill_id;
-    });
 
     return (
       <div style={{ margin: "12px 12px 16px" }}>
@@ -2034,14 +1860,6 @@ function ChargesPanel({ order, role, user, isLocked }) {
                 <button onClick={() => addBlankRow(direction)} style={btnSmallPrimary(color.text)}>+ 费用名称</button>
                 {selected.size > 0 && (
                   <>
-                    <button onClick={() => createBill(direction)} style={btnSmallPrimary("#13c2c2")}>
-                      创建账单 ({selected.size})
-                    </button>
-                    {selectedHasBound && (
-                      <button onClick={() => unbindBill(direction)} style={btnSmallPrimary("#8c8c8c")}>
-                        解绑账单
-                      </button>
-                    )}
                     <button onClick={() => deleteRows(direction, [...selected])} style={btnSmallDanger}>
                       删除 ({selected.size})
                     </button>
@@ -2065,7 +1883,7 @@ function ChargesPanel({ order, role, user, isLocked }) {
               </th>
               <th style={{ width: 30, textAlign: "center" }}>#</th>
               <th style={{ width: 130 }}>费用名称</th>
-              <th style={{ width: 160 }}>{partnerLabel}</th>
+              <th style={{ width: 140 }}>{partnerLabel}</th>
               <th style={{ width: 70 }}>计费单位</th>
               <th style={{ width: 60, textAlign: "right" }}>数量</th>
               <th style={{ width: 60, textAlign: "center" }}>币种</th>
@@ -2075,35 +1893,28 @@ function ChargesPanel({ order, role, user, isLocked }) {
               <th style={{ width: 70, textAlign: "right" }}>税率%</th>
               <th style={{ width: 110, textAlign: "right" }}>折 CNY</th>
               <th style={{ width: 70, textAlign: "center" }}>状态</th>
-              <th style={{ width: 110 }}>账单号</th>
               <th>备注</th>
               <th style={{ width: 70, textAlign: "center" }}>操作</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={16} style={{ textAlign: "center", padding: 20, color: "#999" }}>
+              <tr><td colSpan={15} style={{ textAlign: "center", padding: 20, color: "#999" }}>
                 暂无{direction}，点上方「+ 费用名称」添加
               </td></tr>
             ) : rows.map((r, idx) => {
               const rowId = r.id || r._id;
               const isSelected = selected.has(rowId);
               const isDraft = !!r._draft;
-              const lockedByBill = isRowLockedByBill(r);    // 已开票/已结算账单锁定
-              const rowEditable = canEdit && !lockedByBill;   // 整行是否可编辑
-              const rowBill = r.bill_id ? billMap[r.bill_id] : null;
               return (
                 <tr key={rowId}
-                  draggable={rowEditable && !isDraft}
+                  draggable={canEdit && !isDraft}
                   onDragStart={() => onDragStart(rowId)}
                   onDragOver={onDragOver}
                   onDrop={() => onDrop(direction, rowId)}
                   style={{
-                    background: isDraft ? "#fff8e9"
-                              : lockedByBill ? "#f5f5f5"
-                              : isSelected ? "#e6f4ff" : undefined,
-                    cursor: rowEditable && !isDraft ? "move" : undefined,
-                    opacity: lockedByBill ? 0.85 : 1,
+                    background: isDraft ? "#fff8e9" : isSelected ? "#e6f4ff" : undefined,
+                    cursor: canEdit && !isDraft ? "move" : undefined,
                   }}>
                   <td style={{ textAlign: "center" }}>
                     {canEdit && (
@@ -2113,40 +1924,37 @@ function ChargesPanel({ order, role, user, isLocked }) {
                   <td style={{ textAlign: "center", color: "#888", fontWeight: "bold" }}>{idx + 1}</td>
                   {/* 费用名称 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <select value={r.charge_item_id || ""} onChange={e => updateRow(direction, rowId, { charge_item_id: e.target.value })} style={inlineInput}>
                         <option value="">— 选择 —</option>
                         {chargeItems.map(i => <option key={i.id} value={i.id}>{i.name_zh}</option>)}
                       </select>
                     ) : (chargeItems.find(i => i.id === r.charge_item_id)?.name_zh || "—")}
                   </td>
-                  {/* 结算单位（PartnerCombo） */}
+                  {/* 客户/供应商 */}
                   <td>
-                    {rowEditable ? (
-                      <PartnerCombo
-                        value={r.partner_id || ""}
-                        options={partnerOptions}
-                        defaultPartnerType={defaultPartnerType}
-                        onChange={pid => updateRow(direction, rowId, { partner_id: pid })}
-                        onCreateNew={handleCreatePartner}
-                      />
-                    ) : (r.partner_name || partners.find(p => p.id === r.partner_id)?.name || "—")}
+                    {canEdit ? (
+                      <select value={r.partner_id || ""} onChange={e => updateRow(direction, rowId, { partner_id: e.target.value })} style={inlineInput}>
+                        <option value="">—</option>
+                        {partnerOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    ) : (r.partner_name || "—")}
                   </td>
                   {/* 单位 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <input list="unit-suggestions" value={r.unit || ""} onChange={e => updateRow(direction, rowId, { unit: e.target.value })} style={inlineInput} placeholder="票" />
                     ) : (r.unit || "—")}
                   </td>
                   {/* 数量 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <input type="number" step="0.01" value={r.quantity ?? ""} onChange={e => updateRow(direction, rowId, { quantity: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} />
                     ) : <span style={{ display: "block", textAlign: "right" }}>{r.quantity || 0}</span>}
                   </td>
                   {/* 币种 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <select value={r.currency || "CNY"} onChange={e => updateRow(direction, rowId, { currency: e.target.value })} style={inlineInput}>
                         {CURRENCIES.map(c => <option key={c}>{c}</option>)}
                       </select>
@@ -2154,13 +1962,13 @@ function ChargesPanel({ order, role, user, isLocked }) {
                   </td>
                   {/* 汇率 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <input type="number" step="0.0001" value={r.exchange_rate ?? 1} onChange={e => updateRow(direction, rowId, { exchange_rate: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} disabled={r.currency === "CNY"} />
                     ) : <span style={{ display: "block", textAlign: "right", color: "#666" }}>{parseFloat(r.exchange_rate || 1).toFixed(4)}</span>}
                   </td>
                   {/* 单价 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <input type="number" step="0.01" value={r.unit_price ?? ""} onChange={e => updateRow(direction, rowId, { unit_price: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} />
                     ) : <span style={{ display: "block", textAlign: "right" }}>{parseFloat(r.unit_price || 0).toFixed(2)}</span>}
                   </td>
@@ -2173,7 +1981,7 @@ function ChargesPanel({ order, role, user, isLocked }) {
                   </td>
                   {/* 税率 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <input type="number" step="0.01" value={r.tax_rate ?? 0} onChange={e => updateRow(direction, rowId, { tax_rate: e.target.value })} style={{ ...inlineInput, textAlign: "right" }} />
                     ) : <span style={{ display: "block", textAlign: "right" }}>{parseFloat(r.tax_rate || 0).toFixed(2)}</span>}
                   </td>
@@ -2187,42 +1995,27 @@ function ChargesPanel({ order, role, user, isLocked }) {
                   </td>
                   {/* 状态 */}
                   <td style={{ textAlign: "center" }}>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <select value={r.status || "草稿"} onChange={e => updateRow(direction, rowId, { status: e.target.value })} style={inlineInput}>
                         <option>草稿</option><option>已确认</option><option>已开票</option><option>已结清</option>
                       </select>
                     ) : <span style={{ fontSize: 10, color: "#888" }}>{r.status}</span>}
                   </td>
-                  {/* 账单号 */}
-                  <td style={{ textAlign: "center" }}>
-                    {rowBill ? (
-                      <a
-                        href={`#/bills/${rowBill.id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: "#1890ff", textDecoration: "underline",
-                                 fontFamily: "'Consolas',monospace", fontSize: 10 }}
-                      >
-                        {rowBill.bill_no}
-                      </a>
-                    ) : <span style={{ color: "#ccc" }}>—</span>}
-                  </td>
                   {/* 备注 */}
                   <td>
-                    {rowEditable ? (
+                    {canEdit ? (
                       <input value={r.remark || ""} onChange={e => updateRow(direction, rowId, { remark: e.target.value })} style={inlineInput} />
                     ) : (r.remark || "")}
                   </td>
                   {/* 操作 */}
                   <td style={{ textAlign: "center" }}>
-                    {rowEditable && (
+                    {canEdit && (
                       <>
                         <span className="lk" style={{ marginRight: 6 }} onClick={() => copyRow(direction, r)}>复制</span>
                         <span className="delete-btn" onClick={() => deleteRows(direction, [rowId])}>删</span>
                       </>
                     )}
                     {isDraft && <span style={{ marginLeft: 6, fontSize: 9, color: "#fa8c16", fontWeight: "bold" }}>未保存</span>}
-                    {lockedByBill && <span style={{ fontSize: 12, color: "#1890ff", fontWeight: "bold" }} title="已开票/已结算账单锁定">🔒</span>}
                   </td>
                 </tr>
               );
@@ -2231,7 +2024,7 @@ function ChargesPanel({ order, role, user, isLocked }) {
               <tr style={{ background: color.bgLight, fontWeight: "bold" }}>
                 <td colSpan={11} style={{ textAlign: "right", color: color.text }}>合计 (CNY):</td>
                 <td style={{ textAlign: "right", color: color.text, fontSize: 13 }}>{totalCny.toFixed(2)}</td>
-                <td colSpan={4}></td>
+                <td colSpan={3}></td>
               </tr>
             )}
           </tbody>

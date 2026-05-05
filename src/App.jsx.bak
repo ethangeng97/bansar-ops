@@ -9,7 +9,6 @@ import { supabase } from "./supabase.js";
 import { OrdersPage } from "./pages/Orders.jsx";
 import { PartnersPage } from "./pages/Partners.jsx";
 import Portal from "./pages/Portal.jsx";
-import BillDetail from "./pages/BillDetail.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -121,17 +120,6 @@ export default function App() {
   // 没有 hash 路由 → 显示门户首页
   if (!route) {
     return <Portal user={user} onLogout={logout} />;
-  }
-
-  // 动态路由：账单详情 #/bills/:id
-  if (route.startsWith("bills/")) {
-    const billId = route.slice("bills/".length);
-    return (
-      <BillDetail
-        billId={billId}
-        onBack={() => { window.history.back(); }}
-      />
-    );
   }
 
   // 有 hash 路由 → 加载对应页面

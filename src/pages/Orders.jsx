@@ -1674,6 +1674,90 @@ function PartnerCombo({ value, onChange, options, onCreateNew, defaultPartnerTyp
   );
 }
 
+// ChargeItemCombo — 费用名称专用 ComboBox（输入+下拉，可+新增到 charge_items 表）
+// props:
+//   value: charge_item.id (uuid 或 "") | onChange(id)
+//   options: [{id, code, name_zh}]
+//   onCreateNew(name) → Promise<id>
+//   disabled
+function ChargeItemCombo({ value, onChange, options, onCreateNew, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!value) { setText(""); return; }
+    const it = options.find(x => x.id === value);
+    if (it) setText(it.name_zh);
+  }, [value, options]);
+
+  useEffect(() => {
+    const fn = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, []);
+
+  const q = text.trim().toLowerCase();
+  const matched = !q ? options.slice(0, 100)
+    : options.filter(it =>
+        (it.name_zh || "").toLowerCase().includes(q) ||
+        (it.code || "").toLowerCase().includes(q)
+      ).slice(0, 100);
+
+  const canCreate = !!q && !options.some(it => (it.name_zh || "").trim().toLowerCase() === q);
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
+      <input
+        type="text"
+        value={text}
+        disabled={disabled}
+        onFocus={() => setOpen(true)}
+        onChange={e => { setText(e.target.value); setOpen(true); if (!e.target.value) onChange(""); }}
+        placeholder="— 选择 —"
+        style={inlineInput}
+      />
+      {open && !disabled && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100,
+          background: "#fff", border: "1px solid #d9d9d9", borderRadius: 3,
+          maxHeight: 240, overflowY: "auto", boxShadow: "0 2px 8px rgba(0,0,0,.12)",
+          fontSize: 11,
+        }}>
+          {matched.map(it => (
+            <div key={it.id}
+              onClick={() => { onChange(it.id); setText(it.name_zh); setOpen(false); }}
+              style={{ padding: "4px 8px", cursor: "pointer",
+                       background: value === it.id ? "#e6f7ff" : "#fff" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
+              onMouseLeave={e => e.currentTarget.style.background = value === it.id ? "#e6f7ff" : "#fff"}
+            >
+              <span style={{ color: "#999", marginRight: 6, fontFamily: "'Consolas',monospace" }}>{it.code}</span>
+              {it.name_zh}
+            </div>
+          ))}
+          {canCreate && (
+            <div
+              onClick={async () => {
+                const newName = text.trim();
+                const id = await onCreateNew(newName);
+                if (id) { onChange(id); setText(newName); setOpen(false); }
+              }}
+              style={{ padding: "6px 8px", cursor: "pointer", color: "#fa8c16",
+                       background: "#fff7e6", borderTop: "1px solid #f0f0f0", fontWeight: 500 }}
+            >
+              + 新增「{text.trim()}」为费用项
+            </div>
+          )}
+          {matched.length === 0 && !canCreate && (
+            <div style={{ padding: 8, textAlign: "center", color: "#999" }}>无匹配</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChargesPanel({ order, role, user, isLocked }) {
   const [arRows, setArRows] = useState([]);   // 应收（含已存+草稿）
   const [apRows, setApRows] = useState([]);   // 应付（含已存+草稿）
@@ -1912,6 +1996,19 @@ function ChargesPanel({ order, role, user, isLocked }) {
     return data;
   };
 
+  // 新建费用项（ChargeItemCombo 触发）
+  const handleCreateChargeItem = async (name) => {
+    const { data, error } = await supabase.rpc("ensure_charge_item_quick_create", {
+      p_name: name,
+    });
+    if (error) { alert("新建费用项失败：" + error.message); return null; }
+    // 刷新 chargeItems
+    const { data: ci } = await supabase
+      .from("charge_items").select("id, code, name_zh, name_en, sort").eq("active", true).order("sort");
+    setChargeItems(ci || []);
+    return data;
+  };
+
   // 创建账单（基于已选行）
   const createBill = async (direction) => {
     const selected = direction === "应收" ? selectedAr : selectedAp;
@@ -2114,10 +2211,12 @@ function ChargesPanel({ order, role, user, isLocked }) {
                   {/* 费用名称 */}
                   <td>
                     {rowEditable ? (
-                      <select value={r.charge_item_id || ""} onChange={e => updateRow(direction, rowId, { charge_item_id: e.target.value })} style={inlineInput}>
-                        <option value="">— 选择 —</option>
-                        {chargeItems.map(i => <option key={i.id} value={i.id}>{i.name_zh}</option>)}
-                      </select>
+                      <ChargeItemCombo
+                        value={r.charge_item_id || ""}
+                        options={chargeItems}
+                        onChange={cid => updateRow(direction, rowId, { charge_item_id: cid })}
+                        onCreateNew={handleCreateChargeItem}
+                      />
                     ) : (chargeItems.find(i => i.id === r.charge_item_id)?.name_zh || "—")}
                   </td>
                   {/* 结算单位（PartnerCombo） */}

@@ -1,15 +1,16 @@
 // ============================================================================
-// BLLayout.jsx — 提单共享布局 v2（按 BANSAR HOUSE BILL OF LADING 模板）
-// 用途：DraftBL 和 BLCopy 共用，mode 区分水印/印章
-// 改动 (v1 → v2)：
-//   - 完全重做，按 HOUSE BILL OF LADING 行业标准模板
-//   - 抬头独立大区，logo + 公司名 + 联系方式 / 标题在右上
-//   - 字段编号 1-28（行业标准）
-//   - 单货物表（仅 12-16），自动多行/多页支持
-//   - 23 三组勾选框（Freight Payable at / by / Currency）
-//   - 28 签章区（Authorized Signature + Name + Date + Company Stamp）
-//   - 多品名分页：>8 行自动分到第二页，续页头部简化
-// 仍保留：TELEX RELEASE 红框印章 / DRAFT 水印 / COPY 大字
+// BLLayout.jsx v3 — 完全按 Fast Freight 风格重做
+// 改动 (v2 → v3):
+//   - 删除字段编号 1-28（跟 Fast Freight 一致）
+//   - 严格 50/50 CSS Grid 布局
+//   - 集装箱信息合并到货物表（Container No./Seal No./Marks 第一列）
+//   - 法律条款移到签章区左侧
+//   - 删除中文公司名（顶部抬头只剩英文+logo）
+//   - 字号统一：B/L No. 11px、英文名 14px nowrap
+//   - 印章左挪 28px（不贴右边缘）
+//   - 加 destination_agent 字段（For delivery of goods please apply to）
+//   - 第二页 TERMS AND CONDITIONS 默认追加（23 条二栏）
+// 多页支持：货物 >5 行自动分页（continuation sheet）
 // ============================================================================
 
 import { useEffect, useState } from "react";
@@ -19,8 +20,7 @@ const BRAND = "#1f3864";
 const BRAND_BG = "#f5f8fc";
 const BRAND_BORDER = "#cdd9ec";
 const STAMP_RED = "#c00";
-
-const ROWS_PER_PAGE = 8;
+const ROWS_PER_PAGE = 5;
 
 export default function BLLayout({ shipmentId, onBack, mode }) {
   const [shipment, setShipment] = useState(null);
@@ -55,8 +55,18 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const s = shipment;
   const co = company || {};
 
+  // 货物数据
+  const containerNos = (s.container_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+  const sealNos = (s.seal_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+
   let rows = cargoItems.length > 0
-    ? cargoItems.map(it => ({
+    ? cargoItems.map((it, i) => ({
+        cnInfo: [
+          containerNos[i] || containerNos[0] || "",
+          s.qty_container || "",
+          sealNos[i] || sealNos[0] || "",
+          s.carrier_service || "CY-CY",
+        ].filter(Boolean).join("/"),
         marks: it.marks || s.marks || "N/M",
         pkgs: it.qty_packages || 0,
         unit: it.pkg_unit || "CARTONS",
@@ -68,12 +78,14 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         cbm: parseFloat(it.volume) || 0,
       }))
     : [{
+        cnInfo: containerNos.length > 0
+          ? containerNos.map((cn, i) => `${cn}/${s.qty_container || ""}/${sealNos[i] || ""}/${s.carrier_service || "CY-CY"}`).join("\n")
+          : (s.qty_container ? `${s.qty_container}/${s.carrier_service || "CY-CY"}` : ""),
         marks: s.marks || "N/M",
         pkgs: parseInt(s.qty_packages) || 0,
         unit: "CARTONS",
         desc: [s.cargo_type || "GENERAL CARGO",
                s.po ? `PO-${s.po}` : null,
-               s.qty_container || null,
               ].filter(Boolean).join("\n"),
         gw: parseFloat(s.weight) || 0,
         cbm: parseFloat(s.volume) || 0,
@@ -83,19 +95,17 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const totalWt  = rows.reduce((sum, r) => sum + (r.gw || 0), 0);
   const totalCbm = rows.reduce((sum, r) => sum + (r.cbm || 0), 0);
 
-  const pages = [];
+  // 分页
+  const cargoPages = [];
   for (let i = 0; i < rows.length; i += ROWS_PER_PAGE) {
-    pages.push(rows.slice(i, i + ROWS_PER_PAGE));
+    cargoPages.push(rows.slice(i, i + ROWS_PER_PAGE));
   }
-  if (pages.length === 0) pages.push([]);
-  const totalPages = pages.length;
+  if (cargoPages.length === 0) cargoPages.push([]);
+  const totalCargoPages = cargoPages.length;
+  const totalPages = totalCargoPages + 1; // +1 是 Terms 页
 
   const blNo = s.hbl_no || `BSNR${(s.order_no || "").replace(/^BSO/, "")}` || "—";
-
-  const onBoardDate = s.atd
-    ? formatDateLong(s.atd)
-    : (s.etd ? formatDateLong(s.etd) : "—");
-
+  const onBoardDate = s.atd ? formatDateLong(s.atd) : (s.etd ? formatDateLong(s.etd) : "—");
   const issueDate = mode === "copy"
     ? formatDateLong(s.obl_issued_at || s.atd || s.etd || new Date())
     : formatDateLong(new Date());
@@ -110,7 +120,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const blType = s.bl_type || "正本提单";
   const numOriginals = blType === "电放" ? "ZERO (TELEX RELEASE)"
                      : blType === "海运单" ? "ZERO (SEAWAY BILL)"
-                     : "THREE (3) ORIGINAL BILLS";
+                     : "THREE (3)";
+
+  const carrierName = s.carrier_name || s.shipping_line || "";
 
   return (
     <div className="doc-page">
@@ -130,61 +142,24 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         .hbl-watermark {
           position: absolute; top: 38%; left: 50%;
           transform: translate(-50%, -50%) rotate(-22deg);
-          font-size: 150px; font-weight: 900;
+          font-size: 130px; font-weight: 900;
           color: rgba(192, 0, 0, 0.07);
-          letter-spacing: 16px;
+          letter-spacing: 12px;
           pointer-events: none; z-index: 1; user-select: none;
         }
 
-        .fld {
-          border: 1px solid #888;
-          padding: 4px 8px;
-          background: #fff;
-          position: relative;
-          min-height: 28px;
+        .bl-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #555; }
+        .bl-cell {
+          padding: 6px 10px;
+          border-right: 1px solid #555;
+          border-bottom: 1px solid #555;
         }
-        .fld-num {
-          position: absolute; top: 3px; left: 6px;
-          font-size: 8.5px; font-weight: 700; color: #000;
+        .bl-cell:last-child { border-right: 0; }
+        .bl-cell-label {
+          font-size: 9px; color: #444; margin-bottom: 4px;
         }
-        .fld-label {
-          font-size: 9px; font-weight: 700; color: #000;
-          margin-left: 14px;
-          margin-bottom: 2px;
-        }
-        .fld-val {
-          font-size: 10.5px; color: #000; white-space: pre-wrap;
-          padding-left: 14px;
-          line-height: 1.5;
-        }
-        .fld-val-mono { font-family: 'Consolas','Microsoft YaHei',monospace; }
-
-        .cargo-table { width: 100%; border-collapse: collapse; }
-        .cargo-table th {
-          background: ${BRAND}; color: #fff;
-          font-size: 9px; font-weight: 700;
-          padding: 5px 6px;
-          border: 1px solid ${BRAND};
-          letter-spacing: 0.5px;
-          line-height: 1.3;
-          text-align: left;
-          position: relative;
-        }
-        .cargo-table th .num {
-          font-size: 8px; opacity: 0.85;
-          margin-right: 4px;
-        }
-        .cargo-table td {
-          padding: 6px;
-          border: 1px solid #888;
-          background: #fff;
-          font-size: 10px;
-          vertical-align: top;
-          line-height: 1.5;
-        }
-        .cargo-table tr.total-row td {
-          background: ${BRAND_BG};
-          font-weight: 700;
+        .bl-cell-val {
+          font-size: 10.5px; line-height: 1.5; white-space: pre-wrap;
         }
 
         .chk {
@@ -204,6 +179,10 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           color: #000;
         }
 
+        .terms-col { column-count: 2; column-gap: 14px; column-rule: 0.5px solid #ccc; text-align: justify; }
+        .term-item { break-inside: avoid; margin-bottom: 7px; }
+        .term-num { font-weight: 700; color: ${BRAND}; font-size: 9px; margin-bottom: 2px; }
+
         @media print {
           @page { size: A4; margin: 0; }
           body { background: #fff !important; }
@@ -213,6 +192,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         }
       `}</style>
 
+      {/* 工具条 */}
       <div className="no-print" style={{
         position: "sticky", top: 0, zIndex: 100,
         padding: "10px 16px", background: "#f5f5f5", borderBottom: "1px solid #ddd",
@@ -221,494 +201,486 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         <button onClick={onBack} style={btn}>← 返回</button>
         <span style={{ fontSize: 13, color: "#666" }}>
           {isDraft ? "提单确认件 Draft B/L" : "提单副本 B/L Copy"} · {s.order_no} · {blNo}
-          {totalPages > 1 && <span style={{ marginLeft: 8, color: "#fa8c16" }}>· 多页 ({totalPages} pages)</span>}
+          <span style={{ marginLeft: 8, color: "#999" }}>· 共 {totalPages} 页</span>
         </span>
         <div style={{ flex: 1 }} />
         <button onClick={print} style={btnPrimary}>🖨 打印 / 另存为 PDF</button>
       </div>
 
-      {pages.map((pageRows, pageIdx) => (
-        <HBLPage
-          key={pageIdx}
-          pageIdx={pageIdx}
-          totalPages={totalPages}
-          isFirstPage={pageIdx === 0}
-          isLastPage={pageIdx === totalPages - 1}
-          rows={pageRows}
-          totalPkg={totalPkg}
-          totalWt={totalWt}
-          totalCbm={totalCbm}
-          isDraft={isDraft}
-          isCopy={isCopy}
-          s={s}
-          co={co}
-          blNo={blNo}
-          onBoardDate={onBoardDate}
-          issueDate={issueDate}
-          isPrepaid={isPrepaid}
-          isCollect={isCollect}
-          numOriginals={numOriginals}
-          blType={blType}
+      {/* 渲染所有货物页 */}
+      {cargoPages.map((pageRows, pageIdx) => (
+        <CargoPage key={pageIdx}
+          pageIdx={pageIdx} totalPages={totalPages}
+          isFirstPage={pageIdx === 0} isLastCargoPage={pageIdx === totalCargoPages - 1}
+          rows={pageRows} totalPkg={totalPkg} totalWt={totalWt} totalCbm={totalCbm}
+          isDraft={isDraft} isCopy={isCopy}
+          s={s} co={co} blNo={blNo} onBoardDate={onBoardDate} issueDate={issueDate}
+          isPrepaid={isPrepaid} isCollect={isCollect}
+          numOriginals={numOriginals} blType={blType} carrierName={carrierName}
         />
       ))}
+
+      {/* 第二页（最后一页）TERMS AND CONDITIONS */}
+      <TermsPage co={co} blNo={blNo} totalPages={totalPages} />
     </div>
   );
 }
 
-function HBLPage({
-  pageIdx, totalPages, isFirstPage, isLastPage,
+// ============================================================================
+// 货物页（提单正面）
+// ============================================================================
+function CargoPage({
+  pageIdx, totalPages, isFirstPage, isLastCargoPage,
   rows, totalPkg, totalWt, totalCbm,
   isDraft, isCopy,
   s, co, blNo, onBoardDate, issueDate,
-  isPrepaid, isCollect, numOriginals, blType,
+  isPrepaid, isCollect, numOriginals, blType, carrierName,
 }) {
   return (
     <div className="hbl-page">
       {isDraft && <div className="hbl-watermark">DRAFT</div>}
-      {isCopy && <div className="hbl-watermark" style={{ fontSize: 130, letterSpacing: 12 }}>COPY</div>}
+      {isCopy && <div className="hbl-watermark">COPY</div>}
 
-      {/* ─── 顶部抬头区 ─── */}
-      <header style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8, position: "relative", zIndex: 2 }}>
-        <div style={{ display: "flex", gap: 12, flex: 1.5, alignItems: "center" }}>
-          <div style={{ flex: "0 0 auto", width: 80, paddingTop: 2 }}>
+      {/* 顶部抬头 */}
+      <header style={{ display: "flex", alignItems: "center", gap: 14, paddingBottom: 8, position: "relative", zIndex: 2 }}>
+        <div style={{ display: "flex", gap: 14, flex: 1, alignItems: "center", minWidth: 0 }}>
+          <div style={{ flex: "0 0 auto", width: 70 }}>
             {co.logo_url
-              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 80, maxHeight: 60 }} />
-              : <div style={{ width: 80, height: 60, border: "1px dashed #ccc",
+              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 70, maxHeight: 54 }} />
+              : <div style={{ width: 70, height: 54, border: "1px dashed #ccc",
                               display: "flex", alignItems: "center", justifyContent: "center",
                               color: "#999", fontSize: 9 }}>LOGO</div>}
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: BRAND, letterSpacing: 0.5 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: BRAND, letterSpacing: 0.3, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
-            </div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: BRAND, marginTop: 2, letterSpacing: 2 }}>
-              {co.name_zh || "班萨（宁波）国际货运代理有限公司"}
             </div>
           </div>
         </div>
-
-        <div style={{ flex: "0 0 220px", textAlign: "right" }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: BRAND, letterSpacing: 2, lineHeight: 1.1 }}>
-            BILL OF LADING
+        <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 12 }}>
+          <div style={{ fontSize: 9, color: "#444" }}>B/L No.</div>
+          <div style={{ fontSize: 11, fontWeight: 800, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.5 }}>
+            {blNo}
           </div>
-          <div style={{
-            border: `2px solid ${BRAND}`, padding: "5px 10px",
-            display: "inline-block", textAlign: "left", marginTop: 8,
-          }}>
-            <div style={{ fontSize: 9, color: BRAND, fontWeight: 700 }}>B/L No.</div>
-            <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Consolas',monospace", color: "#000" }}>
-              {blNo}
-            </div>
-          </div>
-          {totalPages > 1 && (
-            <div style={{ fontSize: 9, color: "#999", marginTop: 4 }}>
-              Page {pageIdx + 1} of {totalPages}
-            </div>
-          )}
         </div>
       </header>
 
-      {isDraft && (
+      {/* 主网格 */}
+      <div className="bl-grid" style={{ position: "relative", zIndex: 2 }}>
+
+        {/* Row 1: Shipper | 标题区 */}
+        <div className="bl-cell" style={{ minHeight: 110 }}>
+          <div className="bl-cell-label">Shipper</div>
+          <div className="bl-cell-val" style={{ fontWeight: 600 }}>{s.shipper_name || "—"}</div>
+        </div>
         <div style={{
-          textAlign: "center", color: STAMP_RED, fontSize: 11, fontWeight: 700,
-          margin: "4px 0 8px", letterSpacing: 1, position: "relative", zIndex: 2,
+          padding: "14px 10px 8px", textAlign: "center", borderBottom: "1px solid #555",
+          display: "flex", flexDirection: "column", justifyContent: "center",
         }}>
-          ⚠ DRAFT — Subject to client confirmation / 待客户确认
-        </div>
-      )}
-      {isCopy && (
-        <div style={{ textAlign: "center", margin: "4px 0 8px", position: "relative", zIndex: 2 }}>
-          <div style={{
-            display: "inline-block", padding: "3px 16px",
-            border: `2px solid ${STAMP_RED}`, color: STAMP_RED,
-            fontSize: 13, fontWeight: 800, letterSpacing: 4,
-            background: "rgba(255, 240, 240, 0.4)",
-          }}>
-            COPY NON-NEGOTIABLE
+          <div style={{ fontSize: 22, fontWeight: 800, color: BRAND, letterSpacing: 2, lineHeight: 1 }}>
+            BILL OF LADING
           </div>
-        </div>
-      )}
-
-      {!isFirstPage && (
-        <div style={{
-          textAlign: "center", padding: 16, color: "#666",
-          background: BRAND_BG, border: `1px solid ${BRAND_BORDER}`,
-          fontSize: 11, marginBottom: 8, position: "relative", zIndex: 2,
-        }}>
-          ── CONTINUATION SHEET / 续页 — Cargo Description Continued ──
-        </div>
-      )}
-
-      {/* ─── 1-11 字段区（仅首页） ─── */}
-      {isFirstPage && (
-        <div style={{ position: "relative", zIndex: 2 }}>
-          <div style={{ display: "flex", gap: 0 }}>
-            <div className="fld" style={{ flex: 1.5, minHeight: 70, borderRight: 0 }}>
-              <span className="fld-num">1.</span>
-              <div className="fld-label">Shipper</div>
-              <div className="fld-val">{s.shipper_name || "—"}</div>
-            </div>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-              <div className="fld" style={{ borderBottom: 0 }}>
-                <span className="fld-num">4.</span>
-                <div className="fld-label">Booking No.</div>
-                <div className="fld-val fld-val-mono">{s.booking_no || "—"}</div>
-              </div>
-              <div className="fld" style={{ borderBottom: 0 }}>
-                <span className="fld-num">5.</span>
-                <div className="fld-label">Export References</div>
-                <div className="fld-val fld-val-mono">{s.po || s.customer_po || "—"}</div>
-              </div>
-              <div className="fld">
-                <span className="fld-num">6.</span>
-                <div className="fld-label">Forwarder Ref.</div>
-                <div className="fld-val fld-val-mono">{s.order_no || "—"}</div>
-              </div>
-            </div>
+          <div style={{ fontSize: 10, color: "#444", marginTop: 4, letterSpacing: 1 }}>
+            (COMBINED TRANSPORT / PORT TO PORT)
           </div>
-
-          <div style={{ display: "flex", gap: 0 }}>
-            <div className="fld" style={{ flex: 1.5, minHeight: 70, borderTop: 0, borderRight: 0 }}>
-              <span className="fld-num">2.</span>
-              <div className="fld-label">Consignee</div>
-              <div className="fld-val">{s.consignee_name || "—"}</div>
-              {blType === "电放" && (
-                <div style={{
-                  position: "absolute", right: 10, top: "50%",
-                  transform: "translateY(-50%) rotate(-3deg)",
-                  border: `2.5px solid ${STAMP_RED}`, color: STAMP_RED,
-                  padding: "5px 14px", fontSize: 14, fontWeight: 800, letterSpacing: 2,
-                  background: "rgba(255, 240, 240, 0.5)",
-                  pointerEvents: "none", whiteSpace: "nowrap",
-                }}>
-                  TELEX RELEASE
-                </div>
-              )}
-            </div>
-            <div className="fld" style={{ flex: 1, borderTop: 0 }}>
-              <span className="fld-num">7.</span>
-              <div className="fld-label">Ocean Vessel / Voyage</div>
-              <div className="fld-val">
-                {s.vessel ? `${s.vessel}${s.voyage ? " / " + s.voyage : ""}` : "—"}
+          <div style={{ marginTop: 8 }}>
+            {isDraft && (
+              <div style={{ display: "inline-block", padding: "3px 14px",
+                            border: `2px solid ${STAMP_RED}`, color: STAMP_RED,
+                            fontSize: 12, fontWeight: 800, letterSpacing: 3 }}>
+                DRAFT — Subject to Confirmation
               </div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 0 }}>
-            <div className="fld" style={{ flex: 1.5, borderTop: 0, borderRight: 0 }}>
-              <span className="fld-num">8.</span>
-              <div className="fld-label">Port of Loading</div>
-              <div className="fld-val">{s.pol || "—"}</div>
-            </div>
-            <div className="fld" style={{ flex: 1, borderTop: 0 }}>
-              <span className="fld-num">9.</span>
-              <div className="fld-label">Port of Discharge</div>
-              <div className="fld-val">{s.pod || "—"}</div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 0 }}>
-            <div className="fld" style={{ flex: 1.5, minHeight: 60, borderTop: 0, borderRight: 0 }}>
-              <span className="fld-num">3.</span>
-              <div className="fld-label">Notify Party</div>
-              <div className="fld-val">{s.notify_party || "SAME AS CONSIGNEE"}</div>
-            </div>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-              <div className="fld" style={{ borderTop: 0, borderBottom: 0 }}>
-                <span className="fld-num">10.</span>
-                <div className="fld-label">Place of Receipt</div>
-                <div className="fld-val">{s.pol || "—"}</div>
-              </div>
-              <div className="fld" style={{ borderTop: 0 }}>
-                <span className="fld-num">11.</span>
-                <div className="fld-label">Place of Delivery</div>
-                <div className="fld-val">{s.pod || "—"}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── 12-16 货物表 ─── */}
-      <div style={{ position: "relative", zIndex: 2 }}>
-        <table className="cargo-table">
-          <thead>
-            <tr>
-              <th style={{ width: "13%" }}><span className="num">12.</span>Marks &amp; Numbers</th>
-              <th style={{ width: "13%" }}><span className="num">13.</span>Number and Kind<br/>of Packages</th>
-              <th style={{ width: "44%" }}><span className="num">14.</span>Description of Goods</th>
-              <th style={{ width: "15%", textAlign: "right" }}><span className="num">15.</span>Gross Weight<br/>(KGS)</th>
-              <th style={{ width: "15%", textAlign: "right" }}><span className="num">16.</span>Measurement<br/>(CBM)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={5} style={{ textAlign: "center", color: "#999", padding: 24 }}>
-                No cargo data
-              </td></tr>
-            ) : rows.map((r, i) => (
-              <tr key={i}>
-                <td style={{ whiteSpace: "pre-wrap", fontWeight: 600 }}>{r.marks}</td>
-                <td>
-                  <div style={{ fontWeight: 600 }}>{r.pkgs ? `${r.pkgs} ${r.unit}` : "—"}</div>
-                </td>
-                <td style={{ whiteSpace: "pre-wrap" }}>
-                  {i === 0 && (
-                    <div style={{ fontWeight: 600, fontSize: 9.5, marginBottom: 4, letterSpacing: 0.3 }}>
-                      SHIPPER'S LOAD COUNT &amp; SEAL S.T.C.
-                    </div>
-                  )}
-                  {r.desc}
-                </td>
-                <td style={{ textAlign: "right", fontFamily: "'Consolas',monospace" }}>
-                  {r.gw ? r.gw.toFixed(3) : "—"}
-                </td>
-                <td style={{ textAlign: "right", fontFamily: "'Consolas',monospace" }}>
-                  {r.cbm ? r.cbm.toFixed(3) : "—"}
-                </td>
-              </tr>
-            ))}
-            {isLastPage && (
-              <tr className="total-row">
-                <td></td>
-                <td style={{ fontWeight: 700 }}>{totalPkg ? `${totalPkg}` : "—"}</td>
-                <td style={{ fontStyle: "italic", fontSize: 9.5 }}>
-                  TOTAL · SAY {chineseNum(totalPkg)} {rows[0]?.unit || "PACKAGES"} ONLY
-                </td>
-                <td style={{ textAlign: "right", fontFamily: "'Consolas',monospace" }}>
-                  {totalWt ? totalWt.toFixed(3) : "—"}
-                </td>
-                <td style={{ textAlign: "right", fontFamily: "'Consolas',monospace" }}>
-                  {totalCbm ? totalCbm.toFixed(3) : "—"}
-                </td>
-              </tr>
             )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ─── 末页底部 17 集装箱明细 + 22-28 ─── */}
-      {isLastPage && (
-        <div style={{ position: "relative", zIndex: 2 }}>
-          {/* 17. Container No. / Seal No. / Pieces / Wt / CBM */}
-          <div className="fld" style={{ borderTop: 0, padding: "5px 8px" }}>
-            <span className="fld-num">17.</span>
-            <div className="fld-label">Container No. / Seal No. / Size / Pieces / Gross Weight / Measurement</div>
-            <div style={{ marginLeft: 14, marginTop: 4 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10, fontFamily: "'Consolas','Microsoft YaHei',monospace" }}>
-                <thead>
-                  <tr style={{ background: BRAND_BG }}>
-                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "left" }}>Container No.</th>
-                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "left" }}>Seal No.</th>
-                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "center", width: 60 }}>Size</th>
-                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "right", width: 80 }}>Pieces</th>
-                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "right", width: 90 }}>G.W. (KGS)</th>
-                    <th style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, fontSize: 9, fontWeight: 700, textAlign: "right", width: 80 }}>CBM</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    // 解析集装箱信息：优先用 container_no/seal_no（多个用 / 或换行分隔）
-                    // 否则按 qty_container 字段（如 "2x40HQ"）展开成占位行
-                    const containerNos = (s.container_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
-                    const sealNos = (s.seal_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
-                    const containerRows = [];
-
-                    if (containerNos.length > 0) {
-                      // 有具体箱号：每箱一行
-                      const perBoxPkg = totalPkg && containerNos.length ? Math.floor(totalPkg / containerNos.length) : 0;
-                      const perBoxWt = totalWt && containerNos.length ? totalWt / containerNos.length : 0;
-                      const perBoxCbm = totalCbm && containerNos.length ? totalCbm / containerNos.length : 0;
-                      containerNos.forEach((cn, i) => {
-                        containerRows.push({
-                          cn,
-                          seal: sealNos[i] || "",
-                          size: s.qty_container || "",
-                          pkgs: perBoxPkg ? `${perBoxPkg} CTNS` : "—",
-                          gw: perBoxWt ? perBoxWt.toFixed(3) : "—",
-                          cbm: perBoxCbm ? perBoxCbm.toFixed(3) : "—",
-                        });
-                      });
-                    } else if (s.qty_container) {
-                      // 没箱号但有"2x40HQ"信息：占位一行
-                      containerRows.push({
-                        cn: "—", seal: "—",
-                        size: s.qty_container,
-                        pkgs: totalPkg ? `${totalPkg} CTNS` : "—",
-                        gw: totalWt ? totalWt.toFixed(3) : "—",
-                        cbm: totalCbm ? totalCbm.toFixed(3) : "—",
-                      });
-                    }
-
-                    if (containerRows.length === 0) {
-                      return <tr><td colSpan={6} style={{ padding: 10, textAlign: "center", color: "#999", border: `0.5px solid ${BRAND_BORDER}` }}>—</td></tr>;
-                    }
-                    return containerRows.map((cr, i) => (
-                      <tr key={i}>
-                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}` }}>{cr.cn}</td>
-                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}` }}>{cr.seal}</td>
-                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "center" }}>{cr.size}</td>
-                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "right" }}>{cr.pkgs}</td>
-                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "right" }}>{cr.gw}</td>
-                        <td style={{ padding: "3px 6px", border: `0.5px solid ${BRAND_BORDER}`, textAlign: "right" }}>{cr.cbm}</td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
+            {isCopy && (
+              <div style={{ display: "inline-block", padding: "3px 14px",
+                            background: STAMP_RED, color: "#fff",
+                            fontSize: 12, fontWeight: 800, letterSpacing: 3 }}>
+                COPY NON-NEGOTIABLE
+              </div>
+            )}
           </div>
+        </div>
 
-          <div style={{ display: "flex" }}>
-            <div className="fld" style={{ flex: 1.5, borderTop: 0, borderRight: 0, minHeight: 80 }}>
-              <span className="fld-num">22.</span>
-              <div className="fld-label">Freight &amp; Charges</div>
-              <div style={{ marginLeft: 14, marginTop: 2, fontSize: 10 }}>
-                <div style={{ marginBottom: 3 }}>Ocean Freight: <b>{s.freight_term || "AS ARRANGED"}</b></div>
-                <div>Service Type: <b>{s.carrier_service || "CY-CY"}</b></div>
-                <div style={{ fontSize: 9, color: "#666", marginTop: 4 }}>FREIGHT AS ARRANGED</div>
-              </div>
-            </div>
-            <div className="fld" style={{ flex: 1, borderTop: 0, minHeight: 80 }}>
-              <span className="fld-num">24.</span>
-              <div className="fld-label">Number of Original B/Ls</div>
-              <div className="fld-val" style={{ fontWeight: 700, fontSize: 12, marginTop: 4 }}>
-                {numOriginals}
-              </div>
-            </div>
+        {/* Row 2: Consignee | For delivery of goods */}
+        <div className="bl-cell" style={{ minHeight: 110 }}>
+          <div className="bl-cell-label">Consignee (if "To Order" so indicate)</div>
+          <div className="bl-cell-val">{s.consignee_name || "—"}</div>
+        </div>
+        <div className="bl-cell" style={{ minHeight: 110 }}>
+          <div className="bl-cell-label">For delivery of goods please apply to:</div>
+          <div className="bl-cell-val" style={{ fontSize: 10 }}>
+            {s.destination_agent || <span style={{ color: "#999", fontStyle: "italic" }}>—</span>}
           </div>
+        </div>
 
-          <div className="fld" style={{ borderTop: 0, padding: "6px 8px" }}>
-            <span className="fld-num">23.</span>
-            <div className="fld-label">Freight Payable at / by / Currency</div>
-            <div style={{ marginLeft: 14, marginTop: 2, display: "flex", gap: 24, flexWrap: "wrap", fontSize: 10 }}>
-              <div>
-                <div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Payable at:</div>
-                <span className={`chk ${isPrepaid ? "checked" : ""}`}></span>Prepaid
-                <span style={{ marginLeft: 12 }}><span className={`chk ${isCollect ? "checked" : ""}`}></span>Collect</span>
-              </div>
-              <div>
-                <div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Payable by:</div>
-                <span className="chk"></span>Shipper
-                <span style={{ marginLeft: 8 }}><span className="chk"></span>Consignee</span>
-                <span style={{ marginLeft: 8 }}><span className="chk"></span>Third Party</span>
-              </div>
-              <div>
-                <div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Charge Currency:</div>
-                <span className="chk"></span>USD
-                <span style={{ marginLeft: 8 }}><span className="chk"></span>CNY</span>
-                <span style={{ marginLeft: 8 }}><span className="chk"></span>Other: ____</span>
-              </div>
+        {/* Row 3: Notify | TELEX RELEASE 印章 */}
+        <div className="bl-cell" style={{ minHeight: 90 }}>
+          <div className="bl-cell-label">Notify Party (No claim shall attach for failure to notify)</div>
+          <div className="bl-cell-val">{s.notify_party || "SAME AS CONSIGNEE"}</div>
+        </div>
+        <div style={{
+          padding: "6px 10px", borderBottom: "1px solid #555",
+          minHeight: 90,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {blType === "电放" && (
+            <div style={{
+              border: `2.5px solid ${STAMP_RED}`, color: STAMP_RED,
+              padding: "6px 22px", fontSize: 18, fontWeight: 800, letterSpacing: 3,
+              transform: "rotate(-3deg)", background: "rgba(255, 240, 240, 0.5)",
+            }}>
+              TELEX RELEASE
             </div>
+          )}
+        </div>
+
+        {/* Row 4: Pre-carriage | Place of Receipt */}
+        <div className="bl-cell" style={{ padding: "4px 10px" }}>
+          <div className="bl-cell-label">Pre-Carriage by</div>
+          <div className="bl-cell-val">—</div>
+        </div>
+        <div className="bl-cell" style={{ padding: "4px 10px" }}>
+          <div className="bl-cell-label">Place of Receipt</div>
+          <div className="bl-cell-val">{s.pol || "—"}</div>
+        </div>
+
+        {/* Row 5: Vessel/Voy | POL */}
+        <div className="bl-cell" style={{ padding: "4px 10px" }}>
+          <div className="bl-cell-label">Vessel and Voyage No.</div>
+          <div className="bl-cell-val" style={{ fontWeight: 600 }}>
+            {s.vessel || "—"}{s.voyage ? `    ${s.voyage}` : ""}
           </div>
+        </div>
+        <div className="bl-cell" style={{ padding: "4px 10px" }}>
+          <div className="bl-cell-label">Port of Loading</div>
+          <div className="bl-cell-val">{s.pol || "—"}</div>
+        </div>
 
-          <div style={{ display: "flex" }}>
-            <div className="fld" style={{ flex: 1, borderTop: 0, borderRight: 0 }}>
-              <span className="fld-num">25.</span>
-              <div className="fld-label">Place and Date of Issue</div>
-              <div className="fld-val">{(s.pol || "Ningbo") + ", China / " + issueDate}</div>
-            </div>
-            <div className="fld" style={{ flex: 1, borderTop: 0, borderRight: 0 }}>
-              <span className="fld-num">26.</span>
-              <div className="fld-label">Shipped on Board Date</div>
-              <div className="fld-val" style={{ fontWeight: 700 }}>
-                {onBoardDate}
-                {!s.atd && <span style={{ fontSize: 9, color: "#999", fontWeight: 400, marginLeft: 6 }}>
-                  (基于 ETD)
-                </span>}
+        {/* Row 6: POD | Place of Delivery + Final destination */}
+        <div className="bl-cell" style={{ padding: "4px 10px" }}>
+          <div className="bl-cell-label">Port of Discharge</div>
+          <div className="bl-cell-val">{s.pod || "—"}</div>
+        </div>
+        <div style={{ padding: "4px 10px", borderBottom: "1px solid #555", display: "flex", gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div className="bl-cell-label">Place of Delivery</div>
+            <div className="bl-cell-val">{s.pod || "—"}</div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div className="bl-cell-label">Final destination</div>
+            <div className="bl-cell-val">{s.pod || "—"}</div>
+          </div>
+        </div>
+
+        {/* PARTICULARS DECLARED BY SHIPPER 横通栏 */}
+        <div style={{
+          gridColumn: "1 / -1",
+          background: BRAND, color: "#fff",
+          padding: "5px 10px", textAlign: "center",
+          fontSize: 10.5, fontWeight: 700, letterSpacing: 2,
+          borderBottom: "1px solid #555",
+        }}>
+          PARTICULARS DECLARED BY SHIPPER
+        </div>
+
+        {/* 续页提示（非首页） */}
+        {!isFirstPage && (
+          <div style={{
+            gridColumn: "1 / -1",
+            padding: 10, textAlign: "center",
+            background: BRAND_BG, color: "#666",
+            fontSize: 10, fontStyle: "italic",
+            borderBottom: "1px solid #555",
+          }}>
+            ── CONTINUATION SHEET / 续页 (Page {pageIdx + 1} of {totalPages}) ──
+          </div>
+        )}
+
+        {/* 货物表 */}
+        <div style={{ gridColumn: "1 / -1", borderBottom: "1px solid #555" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: BRAND_BG }}>
+                <th style={thStyle(22, "left")}>Container No. / Seal No. /<br/>Marks and Nos.</th>
+                <th style={thStyle(13, "left")}>No. of Containers<br/>or Packages</th>
+                <th style={thStyle(35, "left")}>Description of Packages and Goods</th>
+                <th style={thStyle(15, "right")}>Gross Weight (KGS)</th>
+                <th style={{ ...thStyle(15, "right"), borderRight: 0 }}>Measurement (CBM)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#999",
+                                              border: "1px solid #555", borderTop: 0 }}>
+                  No cargo data
+                </td></tr>
+              ) : rows.map((r, i) => (
+                <tr key={i}>
+                  <td style={tdStyle({ mono: true, fontSize: 9.5 })}>
+                    {r.cnInfo ? `${r.cnInfo}\n\n` : ""}{r.marks}
+                  </td>
+                  <td style={tdStyle({ bold: true })}>
+                    {r.pkgs ? `${r.pkgs} ${r.unit}` : "—"}
+                  </td>
+                  <td style={tdStyle()}>
+                    {i === 0 && (
+                      <div style={{ fontWeight: 600, fontSize: 9.5, marginBottom: 4 }}>
+                        SHIPPER'S LOAD COUNT &amp; SEAL S.T.C.
+                      </div>
+                    )}
+                    {r.pkgs} {r.unit}    {r.gw ? `${r.gw.toFixed(3)}KGS` : ""}    {r.cbm ? `${r.cbm.toFixed(3)}CBM` : ""}
+                    {"\n"}
+                    {"\n"}
+                    <span style={{ fontWeight: 600 }}>═══════</span>
+                    {"\n"}
+                    {r.desc}
+                  </td>
+                  <td style={{ ...tdStyle({ mono: true, align: "right" }) }}>
+                    {r.gw ? r.gw.toFixed(3) : "—"}
+                  </td>
+                  <td style={{ ...tdStyle({ mono: true, align: "right" }), borderRight: 0 }}>
+                    {r.cbm ? r.cbm.toFixed(3) : "—"}
+                  </td>
+                </tr>
+              ))}
+              {/* 末页底部：FREIGHT 类型 + Shipped on Board */}
+              {isLastCargoPage && (
+                <tr>
+                  <td colSpan={5} style={{ padding: "60px 8px", verticalAlign: "bottom",
+                                            border: "1px solid #555", borderTop: 0,
+                                            borderRight: 0, borderLeft: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                      <div><b>{(s.freight_term || "FREIGHT AS ARRANGED").toUpperCase()}</b></div>
+                      <div><b>SHIPPED ON BOARD: {onBoardDate}</b></div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 末页底部 24-28 区域 */}
+        {isLastCargoPage && (
+          <>
+            {/* Total in words | (空) */}
+            <div className="bl-cell" style={{ padding: "4px 10px" }}>
+              <div className="bl-cell-label">Total No. of Containers or Packages (in words)</div>
+              <div className="bl-cell-val" style={{ fontWeight: 600 }}>
+                SAY {chineseNum(totalPkg)} ({totalPkg}) {rows[0]?.unit || "PACKAGES"} ONLY
               </div>
             </div>
-            <div className="fld" style={{ flex: 1.2, borderTop: 0 }}>
-              <span className="fld-num">27.</span>
-              <div className="fld-label">Declared Value</div>
-              <div className="fld-val" style={{ fontSize: 9, color: "#666", lineHeight: 1.4 }}>
-                Currency: ____________ Amount: ____________
-                <div style={{ marginTop: 3, fontStyle: "italic" }}>
-                  If no value is declared, the liability of the carrier is limited as provided in Clause 18.
+            <div className="bl-cell" style={{ padding: "4px 10px" }}>&nbsp;</div>
+
+            {/* Freight | Rate | Prepaid | Collect (4 栏，跨整宽) */}
+            <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", borderBottom: "1px solid #555" }}>
+              <div style={{ padding: "4px 10px", borderRight: "1px solid #555" }}>
+                <div className="bl-cell-label">Freight and Charges</div>
+                <div className="bl-cell-val" style={{ fontWeight: 600 }}>FREIGHT AS ARRANGED</div>
+              </div>
+              <div style={{ padding: "4px 10px", borderRight: "1px solid #555" }}>
+                <div className="bl-cell-label">Rate</div>
+              </div>
+              <div style={{ padding: "4px 10px", borderRight: "1px solid #555" }}>
+                <div className="bl-cell-label">Prepaid</div>
+                <div style={{ paddingTop: 2 }}>
+                  <span className={`chk ${isPrepaid ? "checked" : ""}`}></span>
+                </div>
+              </div>
+              <div style={{ padding: "4px 10px" }}>
+                <div className="bl-cell-label">Collect</div>
+                <div style={{ paddingTop: 2 }}>
+                  <span className={`chk ${isCollect ? "checked" : ""}`}></span>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="fld" style={{ borderTop: 0, padding: "6px 8px", minHeight: 170, position: "relative" }}>
-            <span className="fld-num">28.</span>
-            <div className="fld-label">Signed for the Carrier / As Agent</div>
-            <div style={{ marginLeft: 14, marginTop: 4, fontSize: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 2 }}>
+            {/* Ex.Rate | Prepaid at | Payable at */}
+            <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderBottom: "1px solid #555" }}>
+              <div style={{ padding: "4px 10px", borderRight: "1px solid #555" }}>
+                <div className="bl-cell-label">Ex. Rate</div>
+              </div>
+              <div style={{ padding: "4px 10px", borderRight: "1px solid #555" }}>
+                <div className="bl-cell-label">Prepaid at</div>
+              </div>
+              <div style={{ padding: "4px 10px" }}>
+                <div className="bl-cell-label">Payable at</div>
+                <div className="bl-cell-val" style={{ fontWeight: 600 }}>
+                  {isCollect ? "DESTINATION" : isPrepaid ? "ORIGIN" : ""}
+                </div>
+              </div>
+            </div>
+
+            {/* Place&Date Issue | No. of OBL */}
+            <div className="bl-cell" style={{ padding: "4px 10px" }}>
+              <div className="bl-cell-label">Place and date of issue</div>
+              <div className="bl-cell-val" style={{ fontWeight: 600 }}>
+                {s.pol || "NINGBO"} &nbsp;&nbsp;&nbsp;&nbsp; {issueDate}
+              </div>
+            </div>
+            <div className="bl-cell" style={{ padding: "4px 10px" }}>
+              <div className="bl-cell-label">No. of Original B(s) / L</div>
+              <div className="bl-cell-val" style={{ fontWeight: 600 }}>{numOriginals}</div>
+            </div>
+
+            {/* 法律条款 | 签章区 */}
+            <div style={{ padding: "6px 10px", borderRight: "1px solid #555",
+                          fontSize: 7.5, color: "#555", lineHeight: 1.45, textAlign: "justify" }}>
+              <p style={{ margin: "0 0 4px" }}>RECEIVED in apparent good order and condition except as otherwise noted the total number of containers or other packages or units enumerated below for transportation from the place of receipt of delivery subject to the terms hereof.</p>
+              <p style={{ margin: "0 0 4px" }}>One of the original Bill of Lading must be surrendered duly endorsed in exchange for the Goods Delivery Order.</p>
+              <p style={{ margin: "0 0 4px" }}>On presentation of this document (duly endorsed) to the Carrier by or on behalf of the holders the rights and liabilities arising in according with the terms hereof shall (without prejudice to any rule of common law or statute rendering them binding on the Merchant) become binding all respects between the Carrier and the Holder as thought the contract evidenced hereby had been made between them.</p>
+              <p style={{ margin: "0 0 4px" }}>IN WITNESS whereof the number of original Bill of Lading stated below have been signed, one of which being accomplished, the other(s) to be void.</p>
+              <p style={{ margin: 0 }}>(Terms of Bill of Lading continued on the back hereof).</p>
+            </div>
+            <div style={{ padding: "6px 10px", position: "relative", minHeight: 170 }}>
+              <div style={{ fontSize: 9, color: "#000", marginBottom: 4 }}>For and on behalf of</div>
+              <div style={{ fontSize: 11, fontWeight: 700 }}>
                 {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
               </div>
-              <div style={{ fontStyle: "italic", color: "#444", fontSize: 9.5 }}>
-                as Agent for and on behalf of the Carrier
-              </div>
 
-              <div style={{ position: "relative", marginTop: 16, minHeight: 140, paddingRight: 220 }}>
-                {co.signature_url && (
-                  <img src={co.signature_url} alt="signature"
-                       style={{ position: "absolute", left: 20, top: 20,
-                                maxWidth: 200, maxHeight: 70, opacity: 0.9 }} />
-                )}
+              <div style={{ position: "relative", marginTop: 14, minHeight: 110 }}>
+                {/* 印章：左挪 28px，不贴右边缘 */}
                 {co.stamp_url ? (
                   <img src={co.stamp_url} alt="stamp"
-                       style={{ position: "absolute", right: 0, top: -10,
-                                maxWidth: 210, maxHeight: 160, opacity: 0.9 }} />
+                       style={{ position: "absolute", right: 28, top: -10,
+                                maxWidth: 160, maxHeight: 120, opacity: 0.9 }} />
                 ) : (
                   <div style={{
-                    position: "absolute", right: 0, top: -10,
-                    width: 200, height: 150, border: "1.5px dashed #bbb",
+                    position: "absolute", right: 28, top: -10,
+                    width: 130, height: 100, border: "1.5px dashed #bbb",
+                    borderRadius: "50%",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     color: "#aaa", fontSize: 9, textAlign: "center", lineHeight: 1.3,
-                    borderRadius: 4,
                   }}>
                     Company<br/>Stamp
                   </div>
                 )}
+
+                {/* 签名（如有） */}
+                {co.signature_url && (
+                  <img src={co.signature_url} alt="signature"
+                       style={{ position: "absolute", left: 0, top: 30,
+                                maxWidth: 160, maxHeight: 50, opacity: 0.9 }} />
+                )}
+
+                {/* dotted line */}
+                <div style={{ position: "absolute", left: 0, bottom: 24, right: 0,
+                              borderBottom: "1.5px dotted #555" }}></div>
+                <div style={{ position: "absolute", left: 0, bottom: 6, right: 0,
+                              fontSize: 9.5, fontStyle: "italic", color: "#444", textAlign: "center" }}>
+                  <b>Authorized Signature(s)</b>
+                </div>
               </div>
 
-              <div style={{ display: "flex", gap: 16, marginTop: 4, fontSize: 9.5 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ borderBottom: "1px solid #000", height: 14 }}></div>
-                  <div style={{ marginTop: 1, color: "#444" }}>Authorized Signature</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ borderBottom: "1px solid #000", height: 14 }}></div>
-                  <div style={{ marginTop: 1, color: "#444" }}>Name</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ borderBottom: "1px solid #000", height: 14, lineHeight: "14px",
-                                fontFamily: "'Consolas',monospace", fontSize: 10 }}>
-                    {issueDate}
-                  </div>
-                  <div style={{ marginTop: 1, color: "#444" }}>Date</div>
-                </div>
+              <div style={{ marginTop: 4, fontSize: 9 }}>
+                <span style={{ color: "#444" }}>As Agent for the Carrier</span>
+                {carrierName && <span style={{ fontWeight: 600, marginLeft: 12 }}>{carrierName.toUpperCase()}</span>}
               </div>
             </div>
-          </div>
+          </>
+        )}
+      </div>
 
-          <div style={{
-            border: "1px solid #888", borderTop: 0,
-            padding: "6px 10px", fontSize: 8, lineHeight: 1.4, color: "#444",
-            textAlign: "justify",
-          }}>
-            We, {co.name_zh || co.name_en || "BANSAR"}, as Forwarders only, acknowledge receipt of the goods
-            in apparent good order and condition unless otherwise noted herein, for transportation as
-            mentioned above and we undertake to deliver the same in like good order and condition subject
-            to the terms and conditions set forth on the face and reverse hereof, the Company's Standard
-            Trading Conditions (available at {co.website || "www.bansargroup.com"}) and the actual Carrier's
-            applicable bill of lading, tariff and service terms, all of which are hereby expressly
-            incorporated herein. — END OF CLAUSE —
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6,
-                        fontSize: 8, color: "#888" }}>
-            <div>TERMS AND CONDITIONS OVERLEAF</div>
-            <div>Form BNSR-HBL</div>
-          </div>
-        </div>
-      )}
+      {/* 页脚 */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6,
+                    fontSize: 8, color: "#888", position: "relative", zIndex: 2 }}>
+        <div>TERMS AND CONDITIONS OVERLEAF</div>
+        <div>Form BNSR-HBL · Page {pageIdx + 1} of {totalPages}</div>
+      </div>
     </div>
   );
 }
 
+// ============================================================================
+// 第二页 TERMS AND CONDITIONS
+// ============================================================================
+function TermsPage({ co, blNo, totalPages }) {
+  const terms = TERMS_LIST;
+  return (
+    <div className="hbl-page">
+      <div style={{ display: "flex", alignItems: "center", gap: 14, paddingBottom: 8,
+                    borderBottom: `2px solid ${BRAND}`, marginBottom: 10 }}>
+        <div style={{ flex: "0 0 auto", width: 60 }}>
+          {co.logo_url
+            ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 60, maxHeight: 44 }} />
+            : <div style={{ width: 60, height: 44, border: "1px dashed #ccc",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            color: "#999", fontSize: 9 }}>LOGO</div>}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: BRAND,
+                        letterSpacing: 0.3, lineHeight: 1.2,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {(co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase()}
+          </div>
+        </div>
+        <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: BRAND, letterSpacing: 0.5 }}>
+            TERMS AND CONDITIONS
+          </div>
+          <div style={{ fontSize: 8.5, color: "#666", marginTop: 3 }}>
+            B/L No.: <b style={{ fontFamily: "'Consolas',monospace" }}>{blNo}</b>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 9, lineHeight: 1.5, color: "#444",
+                    padding: "6px 10px", background: BRAND_BG,
+                    border: `0.5px solid ${BRAND_BORDER}`, marginBottom: 10 }}>
+        This Bill of Lading is issued subject to the terms and conditions on the face and reverse side hereof, the Company's Standard Trading Conditions, and the actual Carrier's applicable bill of lading, tariff and service terms, all of which are incorporated herein.
+      </div>
+
+      <div className="terms-col" style={{ fontSize: 8.5, lineHeight: 1.45, color: "#000" }}>
+        {terms.map((t, i) => (
+          <div key={i} className="term-item">
+            <div className="term-num">{i + 1}. {t.title}</div>
+            <div>{t.body}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10,
+                    paddingTop: 6, borderTop: `1px solid ${BRAND}`,
+                    fontSize: 8, color: "#666" }}>
+        <div>{(co.name_en || "BANSAR").toUpperCase()} — Bill of Lading Terms and Conditions</div>
+        <div>Page {totalPages} of {totalPages} · Form BNSR-HBL</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 23 条款数据
+// ============================================================================
+const TERMS_LIST = [
+  { title: "Definitions", body: "\"Carrier\" means the actual ocean carrier, vessel operator or any other carrier or transportation provider. \"Company\" means BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD. \"Merchant\" means the shipper, consignee, notify party, holder, owner, receiver of the Goods and all persons acting on their behalf. The Merchant shall be jointly and severally liable." },
+  { title: "Capacity of the Company", body: "The Company issues this Bill of Lading as freight forwarder and/or agent only unless expressly stated otherwise. The Company is not liable as an ocean carrier for any acts, omissions, defaults or errors of the actual carrier, vessel owners, terminal operators, customs authorities, truckers, warehouses, depots or any other subcontractors or third parties." },
+  { title: "Incorporation of Carrier's Terms", body: "The carriage of Goods is subject to the terms and conditions of the actual ocean carrier's bill of lading, tariff, booking note, service contract and all applicable rules and regulations, which are hereby incorporated herein by reference." },
+  { title: "Merchant's Warranty", body: "The Merchant warrants that all particulars supplied for this Bill of Lading, including description, quantity, weight, measurement, value, HS code, dangerous nature, temperature requirements and packing condition of the Goods, are true, accurate and complete." },
+  { title: "Particulars Furnished by Shipper", body: "All information inserted in this Bill of Lading is furnished by the Merchant and the Company acts in reliance thereon without independent verification." },
+  { title: "Apparent Good Order and Condition", body: "Receipt of the Goods in apparent good order and condition refers only to the external and visible condition of the packages or units and not to the internal condition, quality, quantity, value or suitability of the Goods." },
+  { title: "Packing, Loading and Sealing", body: "Where the Goods are packed, stuffed, loaded, counted or sealed by or on behalf of the Merchant, the Company shall not be liable for any shortage, damage, leakage, condensation, mis-stowage, incorrect seal, overweight or any related consequences." },
+  { title: "Dangerous, Restricted or Special Cargo", body: "Dangerous, restricted or special cargo must be declared in writing with full details before booking. If such cargo is not declared, the Goods may be rejected, discharged, stored, destroyed or otherwise dealt with at the Merchant's risk and expense." },
+  { title: "Liberty of Route, Transshipment and Storage", body: "The Company and the actual carrier may use any route, vessel, feeder vessel, terminal, warehouse or other means of transport and may transship, store, reload, forward, omit or call at any port or place without such action being deemed a deviation or breach of contract." },
+  { title: "Delay and Schedule", body: "All sailing dates, arrival dates, transit times, cut-off times and delivery dates are estimates only and not guaranteed." },
+  { title: "Force Majeure and Extraordinary Events", body: "The Company shall not be liable for loss, damage, delay or failure in performance resulting from events beyond its reasonable control, including act of God, war, piracy, terrorism, sanctions, epidemic, quarantine, port closure, congestion, strike, fire, flood, storm, breakdown, equipment shortage, cyber incident, government action, customs action or insolvency of the carrier." },
+  { title: "Freight, Charges and Additional Costs", body: "All freight, local charges, destination charges, demurrage, detention, storage, port charges, customs charges, inspection fees and surcharges shall be payable by the Merchant on demand whether prepaid, collect or payable by third party." },
+  { title: "Lien on Goods and Documents", body: "The Company has a general and particular lien over the Goods, containers and all documents in its possession or control for all sums due from the Merchant." },
+  { title: "Delivery and Release of Goods", body: "Delivery of the Goods is made against proper presentation of original bills of lading unless the Goods are released under sea waybill, telex release, express release, electronic release, carrier instruction, court order, customs instruction or written authorization accepted by the Company." },
+  { title: "Telex Release / Surrender / Express Release", body: "When the Merchant requests the Company to effect any telex release, surrender, express release or similar release, the Merchant warrants that it is duly authorized to do so and shall indemnify the Company against all claims, disputes, liabilities, losses, costs and expenses." },
+  { title: "Customs, Compliance and Sanctions", body: "The Merchant is solely responsible for compliance with all customs, import/export licensing, security, sanctions, anti-bribery, anti-money laundering and trade control laws and regulations." },
+  { title: "Limitation of Liability", body: "Unless compulsory law provides otherwise, the Company's liability shall not exceed the lower of the limitation available to the actual carrier or subcontractor, SDR 2 per kilogram of gross weight of the Goods lost or damaged, or the freight actually earned." },
+  { title: "Higher Value Declaration", body: "The value of the Goods is not declared unless expressly stated on the face of this Bill of Lading and accepted in writing by the Company with any required extra charges." },
+  { title: "Notice of Claim and Time Bar", body: "Any claim for loss, damage or delay must be notified in writing to the Company immediately and within three (3) days after delivery. Any suit against the Company is time-barred unless commenced within nine (9) months after delivery." },
+  { title: "Himalaya Clause", body: "All defenses, exemptions, liberties, limitations and rights available to the Company under this Bill of Lading shall also extend to its directors, officers, employees, agents, subcontractors, carriers, terminal operators, warehouses, truckers and depots." },
+  { title: "Insurance", body: "No insurance is effected unless expressly requested and accepted in writing by the Company. Any insurance arranged by the Company shall be subject to the terms, exclusions and limits of the insurer." },
+  { title: "No Set-off", body: "The Merchant shall pay all freight, charges and other sums due to the Company without deduction, withholding, counterclaim or set-off." },
+  { title: "Law and Jurisdiction", body: "This Bill of Lading shall be governed by and construed in accordance with the laws of the People's Republic of China. Any dispute arising out of or in connection with this Bill of Lading shall be submitted to the competent court at the place where the Company is registered." },
+];
+
+// ============================================================================
+// 工具函数
+// ============================================================================
 function formatDateLong(d) {
   if (!d) return "—";
   const date = new Date(d);
@@ -736,6 +708,29 @@ function chineseNum(n) {
   const t = Math.floor(num / 1000);
   const r = num % 1000;
   return under1k(t) + " THOUSAND" + (r ? " " + under1k(r) : "");
+}
+
+function thStyle(widthPct, align) {
+  return {
+    textAlign: align, padding: "4px 8px",
+    borderRight: "1px solid #555", borderBottom: "1px solid #555",
+    fontSize: 9, fontWeight: 700,
+    width: widthPct + "%",
+  };
+}
+
+function tdStyle(opts = {}) {
+  const o = opts || {};
+  return {
+    verticalAlign: "top", padding: "6px 8px",
+    borderRight: "1px solid #555", borderBottom: "1px solid #555",
+    fontSize: o.fontSize || 10,
+    fontWeight: o.bold ? 600 : 400,
+    fontFamily: o.mono ? "'Consolas','Microsoft YaHei',monospace" : "inherit",
+    textAlign: o.align || "left",
+    whiteSpace: "pre-wrap",
+    lineHeight: 1.5,
+  };
 }
 
 const btn = {

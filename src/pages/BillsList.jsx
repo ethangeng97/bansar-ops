@@ -26,9 +26,15 @@ export default function BillsList({ onBack }) {
   const [shipMap, setShipMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showBatchMenu, setShowBatchMenu] = useState(false);
   const [filters, setFilters] = useState({
     keyword: "", direction: "", status: "", date_from: "", date_to: "",
+    partner_id: "", source: "", currency: "",
+    amount_min: "", amount_max: "",
+    has_invoice: "", has_voucher: "",
   });
+  const [partnerOptions, setPartnerOptions] = useState([]);
 
   const [showSettle, setShowSettle] = useState(null);
   const [showInvoice, setShowInvoice] = useState(null);
@@ -39,6 +45,9 @@ export default function BillsList({ onBack }) {
     let q = supabase.from("bills").select("*").order("created_at", { ascending: false });
     if (filters.direction) q = q.eq("direction", filters.direction);
     if (filters.status)    q = q.eq("status", filters.status);
+    if (filters.partner_id) q = q.eq("partner_id", filters.partner_id);
+    if (filters.source)    q = q.eq("source", filters.source);
+    if (filters.currency)  q = q.eq("currency", filters.currency);
     if (filters.date_from) q = q.gte("created_at", filters.date_from);
     if (filters.date_to)   q = q.lte("created_at", filters.date_to + "T23:59:59");
     const { data, error } = await q;
@@ -54,6 +63,16 @@ export default function BillsList({ onBack }) {
         (r.voucher_no || "").toLowerCase().includes(k)
       );
     }
+    // 金额范围
+    if (filters.amount_min) rows = rows.filter(r => Number(r.amount_total || 0) >= Number(filters.amount_min));
+    if (filters.amount_max) rows = rows.filter(r => Number(r.amount_total || 0) <= Number(filters.amount_max));
+    // 是否已开票
+    if (filters.has_invoice === "yes") rows = rows.filter(r => !!r.invoice_no);
+    if (filters.has_invoice === "no")  rows = rows.filter(r => !r.invoice_no);
+    // 是否填凭证号
+    if (filters.has_voucher === "yes") rows = rows.filter(r => !!r.voucher_no);
+    if (filters.has_voucher === "no")  rows = rows.filter(r => !r.voucher_no);
+
     setBills(rows);
 
     const partnerIds = [...new Set(rows.map(b => b.partner_id).filter(Boolean))];
@@ -74,6 +93,15 @@ export default function BillsList({ onBack }) {
     setLoading(false);
   };
 
+  // 加载所有 partners 选项（用于筛选下拉）
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("customers")
+        .select("id, name, partner_type").order("name");
+      setPartnerOptions(data || []);
+    })();
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   const toggle = (id) => {
@@ -90,6 +118,114 @@ export default function BillsList({ onBack }) {
     if (selected.size === 0) { alert("请先勾选要开票的账单"); return; }
     const sel = bills.filter(b => selected.has(b.id));
     setShowInvoice({ bills: sel });
+    setShowBatchMenu(false);
+  };
+
+  // 批量核销（弹窗输入核销日期 + 流水号，每张账单整额核销其未核销部分）
+  const batchSettle = async () => {
+    if (selected.size === 0) { alert("请先勾选要核销的账单"); return; }
+    const sel = bills.filter(b => selected.has(b.id));
+    const eligible = sel.filter(b => b.status !== "void" && b.status !== "settled");
+    if (eligible.length === 0) { alert("所选账单均已核销或作废，无可核销项"); return; }
+
+    const date = prompt("核销日期 (YYYY-MM-DD)", new Date().toISOString().slice(0, 10));
+    if (!date) return;
+    const settleNo = prompt("核销流水号 (可选，回车跳过)", "") || null;
+
+    if (!confirm(`确认整额核销 ${eligible.length} 张账单（每张按未核销余额）？`)) return;
+
+    let ok = 0, fail = 0;
+    for (const b of eligible) {
+      const remain = Number(b.amount_total || 0) - Number(b.settled_amount || 0);
+      if (remain <= 0.01) continue;
+      const { error } = await supabase.rpc("settle_bill", {
+        p_bill_id: b.id, p_amount: remain, p_settled_at: date, p_settle_no: settleNo,
+      });
+      if (error) fail++; else ok++;
+    }
+    alert(`核销完成：成功 ${ok} 张${fail ? `，失败 ${fail} 张` : ""}`);
+    setShowBatchMenu(false);
+    setSelected(new Set());
+    await load();
+  };
+
+  const batchClearInvoice = async () => {
+    if (selected.size === 0) { alert("请先勾选"); return; }
+    const sel = bills.filter(b => selected.has(b.id) && b.invoice_no);
+    if (sel.length === 0) { alert("所选账单均无发票号"); return; }
+    if (!confirm(`确认清除 ${sel.length} 张账单的发票号？`)) return;
+    const { error } = await supabase.rpc("clear_invoice", { p_bill_ids: sel.map(b => b.id) });
+    if (error) { alert("失败: " + error.message); return; }
+    setShowBatchMenu(false);
+    setSelected(new Set());
+    await load();
+  };
+
+  const batchDelete = async () => {
+    if (selected.size === 0) { alert("请先勾选"); return; }
+    const sel = bills.filter(b => selected.has(b.id));
+    const blocked = sel.filter(b => b.status === "settled" || b.status === "partial");
+    if (blocked.length > 0) {
+      alert(`所选包含 ${blocked.length} 张已核销/部分核销账单，无法删除。请先撤销核销。`);
+      return;
+    }
+    if (!confirm(`⚠ 确认删除 ${sel.length} 张账单？\n相关 charges 的 bill_id 会被解绑（charges 本身保留）。\n此操作不可恢复！`)) return;
+    // 先解绑 charges
+    await supabase.rpc("unbind_charges_from_bill", {
+      p_charge_ids: [],  // 这里可能要按账单维度解绑，简化：直接 update charges
+    }).catch(() => {});
+    // 直接 update charges set bill_id = null
+    await supabase.from("charges").update({ bill_id: null })
+      .in("bill_id", sel.map(b => b.id));
+    // 删账单
+    const { error } = await supabase.from("bills").delete().in("id", sel.map(b => b.id));
+    if (error) { alert("删除失败: " + error.message); return; }
+    setShowBatchMenu(false);
+    setSelected(new Set());
+    await load();
+  };
+
+  // 导出 Excel
+  const exportExcel = (which = "all") => {
+    const rows = which === "selected"
+      ? bills.filter(b => selected.has(b.id))
+      : bills;
+    if (rows.length === 0) { alert("无数据可导出"); return; }
+    const headers = ["属性","账单编号","结算单位","发票号","开票时间","凭证号",
+                     "币种","账单金额","已核销","未核销","状态","来源","创建人","创建时间"];
+    const data = rows.map(b => [
+      b.direction === "AR" ? "应收" : "应付",
+      b.bill_no || "",
+      b.partner_name || "",
+      b.invoice_no || "",
+      b.invoice_date ? formatDate(b.invoice_date) : "",
+      b.voucher_no || "",
+      b.currency || "",
+      Number(b.amount_total || 0).toFixed(2),
+      Number(b.settled_amount || 0).toFixed(2),
+      (Number(b.amount_total || 0) - Number(b.settled_amount || 0)).toFixed(2),
+      STATUS_LABELS[b.status]?.label || b.status,
+      b.source || "",
+      b.created_by || "",
+      b.created_at ? formatDate(b.created_at) : "",
+    ]);
+    // 生成 CSV (Excel 兼容)
+    const csvRows = [headers, ...data];
+    const csv = csvRows.map(r =>
+      r.map(c => {
+        const s = String(c ?? "");
+        if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      }).join(",")
+    ).join("\r\n");
+    // BOM 让 Excel 识别 UTF-8
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `账单管理_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const settleBill = (b) => setShowSettle(b);
@@ -149,7 +285,29 @@ export default function BillsList({ onBack }) {
             </span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={batchInvoice} style={btn} disabled={selected.size === 0}>批量开票</button>
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setShowBatchMenu(!showBatchMenu)}
+                      style={{ ...btnPrimary, fontWeight: 600 }}
+                      disabled={selected.size === 0}>
+                批量操作 ▾
+              </button>
+              {showBatchMenu && selected.size > 0 && (
+                <div style={{
+                  position: "absolute", top: "100%", right: 0, marginTop: 4,
+                  background: "#fff", border: "1px solid #d9d9d9", borderRadius: 3,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.12)", width: 140, zIndex: 10,
+                  padding: "4px 0",
+                }}>
+                  <div onClick={batchInvoice} style={menuItem}>批量开票</div>
+                  <div onClick={batchSettle} style={menuItem}>批量核销</div>
+                  <div onClick={batchClearInvoice} style={menuItem}>批量清票</div>
+                  <div onClick={batchDelete} style={{ ...menuItem, color: "#ff4d4f" }}>批量删除</div>
+                </div>
+              )}
+            </div>
+            <button onClick={() => exportExcel(selected.size > 0 ? "selected" : "all")} style={btn}>
+              导出 {selected.size > 0 ? `选中 (${selected.size})` : "全部"}
+            </button>
             <a href="#/statements" target="_blank" rel="noreferrer"
                style={{ ...btn, textDecoration: "none", display: "inline-block" }}>对账单管理</a>
           </div>
@@ -186,9 +344,97 @@ export default function BillsList({ onBack }) {
                  onChange={e => setFilters({...filters, date_to: e.target.value})}
                  style={selStyle} />
           <button onClick={load} style={btn}>查询</button>
-          <button onClick={() => { setFilters({keyword:"", direction:"", status:"", date_from:"", date_to:""}); setTimeout(load, 0); }}
+          <button onClick={() => { setFilters({
+            keyword:"", direction:"", status:"", date_from:"", date_to:"",
+            partner_id:"", source:"", currency:"",
+            amount_min:"", amount_max:"",
+            has_invoice:"", has_voucher:"",
+          }); setTimeout(load, 0); }}
                   style={btn}>重置</button>
+          <a onClick={() => setShowAdvanced(!showAdvanced)}
+             style={{ marginLeft: "auto", color: "#1990ff", cursor: "pointer", fontSize: 12 }}>
+            {showAdvanced ? "▲ 收起筛选" : "▼ 展开筛选"}
+          </a>
         </div>
+
+        {/* 高级筛选面板 */}
+        {showAdvanced && (
+          <div style={{ marginBottom: 12, padding: 12, background: "#fafafa",
+                        border: "1px dashed #d9d9d9", borderRadius: 3,
+                        display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
+                        gap: "10px 16px", fontSize: 12 }}>
+            <div>
+              <label style={lbl}>结算单位</label>
+              <select value={filters.partner_id}
+                      onChange={e => setFilters({...filters, partner_id: e.target.value})}
+                      style={inp}>
+                <option value="">全部</option>
+                {partnerOptions.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={lbl}>来源</label>
+              <select value={filters.source}
+                      onChange={e => setFilters({...filters, source: e.target.value})}
+                      style={inp}>
+                <option value="">全部</option>
+                <option value="海运出口">海运出口</option>
+                <option value="海运进口">海运进口</option>
+                <option value="集运">集运</option>
+                <option value="陆运">陆运</option>
+                <option value="空运">空运</option>
+              </select>
+            </div>
+            <div>
+              <label style={lbl}>币种</label>
+              <select value={filters.currency}
+                      onChange={e => setFilters({...filters, currency: e.target.value})}
+                      style={inp}>
+                <option value="">全部</option>
+                <option value="CNY">CNY</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+                <option value="JPY">JPY</option>
+              </select>
+            </div>
+            <div></div>
+            <div>
+              <label style={lbl}>金额 ≥</label>
+              <input type="number" step="0.01" value={filters.amount_min}
+                     onChange={e => setFilters({...filters, amount_min: e.target.value})}
+                     placeholder="0.00" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>金额 ≤</label>
+              <input type="number" step="0.01" value={filters.amount_max}
+                     onChange={e => setFilters({...filters, amount_max: e.target.value})}
+                     placeholder="0.00" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>是否已开票</label>
+              <select value={filters.has_invoice}
+                      onChange={e => setFilters({...filters, has_invoice: e.target.value})}
+                      style={inp}>
+                <option value="">全部</option>
+                <option value="yes">已开票</option>
+                <option value="no">未开票</option>
+              </select>
+            </div>
+            <div>
+              <label style={lbl}>是否填凭证号</label>
+              <select value={filters.has_voucher}
+                      onChange={e => setFilters({...filters, has_voucher: e.target.value})}
+                      style={inp}>
+                <option value="">全部</option>
+                <option value="yes">已填</option>
+                <option value="no">未填</option>
+              </select>
+            </div>
+          </div>
+        )}
 
         {/* 列表 */}
         <div style={{ overflowX: "auto" }}>
@@ -598,3 +844,4 @@ const btn = { padding: "5px 14px", background: "#fff", border: "1px solid #d9d9d
               borderRadius: 3, fontSize: 12, cursor: "pointer" };
 const btnPrimary = { ...btn, background: "#1990ff", color: "#fff", border: "1px solid #1990ff",
                       fontWeight: 600 };
+const menuItem = { padding: "6px 12px", cursor: "pointer", fontSize: 12 };

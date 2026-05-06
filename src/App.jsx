@@ -20,6 +20,7 @@ import Statement from "./pages/docs/Statement.jsx";
 import StatementsList from "./pages/StatementsList.jsx";
 import StatementNew from "./pages/StatementNew.jsx";
 import StatementDetail from "./pages/StatementDetail.jsx";
+import InvoicesList from "./pages/InvoicesList.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -138,15 +139,18 @@ export default function App() {
     return <BillsList onBack={() => { window.location.hash = ""; }} />;
   }
 
-  // ── V5 财务模块占位路由 ──
+  // ── V5 财务模块路由 ──
+  // #/invoices 开票/收票记录
+  if (route === "invoices") {
+    return <InvoicesList onBack={() => { window.location.hash = ""; }} />;
+  }
+
   // #/charges      费用记录列表（V5 第二阶段）
-  // #/invoices     开票记录（V5 第四阶段）
   // #/payments     收付款记录（V5 第三阶段）
   // #/settlements  核销管理（V5 第三阶段）
-  if (route === "charges" || route === "invoices" || route === "payments" || route === "settlements") {
+  if (route === "charges" || route === "payments" || route === "settlements") {
     const titleMap = {
       charges:     "费用记录",
-      invoices:    "开票记录",
       payments:    "收付款记录",
       settlements: "核销管理",
     };

@@ -1,23 +1,25 @@
 // ═══════════════════════════════════════════════════════════════
 // 客商管理 (Partners.jsx)
-// - 7 种 partner_type tab：客户/供应商/船东/海外代理/车队/报关行/仓库
+// - 8 种 partner_type tab：客户/供应商/船东/订舱代理/海外代理/车队/报关行/仓库
 // - 列表 + 筛选 + 新建 + 编辑 + 启用停用
-// - 自动 code 生成（C001 / S001 / V001 / A001 / T001 / B001 / W001）
+// - 自动 code 生成（C001 / S001 / V001 / F001 / A001 / T001 / B001 / W001）
+// - 列表"改类型"快捷操作：1 步把单条客商挪到任意分类
 // ═══════════════════════════════════════════════════════════════
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
 
-// 7 种 partner_type 定义
+// 8 种 partner_type 定义
 const PARTNER_TYPES = [
-  { key: "客户",    code: "C", colorBg: "#e6f4ff", colorFg: "#1990FF" },
-  { key: "供应商",  code: "S", colorBg: "#f6ffed", colorFg: "#52c41a" },
-  { key: "船东",    code: "V", colorBg: "#fff7e6", colorFg: "#fa8c16" },
-  { key: "海外代理", code: "A", colorBg: "#f9f0ff", colorFg: "#722ed1" },
-  { key: "车队",    code: "T", colorBg: "#fff1f0", colorFg: "#cf1322" },
-  { key: "报关行",  code: "B", colorBg: "#fcffe6", colorFg: "#a0d911" },
-  { key: "仓库",    code: "W", colorBg: "#e6fffb", colorFg: "#13c2c2" },
+  { key: "客户",      code: "C", colorBg: "#e6f4ff", colorFg: "#1990FF" },
+  { key: "供应商",    code: "S", colorBg: "#f6ffed", colorFg: "#52c41a" },
+  { key: "船东",      code: "V", colorBg: "#fff7e6", colorFg: "#fa8c16" },
+  { key: "订舱代理",  code: "F", colorBg: "#fff0f6", colorFg: "#eb2f96" },
+  { key: "海外代理",  code: "A", colorBg: "#f9f0ff", colorFg: "#722ed1" },
+  { key: "车队",      code: "T", colorBg: "#fff1f0", colorFg: "#cf1322" },
+  { key: "报关行",    code: "B", colorBg: "#fcffe6", colorFg: "#a0d911" },
+  { key: "仓库",      code: "W", colorBg: "#e6fffb", colorFg: "#13c2c2" },
 ];
 
 // 列定义
@@ -33,6 +35,7 @@ const PARTNER_COLS = [
   { k: "credit",  w: 100, label: "信用条款" },
   { k: "active",  w: 70,  label: "状态", center: true },
   { k: "use",     w: 80,  label: "订单数", center: true },
+  { k: "act",     w: 90,  label: "操作", center: true },
 ];
 const PARTNER_COL_WIDTHS_KEY = "bansar_partners_col_widths_v1";
 
@@ -52,6 +55,8 @@ export function PartnersPage({ user, onBack }) {
   const [showNew, setShowNew] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize] = useState(50);
+  // 列表"改类型"浮层：存当前打开浮层的 partner.id，null = 都关闭
+  const [changeTypeFor, setChangeTypeFor] = useState(null);
 
   // 列宽
   const [colWidths, setColWidths] = useState(() => {
@@ -124,6 +129,17 @@ export function PartnersPage({ user, onBack }) {
   }, []);
 
   useEffect(() => { load(); loadOrderCounts(); }, [load, loadOrderCounts]);
+
+  // 把单条客商挪到目标类型分类
+  // 注意：改 partner_type 不级联改任何 shipments / bills（只是分类标签）
+  const changePartnerType = async (partner, targetType) => {
+    if (partner.partner_type === targetType) { setChangeTypeFor(null); return; }
+    const { error } = await supabase.from("customers")
+      .update({ partner_type: targetType }).eq("id", partner.id);
+    if (error) { alert("修改失败: " + error.message); return; }
+    setChangeTypeFor(null);
+    await load();
+  };
 
   // 按 tab 过滤 + 搜索 + 启用过滤
   const filtered = useMemo(() => {
@@ -235,6 +251,7 @@ export function PartnersPage({ user, onBack }) {
             {paged.map((p, i) => {
               const evenOdd = i % 2 === 0 ? "even" : "odd";
               const useCount = orderCounts[p.name] || 0;
+              const isChangeOpen = changeTypeFor === p.id;
               return (
                 <tr key={p.id} className={evenOdd}>
                   <td className="center"><input type="checkbox" /></td>
@@ -252,6 +269,20 @@ export function PartnersPage({ user, onBack }) {
                       : <span style={{ color: "#52c41a", fontSize: 11 }}>● 启用</span>}
                   </td>
                   <td className="center">{useCount > 0 ? <b style={{ color: "#1990FF" }}>{useCount}</b> : <span style={{ color: "#bbb" }}>—</span>}</td>
+                  <td className="center" style={{ position: "relative" }}>
+                    <span
+                      className="lk"
+                      onClick={(e) => { e.stopPropagation(); setChangeTypeFor(isChangeOpen ? null : p.id); }}
+                      style={{ fontSize: 11 }}
+                    >改类型 ▾</span>
+                    {isChangeOpen && (
+                      <ChangeTypeMenu
+                        currentType={p.partner_type}
+                        onPick={(t) => changePartnerType(p, t)}
+                        onClose={() => setChangeTypeFor(null)}
+                      />
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -273,6 +304,64 @@ export function PartnersPage({ user, onBack }) {
           onSaved={() => { setShowNew(false); load(); }}
         />
       )}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────
+// 列表"改类型"浮层（点击行的"改类型 ▾"展开）
+// 显示除当前类型外的其它类型，点击直接执行 update
+// 点外部自动关闭（用 mousedown 监听 document）
+// ───────────────────────────────────────────────────────────────
+function ChangeTypeMenu({ currentType, onPick, onClose }) {
+  // 点外部关闭
+  useEffect(() => {
+    const onDoc = (e) => {
+      // 让本菜单内的点击不触发关闭
+      if (e.target.closest && e.target.closest("[data-change-type-menu]")) return;
+      onClose();
+    };
+    // 延迟绑定，避免本次点击立即触发关闭
+    const t = setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", onDoc);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      data-change-type-menu="1"
+      style={{
+        position: "absolute",
+        top: "100%", right: 4, marginTop: 4,
+        background: "#fff",
+        border: "1px solid #d9d9d9",
+        borderRadius: 4,
+        boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+        minWidth: 130, zIndex: 50,
+        padding: "4px 0",
+        textAlign: "left",
+      }}
+    >
+      <div style={{ padding: "4px 12px", fontSize: 11, color: "#888", borderBottom: "1px solid #f0f0f0" }}>
+        改为：
+      </div>
+      {PARTNER_TYPES.filter(t => t.key !== currentType).map(t => (
+        <div
+          key={t.key}
+          onClick={(e) => { e.stopPropagation(); onPick(t.key); }}
+          style={{
+            padding: "6px 12px", cursor: "pointer", fontSize: 12,
+            display: "flex", alignItems: "center", gap: 8,
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: t.colorFg }}></span>
+          {t.key}
+        </div>
+      ))}
     </div>
   );
 }

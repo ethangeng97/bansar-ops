@@ -96,6 +96,8 @@ function createClient() {
       like:  (c, v) => { filters.push(`${c}=like.${enc(v)}`); return builder; },
       ilike: (c, v) => { filters.push(`${c}=ilike.${enc(v)}`); return builder; },
       is:  (c, v) => { filters.push(`${c}=is.${v}`); return builder; },
+      // .not(col, op, val) — PostgREST 反向操作，常用 .not("col", "is", null) 表示 IS NOT NULL
+      not: (c, op, v) => { filters.push(`${c}=not.${op}.${v === null ? "null" : enc(v)}`); return builder; },
       in:  (c, vals) => { filters.push(`${c}=in.(${vals.map(enc).join(",")})`); return builder; },
       or:  (expr) => { filters.push(`or=(${expr})`); return builder; },
       order: (c, { ascending = true } = {}) => { params.push(`order=${c}.${ascending ? "asc" : "desc"}`); return builder; },

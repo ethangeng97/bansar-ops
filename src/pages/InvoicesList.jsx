@@ -29,103 +29,102 @@ export default function InvoicesList({ onBack }) {
 
   const load = async () => {
     setLoading(true);
-    // 1. 拉所有有发票号的 bills
-    let q = supabase.from("bills")
-      .select("id, bill_no, invoice_no, invoice_date, partner_id, partner_name, shipment_id, statement_id, currency, amount_total, amount_cny, direction, status")
-      .eq("direction", direction)
-      .not("invoice_no", "is", null)
-      .order("invoice_date", { ascending: false });
+    try {
+      // 1. 拉所有 bills（按 direction 过滤），客户端再过滤 invoice_no
+      // 注：supabase.js builder 不支持 .not()，所以用客户端过滤代替 IS NOT NULL
+      let q = supabase.from("bills")
+        .select("id, bill_no, invoice_no, invoice_date, partner_id, partner_name, shipment_id, statement_id, currency, amount_total, amount_cny, direction, status")
+        .eq("direction", direction)
+        .order("invoice_date", { ascending: false });
 
-    if (filters.date_from) q = q.gte("invoice_date", filters.date_from);
-    if (filters.date_to)   q = q.lte("invoice_date", filters.date_to + "T23:59:59");
+      if (filters.date_from) q = q.gte("invoice_date", filters.date_from);
+      if (filters.date_to)   q = q.lte("invoice_date", filters.date_to + "T23:59:59");
 
-    const { data, error } = await q;
-    if (error) { alert("加载失败: " + error.message); setLoading(false); return; }
-    const billRows = (data || []).filter(b => (b.invoice_no || "").trim() !== "");
+      const { data, error } = await q;
+      if (error) { alert("加载失败: " + error.message); setLoading(false); return; }
+      // 客户端过滤：只要有发票号的
+      const billRows = (data || []).filter(b => (b.invoice_no || "").trim() !== "");
 
-    // 2. 拉 shipments（提单号、作业号）
-    const shipIds = [...new Set(billRows.map(b => b.shipment_id).filter(Boolean))];
-    let shipMap = {};
-    if (shipIds.length > 0) {
-      const { data: ss } = await supabase.from("shipments")
-        .select("id, order_no, booking_no, hbl_no, mbl_no").in("id", shipIds);
-      (ss || []).forEach(x => { shipMap[x.id] = x; });
-    }
+      // 2-3-customer. shipments / statements / customers 并行（互不依赖）
+      const shipIds = [...new Set(billRows.map(b => b.shipment_id).filter(Boolean))];
+      const stmtIds = [...new Set(billRows.map(b => b.statement_id).filter(Boolean))];
+      const partnerIds = [...new Set(billRows.map(b => b.partner_id).filter(Boolean))];
 
-    // 3. 拉 statements（对账单号）
-    const stmtIds = [...new Set(billRows.map(b => b.statement_id).filter(Boolean))];
-    let stmtMap = {};
-    if (stmtIds.length > 0) {
-      const { data: ss } = await supabase.from("statements")
-        .select("id, statement_no").in("id", stmtIds);
-      (ss || []).forEach(x => { stmtMap[x.id] = x.statement_no; });
-    }
+      const [shipRes, stmtRes, partnerRes] = await Promise.all([
+        shipIds.length > 0
+          ? supabase.from("shipments").select("id, order_no, booking_no, hbl_no, mbl_no").in("id", shipIds)
+          : Promise.resolve({ data: [] }),
+        stmtIds.length > 0
+          ? supabase.from("statements").select("id, statement_no").in("id", stmtIds)
+          : Promise.resolve({ data: [] }),
+        partnerIds.length > 0
+          ? supabase.from("customers").select("id, name").in("id", partnerIds)
+          : Promise.resolve({ data: [] }),
+      ]);
 
-    // 4. 给每张 bill 注入提单号、作业号、对账单号
-    billRows.forEach(b => {
-      const ship = shipMap[b.shipment_id];
-      b._order_no = ship?.order_no || "—";
-      b._mbl = ship ? ((ship.mbl_no || "").trim() || (ship.booking_no || "").trim() || "—") : "—";
-      b._hbl = ship ? (ship.hbl_no || "").trim() : "";
-      b._statement_no = b.statement_id ? (stmtMap[b.statement_id] || `#${b.statement_id}`) : null;
-    });
+      const shipMap = {};   (shipRes.data || []).forEach(x => { shipMap[x.id] = x; });
+      const stmtMap = {};   (stmtRes.data || []).forEach(x => { stmtMap[x.id] = x.statement_no; });
+      const partnerMap = {}; (partnerRes.data || []).forEach(p => { partnerMap[p.id] = p.name; });
 
-    // 5. 按 invoice_no 聚合
-    const byInvoice = {};
-    billRows.forEach(b => {
-      const key = b.invoice_no;
-      if (!byInvoice[key]) {
-        byInvoice[key] = {
-          invoice_no: key,
-          invoice_date: b.invoice_date,
-          partner_id: b.partner_id,
-          partner_name: b.partner_name,
-          currency: b.currency,
-          direction: b.direction,
-          bills: [],
-          amount_total: 0,
-          amount_cny: 0,
-        };
+      // 4. 给每张 bill 注入提单号、作业号、对账单号
+      billRows.forEach(b => {
+        const ship = shipMap[b.shipment_id];
+        b._order_no = ship?.order_no || "—";
+        b._mbl = ship ? ((ship.mbl_no || "").trim() || (ship.booking_no || "").trim() || "—") : "—";
+        b._hbl = ship ? (ship.hbl_no || "").trim() : "";
+        b._statement_no = b.statement_id ? (stmtMap[b.statement_id] || `#${b.statement_id}`) : null;
+      });
+
+      // 5. 按 invoice_no 聚合
+      const byInvoice = {};
+      billRows.forEach(b => {
+        const key = b.invoice_no;
+        if (!byInvoice[key]) {
+          byInvoice[key] = {
+            invoice_no: key,
+            invoice_date: b.invoice_date,
+            partner_id: b.partner_id,
+            partner_name: b.partner_name || partnerMap[b.partner_id] || "",
+            currency: b.currency,
+            direction: b.direction,
+            bills: [],
+            amount_total: 0,
+            amount_cny: 0,
+          };
+        }
+        const grp = byInvoice[key];
+        grp.bills.push(b);
+        grp.amount_total += Number(b.amount_total || 0);
+        grp.amount_cny += Number(b.amount_cny || 0);
+        if (b.invoice_date && (!grp.invoice_date || b.invoice_date > grp.invoice_date)) {
+          grp.invoice_date = b.invoice_date;
+        }
+      });
+
+      let invs = Object.values(byInvoice);
+
+      // 客户端过滤关键字（发票号 / 客户 / 账单号 / 提单号 / 作业号）
+      if (filters.keyword) {
+        const k = filters.keyword.toLowerCase().trim();
+        invs = invs.filter(g =>
+          (g.invoice_no || "").toLowerCase().includes(k) ||
+          (g.partner_name || "").toLowerCase().includes(k) ||
+          g.bills.some(b =>
+            (b.bill_no || "").toLowerCase().includes(k) ||
+            (b._mbl || "").toLowerCase().includes(k) ||
+            (b._order_no || "").toLowerCase().includes(k)
+          )
+        );
       }
-      const grp = byInvoice[key];
-      grp.bills.push(b);
-      grp.amount_total += Number(b.amount_total || 0);
-      grp.amount_cny += Number(b.amount_cny || 0);
-      // 如果同发票号下币种不一致（异常），保留第一个
-      // 取最新 invoice_date
-      if (b.invoice_date && (!grp.invoice_date || b.invoice_date > grp.invoice_date)) {
-        grp.invoice_date = b.invoice_date;
-      }
-    });
 
-    let invs = Object.values(byInvoice);
-    // partner_name 兜底
-    const partnerIds = [...new Set(invs.map(i => i.partner_id).filter(Boolean))];
-    if (partnerIds.length > 0) {
-      const { data: ps } = await supabase.from("customers")
-        .select("id, name").in("id", partnerIds);
-      const pm = {}; (ps || []).forEach(p => { pm[p.id] = p.name; });
-      invs.forEach(i => { if (!i.partner_name) i.partner_name = pm[i.partner_id] || ""; });
+      // 按 invoice_date 倒序
+      invs.sort((a, b) => (b.invoice_date || "").localeCompare(a.invoice_date || ""));
+      setInvoices(invs);
+    } catch (err) {
+      alert("加载失败: " + (err.message || err));
+    } finally {
+      setLoading(false);
     }
-
-    // 客户端过滤关键字（发票号 / 客户 / 账单号 / 提单号）
-    if (filters.keyword) {
-      const k = filters.keyword.toLowerCase().trim();
-      invs = invs.filter(g =>
-        (g.invoice_no || "").toLowerCase().includes(k) ||
-        (g.partner_name || "").toLowerCase().includes(k) ||
-        g.bills.some(b =>
-          (b.bill_no || "").toLowerCase().includes(k) ||
-          (b._mbl || "").toLowerCase().includes(k) ||
-          (b._order_no || "").toLowerCase().includes(k)
-        )
-      );
-    }
-
-    // 按 invoice_date 倒序
-    invs.sort((a, b) => (b.invoice_date || "").localeCompare(a.invoice_date || ""));
-    setInvoices(invs);
-    setLoading(false);
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [direction]);

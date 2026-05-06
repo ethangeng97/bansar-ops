@@ -1310,219 +1310,367 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
 
             <div className="tms-detail-panel-light">
               {subtab === "托单信息" && (
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 5fr) minmax(0, 4fr)",
-                  gap: 16,
-                  alignItems: "start",
-                }}>
+                <div style={tmStyles.wrap}>
 
-                  {/* ════════ 左列：货物 + 三方 ════════ */}
-                  <div>
-                    {/* 集装箱：跳到子 tab 的提示 */}
-                    <div style={{
-                      padding: "8px 12px", background: "#f0f7ff", border: "1px solid #c6e2ff",
-                      borderRadius: 3, fontSize: 12, color: "#1f3864", marginBottom: 10,
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                    }}>
-                      <span>📦 集装箱明细（箱型/箱量/箱号/铅封号）请在 <b>集装箱</b> 子 tab 内编辑</span>
+                  {/* ━━━━━━━━━━━ 段 1：集装箱提示 ━━━━━━━━━━━ */}
+                  <div style={tmStyles.section}>
+                    <div style={tmStyles.row}>
+                      <label style={{ ...tmStyles.label, ...tmStyles.labelReadonly, ...tmStyles.labelNotnull }}>集装箱</label>
+                      <input
+                        value={(() => {
+                          // 这里聚合显示 shipment_containers，但因为 ContainerEditor 在子 tab 编辑
+                          // 这里只显示当前 qty_container 旧字段（向后兼容）或提示
+                          return v("qty_container") || "";
+                        })()}
+                        readOnly
+                        placeholder="点右侧 + 跳到集装箱子 tab 编辑"
+                        style={{ ...tmStyles.input, width: 200, fontFamily: "Consolas,monospace", color: "#666" }}
+                      />
+                      <button onClick={() => setSubtab("集装箱")} style={tmStyles.btnPlus} disabled={!order?.id}>+</button>
                     </div>
+                  </div>
 
-                    {/* 货物头：件数 / 单位 / 毛重 / 体积 / 大写数量 / 货物种类 */}
-                    <SectionTitle>货物</SectionTitle>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px 12px", marginBottom: 4 }}>
-                      <Df label="货物件数">
-                        <input type="number" value={v("qty_packages") || ""}
-                               onChange={e => ch("qty_packages", e.target.value === "" ? null : Number(e.target.value))}
-                               disabled={!editing} />
-                      </Df>
-                      <Df label="计件单位">
+                  {/* ━━━━━━━━━━━ 段 2：件数 / 单位 / 毛重 / 体积 ━━━━━━━━━━━ */}
+                  <div style={tmStyles.section}>
+                    <div style={tmStyles.row}>
+                      <label style={tmStyles.label}>货物件数</label>
+                      <input type="number"
+                             value={v("qty_packages") || ""}
+                             onChange={e => ch("qty_packages", e.target.value === "" ? null : Number(e.target.value))}
+                             disabled={!editing}
+                             style={{ ...tmStyles.input, width: 114 }} />
+
+                      <label style={{ ...tmStyles.label, marginLeft: 16 }}>包装</label>
+                      <span style={{ display: "inline-block", width: 114 }}>
                         <ComboBox
                           value={v("pkg_unit") || ""}
                           onChange={val => ch("pkg_unit", val ? liveUpper(val) : null)}
                           options={pkgUnits.map(u => u.code)}
-                          placeholder="CARTONS / PALLETS..."
+                          placeholder="CARTONS"
                         />
-                      </Df>
-                      <Df label="毛重 (KG)">
-                        <input type="number" step="0.001" value={v("weight") || ""}
-                               onChange={e => ch("weight", e.target.value === "" ? null : Number(e.target.value))}
-                               disabled={!editing} />
-                      </Df>
-                      <Df label="体积 (CBM)">
-                        <input type="number" step="0.001" value={v("volume") || ""}
-                               onChange={e => ch("volume", e.target.value === "" ? null : Number(e.target.value))}
-                               disabled={!editing} />
-                      </Df>
-                      <Df label="货物种类" span={2}>
-                        <select value={v("cargo_type") || "general"}
-                                onChange={e => ch("cargo_type", e.target.value)}
-                                disabled={!editing}>
-                          {cargoTypes.length === 0 && <option value="general">普通货</option>}
-                          {cargoTypes.map(t => <option key={t.code} value={t.code}>{t.name_zh}</option>)}
-                        </select>
-                      </Df>
-                      <Df label="大写数量" span={6}>
-                        <input value={v("qty_in_words")}
-                               onChange={e => ch("qty_in_words", liveUpper(e.target.value))}
-                               disabled={!editing}
-                               placeholder="如 SAY: ONE HUNDRED CARTONS ONLY" />
-                      </Df>
-                      <Df label="唛头 (Marks)" span={6}>
-                        <textarea value={v("marks")}
-                                  onChange={e => ch("marks", e.target.value)}
-                                  onBlur={e => {
-                                    const err = validateNoFullWidthSymbols(e.target.value);
-                                    if (err) alert("唛头：" + err);
-                                  }}
-                                  disabled={!editing}
-                                  placeholder="N/M 或自定义唛头" />
-                      </Df>
-                      <Df label="品名货描" span={6}>
-                        <textarea value={v("description")}
-                                  onChange={e => ch("description", e.target.value)}
-                                  disabled={!editing}
-                                  placeholder="完整货描" />
-                      </Df>
-                      <Df label="中文品名" span={3}>
-                        <textarea value={v("desc_zh")}
-                                  onChange={e => ch("desc_zh", e.target.value)}
-                                  onBlur={e => {
-                                    const err = validateNoFullWidthSymbols(e.target.value);
-                                    if (err) alert("中文品名：" + err);
-                                  }}
-                                  disabled={!editing} />
-                      </Df>
-                      <Df label="英文品名" span={3}>
-                        <textarea value={v("desc_en")}
-                                  onChange={e => ch("desc_en", e.target.value)}
-                                  onBlur={e => {
-                                    const err = validateAsciiOnly(e.target.value);
-                                    if (err) alert("英文品名：" + err);
-                                  }}
-                                  disabled={!editing}
-                                  placeholder="仅半角字符" />
-                      </Df>
-                    </div>
+                      </span>
 
-                    {/* 三方信息 */}
-                    <SectionTitle>发货人 / 收货人 / 通知人</SectionTitle>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
-                      <Df label="发货人 (Shipper)" refLabel>
-                        <textarea
-                          value={v("shipper")}
-                          onChange={e => ch("shipper", e.target.value)}
-                          onBlur={e => {
-                            const err = validateAsciiOnly(e.target.value);
-                            if (err) alert("发货人：" + err);
-                          }}
-                          disabled={!editing}
-                          placeholder="英文公司名 + 地址（仅半角字符）"
-                          rows={3}
-                        />
-                      </Df>
-                      <Df label="收货人 (Consignee)" refLabel>
-                        <textarea
-                          value={v("consignee")}
-                          onChange={e => ch("consignee", e.target.value)}
-                          onBlur={e => {
-                            const err = validateAsciiOnly(e.target.value);
-                            if (err) alert("收货人：" + err);
-                          }}
-                          disabled={!editing}
-                          placeholder="英文公司名 + 地址（仅半角字符）"
-                          rows={3}
-                        />
-                      </Df>
-                      <Df label="通知人 (Notify Party)">
-                        <textarea
-                          value={v("notify_party")}
-                          onChange={e => ch("notify_party", e.target.value)}
-                          onBlur={e => {
-                            const err = validateAsciiOnly(e.target.value);
-                            if (err) alert("通知人：" + err);
-                          }}
-                          disabled={!editing}
-                          placeholder="可与收货人相同（仅半角字符）"
-                          rows={3}
-                        />
-                      </Df>
+                      <label style={{ ...tmStyles.label, marginLeft: 16 }}>毛重</label>
+                      <input type="number" step="0.001"
+                             value={v("weight") || ""}
+                             onChange={e => ch("weight", e.target.value === "" ? null : Number(e.target.value))}
+                             disabled={!editing}
+                             style={{ ...tmStyles.input, width: 114, fontFamily: "Consolas,monospace", textAlign: "right" }} />
+
+                      <label style={{ ...tmStyles.label, marginLeft: 16 }}>体积</label>
+                      <input type="number" step="0.001"
+                             value={v("volume") || ""}
+                             onChange={e => ch("volume", e.target.value === "" ? null : Number(e.target.value))}
+                             disabled={!editing}
+                             style={{ ...tmStyles.input, width: 114, fontFamily: "Consolas,monospace", textAlign: "right" }} />
                     </div>
                   </div>
 
-                  {/* ════════ 右列：港口/路线 + 票据 ════════ */}
-                  <div>
-                    <SectionTitle>港口与路线</SectionTitle>
-                    <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: "6px 8px", alignItems: "center" }}>
-                      <label style={portLabel}>收货地</label>
-                      <PortPicker
-                        value={{ code: v("receipt_place_code"), name: v("receipt_place_name") }}
-                        onChange={({code, name}) => { ch("receipt_place_code", code); ch("receipt_place_name", name); }}
-                        disabled={!editing}
-                      />
-                      <label style={portLabel}>起运港 (POL)</label>
-                      <PortPicker
-                        value={{ code: v("pol_code"), name: v("pol") }}
-                        onChange={({code, name}) => { ch("pol_code", code); ch("pol", name); }}
-                        disabled={!editing}
-                      />
-                      <label style={portLabel}>中转港</label>
-                      <PortPicker
-                        value={{ code: v("transit_port_code"), name: v("transit_port_name") }}
-                        onChange={({code, name}) => { ch("transit_port_code", code); ch("transit_port_name", name); }}
-                        disabled={!editing}
-                      />
-                      <label style={portLabel}>卸货港 (POD)</label>
-                      <PortPicker
-                        value={{ code: v("pod_code"), name: v("pod") }}
-                        onChange={({code, name}) => { ch("pod_code", code); ch("pod", name); }}
-                        disabled={!editing}
-                      />
-                      <label style={portLabel}>目的港</label>
-                      <PortPicker
-                        value={{ code: v("destination_code"), name: v("destination") }}
-                        onChange={({code, name}) => { ch("destination_code", code); ch("destination", name); }}
-                        disabled={!editing}
-                      />
-                      <label style={portLabel}>起运港码头</label>
-                      <input
-                        value={v("terminal")}
-                        onChange={e => ch("terminal", liveUpper(e.target.value))}
-                        disabled={!editing}
-                        placeholder="如 BEILUN PORT"
-                        style={portInputStyle}
-                      />
+                  {/* ━━━━━━━━━━━ 段 3：大写数量 + 货物种类 ━━━━━━━━━━━ */}
+                  <div style={tmStyles.section}>
+                    <div style={{ ...tmStyles.row, alignItems: "flex-start" }}>
+                      <label style={tmStyles.label}>大写数量</label>
+                      <input value={v("qty_in_words")}
+                             onChange={e => ch("qty_in_words", liveUpper(e.target.value))}
+                             disabled={!editing}
+                             placeholder="SAY: ONE HUNDRED CARTONS ONLY"
+                             style={{ ...tmStyles.input, width: 318, fontFamily: "Consolas,monospace" }} />
+
+                      <label style={{ ...tmStyles.label, marginLeft: 24 }}>货物种类</label>
+                      <select value={v("cargo_type") || "general"}
+                              onChange={e => ch("cargo_type", e.target.value)}
+                              disabled={!editing}
+                              style={{ ...tmStyles.input, width: 110 }}>
+                        {cargoTypes.length === 0 && <option value="general">普通货</option>}
+                        {cargoTypes.map(t => <option key={t.code} value={t.code}>{t.name_zh}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* ━━━━━━━━━━━ 段 4：3 列大网格 ━━━━━━━━━━━ */}
+                  <div style={tmStyles.threeColWrap}>
+
+                    {/* ──── 左列：发货人 / 收货人 / 通知人 ──── */}
+                    <div style={tmStyles.col}>
+                      {/* 发货人 */}
+                      <div style={tmStyles.subSection}>
+                        <div style={tmStyles.row}>
+                          <label style={{ ...tmStyles.label, ...tmStyles.labelBlue, ...tmStyles.labelRef }}>发货人</label>
+                          <input
+                            value={v("shipper")}
+                            onChange={e => ch("shipper", e.target.value)}
+                            onBlur={e => {
+                              const err = validateAsciiOnly(e.target.value);
+                              if (err) alert("发货人：" + err);
+                            }}
+                            disabled={!editing}
+                            placeholder="英文公司名 + 地址（仅半角字符）"
+                            style={{ ...tmStyles.input, width: 270, fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                        <div style={{ ...tmStyles.row, marginTop: 4 }}>
+                          <textarea
+                            value={v("shipper")}
+                            onChange={e => ch("shipper", e.target.value)}
+                            disabled={!editing}
+                            style={{ ...tmStyles.input, width: 369, height: 98, resize: "vertical", fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* 收货人 */}
+                      <div style={tmStyles.subSection}>
+                        <div style={tmStyles.row}>
+                          <label style={{ ...tmStyles.label, ...tmStyles.labelBlue, ...tmStyles.labelRef }}>收货人</label>
+                          <input
+                            value={v("consignee")}
+                            onChange={e => ch("consignee", e.target.value)}
+                            onBlur={e => {
+                              const err = validateAsciiOnly(e.target.value);
+                              if (err) alert("收货人：" + err);
+                            }}
+                            disabled={!editing}
+                            placeholder="英文公司名 + 地址"
+                            style={{ ...tmStyles.input, width: 270, fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                        <div style={{ ...tmStyles.row, marginTop: 4 }}>
+                          <textarea
+                            value={v("consignee")}
+                            onChange={e => ch("consignee", e.target.value)}
+                            disabled={!editing}
+                            style={{ ...tmStyles.input, width: 369, height: 98, resize: "vertical", fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* 通知人 */}
+                      <div style={tmStyles.subSection}>
+                        <div style={tmStyles.row}>
+                          <label style={{ ...tmStyles.label, ...tmStyles.labelRef }}>通知人</label>
+                          <input
+                            value={v("notify_party")}
+                            onChange={e => ch("notify_party", e.target.value)}
+                            onBlur={e => {
+                              const err = validateAsciiOnly(e.target.value);
+                              if (err) alert("通知人：" + err);
+                            }}
+                            disabled={!editing}
+                            placeholder="可与收货人相同"
+                            style={{ ...tmStyles.input, width: 270, fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                        <div style={{ ...tmStyles.row, marginTop: 4 }}>
+                          <textarea
+                            value={v("notify_party")}
+                            onChange={e => ch("notify_party", e.target.value)}
+                            disabled={!editing}
+                            style={{ ...tmStyles.input, width: 369, height: 98, resize: "vertical", fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                      </div>
                     </div>
 
-                    <SectionTitle>船舶</SectionTitle>
-                    <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 90px 1fr", gap: "6px 8px", alignItems: "center" }}>
-                      <label style={portLabel}>船名</label>
-                      <input value={v("vessel")} onChange={e => ch("vessel", liveUpper(e.target.value))} disabled={!editing} style={portInputStyle} />
-                      <label style={portLabel}>航次</label>
-                      <input value={v("voyage")} onChange={e => ch("voyage", liveUpper(e.target.value))} disabled={!editing} style={portInputStyle} />
-                      <label style={portLabel}>提单号 (MBL)</label>
-                      <input value={v("mbl_no")} onChange={e => ch("mbl_no", liveUpper(e.target.value))} disabled={!editing} style={portInputStyle} />
-                      <label style={portLabel}>分提单号 (HBL)</label>
-                      <input value={v("hbl_no")} onChange={e => ch("hbl_no", liveUpper(e.target.value))} disabled={!editing} style={portInputStyle} />
+                    {/* ──── 中列：唛头 + 品名 ──── */}
+                    <div style={tmStyles.col}>
+                      <div style={tmStyles.subSection}>
+                        <div style={{ ...tmStyles.row, alignItems: "flex-start" }}>
+                          <label style={{ ...tmStyles.label, ...tmStyles.labelVertical }}>唛头</label>
+                          <textarea
+                            value={v("marks")}
+                            onChange={e => ch("marks", e.target.value)}
+                            onBlur={e => {
+                              const err = validateNoFullWidthSymbols(e.target.value);
+                              if (err) alert("唛头：" + err);
+                            }}
+                            disabled={!editing}
+                            placeholder="N/M"
+                            style={{ ...tmStyles.input, width: 345, height: 125, resize: "vertical", fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={tmStyles.subSection}>
+                        <div style={{ ...tmStyles.row, alignItems: "flex-start" }}>
+                          <label style={{ ...tmStyles.label, ...tmStyles.labelVertical }}>品名货描</label>
+                          <textarea
+                            value={v("description")}
+                            onChange={e => ch("description", e.target.value)}
+                            disabled={!editing}
+                            placeholder="完整货描"
+                            style={{ ...tmStyles.input, width: 369, height: 125, resize: "vertical", fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={tmStyles.subSection}>
+                        <div style={{ ...tmStyles.row, alignItems: "flex-start" }}>
+                          <label style={{ ...tmStyles.label, ...tmStyles.labelVertical }}>中文品名</label>
+                          <textarea
+                            value={v("desc_zh")}
+                            onChange={e => ch("desc_zh", e.target.value)}
+                            onBlur={e => {
+                              const err = validateNoFullWidthSymbols(e.target.value);
+                              if (err) alert("中文品名：" + err);
+                            }}
+                            disabled={!editing}
+                            style={{ ...tmStyles.input, width: 369, height: 71, resize: "vertical" }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={tmStyles.subSection}>
+                        <div style={{ ...tmStyles.row, alignItems: "flex-start" }}>
+                          <label style={{ ...tmStyles.label, ...tmStyles.labelVertical }}>英文品名</label>
+                          <textarea
+                            value={v("desc_en")}
+                            onChange={e => ch("desc_en", e.target.value)}
+                            onBlur={e => {
+                              const err = validateAsciiOnly(e.target.value);
+                              if (err) alert("英文品名：" + err);
+                            }}
+                            disabled={!editing}
+                            placeholder="英文 (仅半角字符)"
+                            style={{ ...tmStyles.input, width: 345, height: 71, resize: "vertical", fontFamily: "Consolas,monospace" }}
+                          />
+                        </div>
+                      </div>
                     </div>
 
-                    <SectionTitle>电放与签发</SectionTitle>
-                    <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: "6px 8px", alignItems: "center" }}>
-                      <label style={portLabel}>电放号</label>
-                      <input value={v("swb_no")} onChange={e => ch("swb_no", liveUpper(e.target.value))} disabled={!editing} style={portInputStyle} />
-                      <label style={portLabel}>电放日期</label>
-                      <input type="date" value={v("swb_date") || ""} onChange={e => ch("swb_date", e.target.value || null)} disabled={!editing} style={portInputStyle} />
-                      <label style={portLabel}>签发地</label>
-                      <PortPicker
-                        value={{ code: v("issue_place_code"), name: v("issue_place_name") }}
-                        onChange={({code, name}) => { ch("issue_place_code", code); ch("issue_place_name", name); }}
-                        disabled={!editing}
-                      />
-                      <label style={portLabel}>签发日期</label>
-                      <input type="date" value={v("issue_date") || ""} onChange={e => ch("issue_date", e.target.value || null)} disabled={!editing} style={portInputStyle} />
-                      <label style={portLabel}>HSCode</label>
-                      <input value={v("hs_code")} onChange={e => ch("hs_code", e.target.value.replace(/[^\d.]/g, ""))} disabled={!editing} placeholder="如 8523.49" style={portInputStyle} />
+                    {/* ──── 右列：港口 + 票据 + HSCode + 箱号 ──── */}
+                    <div style={tmStyles.col}>
+                      {/* 收货地 */}
+                      <PortRow label="收货地"
+                               value={{ code: v("receipt_place_code"), name: v("receipt_place_name") }}
+                               onChange={({code, name}) => { ch("receipt_place_code", code); ch("receipt_place_name", name); }}
+                               disabled={!editing} />
+
+                      {/* 起运港 - 必填 */}
+                      <PortRow label="起运港" required
+                               value={{ code: v("pol_code"), name: v("pol") }}
+                               onChange={({code, name}) => { ch("pol_code", code); ch("pol", name); }}
+                               disabled={!editing} />
+
+                      {/* 中转港 */}
+                      <PortRow label="中转港"
+                               value={{ code: v("transit_port_code"), name: v("transit_port_name") }}
+                               onChange={({code, name}) => { ch("transit_port_code", code); ch("transit_port_name", name); }}
+                               disabled={!editing} />
+
+                      {/* 卸货港 - 必填 */}
+                      <PortRow label="卸货港" required
+                               value={{ code: v("pod_code"), name: v("pod") }}
+                               onChange={({code, name}) => { ch("pod_code", code); ch("pod", name); }}
+                               disabled={!editing} />
+
+                      {/* 目的港 - 必填 */}
+                      <PortRow label="目的港" required
+                               value={{ code: v("destination_code"), name: v("destination") }}
+                               onChange={({code, name}) => { ch("destination_code", code); ch("destination", name); }}
+                               disabled={!editing} />
+
+                      {/* 起运港码头（单框） */}
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={{ ...tmStyles.label, ...tmStyles.labelRef }}>起运港码头</label>
+                        <input
+                          value={v("terminal")}
+                          onChange={e => ch("terminal", liveUpper(e.target.value))}
+                          disabled={!editing}
+                          placeholder="如 BEILUN PORT"
+                          style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
+                        />
+                      </div>
+
+                      {/* 间隔 */}
+                      <div style={{ height: 8 }}></div>
+
+                      {/* 电放号 */}
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>电放号</label>
+                        <input
+                          value={v("swb_no")}
+                          onChange={e => ch("swb_no", liveUpper(e.target.value))}
+                          disabled={!editing}
+                          style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
+                        />
+                      </div>
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>电放日期</label>
+                        <input type="date"
+                               value={v("swb_date") || ""}
+                               onChange={e => ch("swb_date", e.target.value || null)}
+                               disabled={!editing}
+                               style={{ ...tmStyles.input, width: 269 }} />
+                      </div>
+
+                      {/* 签发地 */}
+                      <PortRow label="签发地"
+                               value={{ code: v("issue_place_code"), name: v("issue_place_name") }}
+                               onChange={({code, name}) => { ch("issue_place_code", code); ch("issue_place_name", name); }}
+                               disabled={!editing} />
+
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>签发日期</label>
+                        <input type="date"
+                               value={v("issue_date") || ""}
+                               onChange={e => ch("issue_date", e.target.value || null)}
+                               disabled={!editing}
+                               style={{ ...tmStyles.input, width: 269 }} />
+                      </div>
+
+                      {/* HSCode */}
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>HSCode</label>
+                        <input
+                          value={v("hs_code")}
+                          onChange={e => ch("hs_code", e.target.value.replace(/[^\d.]/g, ""))}
+                          disabled={!editing}
+                          placeholder="如 8523.49"
+                          style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
+                        />
+                      </div>
+
+                      {/* 船名 / 航次 */}
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>船名</label>
+                        <input
+                          value={v("vessel")}
+                          onChange={e => ch("vessel", liveUpper(e.target.value))}
+                          disabled={!editing}
+                          style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
+                        />
+                      </div>
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>航次</label>
+                        <input
+                          value={v("voyage")}
+                          onChange={e => ch("voyage", liveUpper(e.target.value))}
+                          disabled={!editing}
+                          style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
+                        />
+                      </div>
+
+                      {/* MBL / HBL */}
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>提单号 (MBL)</label>
+                        <input
+                          value={v("mbl_no")}
+                          onChange={e => ch("mbl_no", liveUpper(e.target.value))}
+                          disabled={!editing}
+                          style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
+                        />
+                      </div>
+                      <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+                        <label style={tmStyles.label}>分提单 (HBL)</label>
+                        <input
+                          value={v("hbl_no")}
+                          onChange={e => ch("hbl_no", liveUpper(e.target.value))}
+                          disabled={!editing}
+                          style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
+                        />
+                      </div>
                     </div>
+
                   </div>
                 </div>
               )}
@@ -3412,21 +3560,110 @@ const modalBox = {
   boxShadow: "0 8px 28px rgba(0,0,0,.25)",
 };
 
-// V5：港口/票据右列的 label 样式（V4 风格紧凑标签）
-const portLabel = {
-  fontSize: 12,
-  color: "#0055aa",
-  fontWeight: 500,
-  textAlign: "right",
-  paddingRight: 4,
+// V5：托单信息 V4 风格的样式集
+// 参考 V4 真实 HTML 结构（class="label" / class="input innertext" / class="block"）
+// 颜色与字号尽量贴近 V4：label 12px 普通灰色 / blue 蓝色 / 必填红星
+const tmStyles = {
+  // 整个托单信息 wrapper
+  wrap: {
+    fontSize: 12,
+    fontFamily: "'Microsoft YaHei',Arial,sans-serif",
+  },
+  // 段（V4 中的 .group）
+  section: {
+    padding: "6px 0",
+    borderBottom: "1px solid #d6e0f0",
+    marginBottom: 4,
+  },
+  subSection: {
+    marginBottom: 6,
+  },
+  // 一行
+  row: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexWrap: "nowrap",
+  },
+  // 标签
+  label: {
+    fontSize: 12,
+    color: "#444",
+    minWidth: 75,
+    textAlign: "right",
+    paddingRight: 4,
+    flexShrink: 0,
+    lineHeight: "24px",
+  },
+  labelBlue: { color: "#1990ff" },
+  labelRef: { color: "#0055aa" },        // V4 ref class（关联字段）
+  labelNotnull: {
+    fontWeight: 600,
+    position: "relative",
+  },
+  labelReadonly: { color: "#666" },
+  labelVertical: {
+    minWidth: 75,
+    textAlign: "right",
+    alignSelf: "flex-start",
+    paddingTop: 4,
+  },
+  // 输入框
+  input: {
+    boxSizing: "border-box",
+    padding: "3px 6px",
+    height: 24,
+    border: "1px solid #c1c1c1",
+    borderRadius: 2,
+    fontSize: 12,
+    background: "#fff",
+    outline: "none",
+    color: "#222",
+  },
+  // + 加箱按钮（V4 风格）
+  btnPlus: {
+    width: 28,
+    height: 24,
+    padding: 0,
+    border: "1px solid #c1c1c1",
+    borderRadius: 2,
+    background: "#f5f5f5",
+    cursor: "pointer",
+    fontSize: 14,
+    lineHeight: 1,
+    color: "#1990ff",
+    fontWeight: 600,
+  },
+  // 3 列大网格
+  threeColWrap: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 405px) minmax(0, 405px) minmax(0, 380px)",
+    gap: 12,
+    paddingTop: 8,
+    borderTop: "1px solid #d6e0f0",
+  },
+  col: {
+    minWidth: 0,
+  },
 };
-const portInputStyle = {
-  boxSizing: "border-box",
-  padding: "4px 8px",
-  border: "1px solid #d9d9d9",
-  borderRadius: 3,
-  fontSize: 12,
-  fontFamily: "Consolas,monospace",
-  background: "#fff",
-  outline: "none",
-};
+
+// V5：港口行（label + 双框）— V4 标准模式
+// label 75px / code 60px / name flex 撑满（约 200px）
+function PortRow({ label, required, value, onChange, disabled }) {
+  return (
+    <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+      <label style={{
+        ...tmStyles.label,
+        ...(required ? tmStyles.labelBlue : tmStyles.labelRef),
+        ...(required ? tmStyles.labelNotnull : {}),
+      }}>
+        {required && <span style={{ color: "#ff4d4f", marginRight: 2 }}>*</span>}
+        {label}
+      </label>
+      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+        <PortPicker value={value} onChange={onChange} disabled={disabled} />
+      </div>
+    </div>
+  );
+}

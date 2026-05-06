@@ -19,6 +19,7 @@ import ReleaseNotice from "./pages/docs/ReleaseNotice.jsx";
 import Statement from "./pages/docs/Statement.jsx";
 import StatementsList from "./pages/StatementsList.jsx";
 import StatementNew from "./pages/StatementNew.jsx";
+import StatementDetail from "./pages/StatementDetail.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -235,6 +236,18 @@ export default function App() {
     );
   }
 
+  // 动态路由：多票合并对账单 PDF #/docs/stmt_batch/:id
+  if (route.startsWith("docs/stmt_batch/")) {
+    const statementId = route.slice("docs/stmt_batch/".length);
+    return (
+      <Statement
+        statementId={statementId}
+        mode="batch"
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
   // 动态路由：新建对账单 #/statements/new
   if (route === "statements/new" || route.startsWith("statements/new?")) {
     return (
@@ -253,14 +266,13 @@ export default function App() {
     );
   }
 
-  // 动态路由：多票合并对账单 #/statements/:id
+  // 动态路由：对账单详情（明细列表）#/statements/:id
   if (route.startsWith("statements/")) {
     const statementId = route.slice("statements/".length);
     return (
-      <Statement
+      <StatementDetail
         statementId={statementId}
-        mode="batch"
-        onBack={() => { window.history.back(); }}
+        onBack={() => { window.location.hash = "#/statements"; }}
       />
     );
   }

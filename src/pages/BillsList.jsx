@@ -54,15 +54,6 @@ export default function BillsList({ onBack }) {
     if (error) { alert("加载失败: " + error.message); setLoading(false); return; }
 
     let rows = data || [];
-    if (filters.keyword) {
-      const k = filters.keyword.toLowerCase();
-      rows = rows.filter(r =>
-        (r.bill_no || "").toLowerCase().includes(k) ||
-        (r.invoice_no || "").toLowerCase().includes(k) ||
-        (r.partner_name || "").toLowerCase().includes(k) ||
-        (r.voucher_no || "").toLowerCase().includes(k)
-      );
-    }
     // 金额范围
     if (filters.amount_min) rows = rows.filter(r => Number(r.amount_total || 0) >= Number(filters.amount_min));
     if (filters.amount_max) rows = rows.filter(r => Number(r.amount_total || 0) <= Number(filters.amount_max));
@@ -73,23 +64,44 @@ export default function BillsList({ onBack }) {
     if (filters.has_voucher === "yes") rows = rows.filter(r => !!r.voucher_no);
     if (filters.has_voucher === "no")  rows = rows.filter(r => !r.voucher_no);
 
-    setBills(rows);
-
+    // ── 先取 shipments 数据，因为 keyword 要参与提单号搜索 ──
     const partnerIds = [...new Set(rows.map(b => b.partner_id).filter(Boolean))];
+    let pMap = {};
     if (partnerIds.length > 0) {
       const { data: ps } = await supabase.from("customers")
         .select("id, name").in("id", partnerIds);
-      const m = {}; (ps || []).forEach(p => { m[p.id] = p.name; });
-      setPartnerMap(m);
+      (ps || []).forEach(p => { pMap[p.id] = p.name; });
     }
+    setPartnerMap(pMap);
+
     const shipIds = [...new Set(rows.map(b => b.shipment_id).filter(Boolean))];
+    let sMap = {};
     if (shipIds.length > 0) {
       const { data: ss } = await supabase.from("shipments")
-        .select("id, order_no").in("id", shipIds);
-      const m = {}; (ss || []).forEach(s => { m[s.id] = s; });
-      setShipMap(m);
+        .select("id, order_no, booking_no, hbl_no, mbl_no").in("id", shipIds);
+      (ss || []).forEach(s => { sMap[s.id] = s; });
+    }
+    setShipMap(sMap);
+
+    // ── keyword 过滤：覆盖账单号 / 发票号 / 凭证号 / 结算单位 / 作业号 / 提单号 / 分提单号 ──
+    if (filters.keyword) {
+      const k = filters.keyword.toLowerCase().trim();
+      rows = rows.filter(r => {
+        const ship = sMap[r.shipment_id];
+        const bl = ship ? ((ship.mbl_no || "").trim() || (ship.booking_no || "").trim()) : "";
+        return (
+          (r.bill_no || "").toLowerCase().includes(k) ||
+          (r.invoice_no || "").toLowerCase().includes(k) ||
+          (r.partner_name || "").toLowerCase().includes(k) ||
+          (r.voucher_no || "").toLowerCase().includes(k) ||
+          (ship?.order_no || "").toLowerCase().includes(k) ||
+          bl.toLowerCase().includes(k) ||
+          (ship?.hbl_no || "").toLowerCase().includes(k)
+        );
+      });
     }
 
+    setBills(rows);
     setLoading(false);
   };
 
@@ -315,7 +327,7 @@ export default function BillsList({ onBack }) {
 
         {/* 筛选 */}
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
-          <input placeholder="账单号 / 发票号 / 结算单位 / 凭证号"
+          <input placeholder="账单号 / 发票号 / 结算单位 / 凭证号 / 作业号 / 提单号"
                  value={filters.keyword}
                  onChange={e => setFilters({...filters, keyword: e.target.value})}
                  onKeyDown={e => e.key === "Enter" && load()}
@@ -453,6 +465,7 @@ export default function BillsList({ onBack }) {
                   </th>
                   <th style={{ ...th, textAlign: "center" }}>属性</th>
                   <th style={th}>账单编号</th>
+                  <th style={th}>提单号</th>
                   <th style={th}>结算单位</th>
                   <th style={th}>发票号</th>
                   <th style={th}>凭证号</th>
@@ -491,6 +504,19 @@ export default function BillsList({ onBack }) {
                            style={{ color: "inherit", textDecoration: "none" }}>
                           {b.bill_no}
                         </a>
+                      </td>
+                      <td style={{ ...td, fontFamily: "Consolas,monospace", fontSize: 11 }}>
+                        {(() => {
+                          if (!ship) return <span style={{ color: "#bbb" }}>—</span>;
+                          const mbl = (ship.mbl_no || "").trim() || (ship.booking_no || "").trim();
+                          const hbl = (ship.hbl_no || "").trim();
+                          return (
+                            <>
+                              <div style={{ color: "#444" }}>{mbl || <span style={{ color: "#bbb" }}>—</span>}</div>
+                              {hbl && <div style={{ color: "#888", fontSize: 10 }}>HBL: {hbl}</div>}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td style={td}>{b.partner_name || partnerMap[b.partner_id] || "—"}</td>
                       <td style={td}>

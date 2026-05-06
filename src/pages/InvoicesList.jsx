@@ -33,7 +33,7 @@ export default function InvoicesList({ onBack }) {
       // 1. 拉所有 bills（按 direction 过滤），客户端再过滤 invoice_no
       // 注：supabase.js builder 不支持 .not()，所以用客户端过滤代替 IS NOT NULL
       let q = supabase.from("bills")
-        .select("id, bill_no, invoice_no, invoice_date, partner_id, partner_name, shipment_id, statement_id, currency, amount_total, amount_cny, direction, status")
+        .select("id, bill_no, invoice_no, invoice_date, partner_id, shipment_id, statement_id, currency, amount_total, amount_cny, direction, status")
         .eq("direction", direction)
         .order("invoice_date", { ascending: false });
 
@@ -84,7 +84,7 @@ export default function InvoicesList({ onBack }) {
             invoice_no: key,
             invoice_date: b.invoice_date,
             partner_id: b.partner_id,
-            partner_name: b.partner_name || partnerMap[b.partner_id] || "",
+            partner_name: partnerMap[b.partner_id] || "",
             currency: b.currency,
             direction: b.direction,
             bills: [],

@@ -1,13 +1,12 @@
 // ============================================================================
-// PortPicker.jsx — 港口选择器
-// 输入 LOCODE / 中文名 / 英文名 都能搜
-// 选中后 onChange({ code, name }) — 调用方写入 *_code 和 *_name 两个字段
+// PortPicker.jsx — 港口选择器（V4 风格双框）
+// 左框 LOCODE（5 字符）+ 右框 港口名称
+// 任一框聚焦都打开下拉；选中港口后 onChange({code, name}) 同时填两个值
 //
 // 用法：
 //   <PortPicker
 //     value={{ code: form.pol_code, name: form.pol }}
 //     onChange={({code, name}) => setForm({...form, pol_code: code, pol: name})}
-//     placeholder="起运港"
 //     disabled={!editing}
 //   />
 // ============================================================================
@@ -15,7 +14,7 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../supabase.js";
 
-// 全局缓存（单页生命周期），避免每个 PortPicker 都查一次
+// 全局缓存
 let _portsCache = null;
 let _loadingPromise = null;
 async function loadPorts() {
@@ -32,23 +31,24 @@ async function loadPorts() {
   return _loadingPromise;
 }
 
-export default function PortPicker({ value, onChange, placeholder, disabled, style }) {
+export default function PortPicker({ value, onChange, disabled, style }) {
   const [ports, setPorts] = useState([]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
+  const [activeField, setActiveField] = useState(null);  // "code" | "name" | null
   const wrapRef = useRef(null);
-  const inputRef = useRef(null);
 
   useEffect(() => { loadPorts().then(setPorts); }, []);
 
-  // 外部 value 变化时同步显示
-  const displayText = (() => {
-    if (open) return query;  // 打开下拉时显示用户输入
-    if (value?.code && value?.name) return `${value.code} ${value.name}`;
-    if (value?.code) return value.code;
-    if (value?.name) return value.name;
-    return "";
+  // 显示文本：根据当前 active 框决定
+  const displayCode = (() => {
+    if (open && activeField === "code") return query;
+    return value?.code || "";
+  })();
+  const displayName = (() => {
+    if (open && activeField === "name") return query;
+    return value?.name || "";
   })();
 
   // 点外部关闭
@@ -57,6 +57,7 @@ export default function PortPicker({ value, onChange, placeholder, disabled, sty
       if (wrapRef.current && !wrapRef.current.contains(e.target)) {
         setOpen(false);
         setQuery("");
+        setActiveField(null);
       }
     };
     if (open) document.addEventListener("mousedown", onDoc);
@@ -71,13 +72,14 @@ export default function PortPicker({ value, onChange, placeholder, disabled, sty
         const zh = p.name_zh || "";
         const code = (p.code || "").toLowerCase();
         return code.includes(q) || en.includes(q) || zh.includes(query.trim());
-      }).slice(0, 60)  // 最多展示 60 条
+      }).slice(0, 60)
     : ports.slice(0, 60);
 
   const pick = (p) => {
     onChange?.({ code: p.code, name: p.name_en });
     setOpen(false);
     setQuery("");
+    setActiveField(null);
   };
 
   const clear = (e) => {
@@ -98,35 +100,82 @@ export default function PortPicker({ value, onChange, placeholder, disabled, sty
     } else if (e.key === "Escape") {
       setOpen(false);
       setQuery("");
+      setActiveField(null);
     }
   };
 
+  const handleFocus = (field) => {
+    if (disabled) return;
+    setActiveField(field);
+    setOpen(true);
+    setHighlight(0);
+    setQuery("");
+  };
+
+  const handleChange = (e, field) => {
+    const v = field === "code" ? e.target.value.toUpperCase() : e.target.value;
+    setQuery(v);
+    setActiveField(field);
+    setOpen(true);
+    setHighlight(0);
+  };
+
+  // 共用 input style
+  const inputStyle = {
+    boxSizing: "border-box",
+    padding: "4px 8px",
+    border: "1px solid #d9d9d9",
+    borderRadius: 3,
+    fontSize: 12,
+    background: disabled ? "#f5f5f5" : "#fff",
+    color: disabled ? "#666" : "#222",
+    outline: "none",
+  };
+
   return (
-    <div ref={wrapRef} style={{ position: "relative", display: "inline-block", width: "100%", ...(style || {}) }}>
+    <div ref={wrapRef} style={{ position: "relative", display: "flex", gap: 4, ...(style || {}) }}>
+      {/* 代码框（窄） */}
       <input
-        ref={inputRef}
-        value={displayText}
-        onChange={e => { setQuery(e.target.value.toUpperCase()); setOpen(true); setHighlight(0); }}
-        onFocus={() => !disabled && setOpen(true)}
+        value={displayCode}
+        onChange={e => handleChange(e, "code")}
+        onFocus={() => handleFocus("code")}
         onKeyDown={onKeyDown}
-        placeholder={placeholder || "搜索港口代码/中英文名"}
         disabled={disabled}
+        placeholder="代码"
         style={{
-          width: "100%", boxSizing: "border-box",
-          padding: "4px 24px 4px 8px",
-          border: "1px solid #d9d9d9", borderRadius: 3,
-          fontSize: 12, fontFamily: "Consolas, monospace",
-          background: disabled ? "#f5f5f5" : "#fff",
-          color: disabled ? "#666" : "#222",
+          ...inputStyle,
+          width: 80,
+          flex: "0 0 80px",
+          fontFamily: "Consolas,monospace",
+          fontWeight: 600,
+          color: disabled ? "#666" : "#1f3864",
+        }}
+      />
+      {/* 名称框（宽，flex: 1） */}
+      <input
+        value={displayName}
+        onChange={e => handleChange(e, "name")}
+        onFocus={() => handleFocus("name")}
+        onKeyDown={onKeyDown}
+        disabled={disabled}
+        placeholder="港口名"
+        style={{
+          ...inputStyle,
+          flex: 1,
+          minWidth: 0,
+          fontFamily: "Consolas,monospace",
         }}
       />
       {value?.code && !disabled && (
-        <span onClick={clear}
-              style={{
-                position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
-                cursor: "pointer", color: "#bbb", fontSize: 14, lineHeight: 1, userSelect: "none",
-              }}
-              title="清空">×</span>
+        <span
+          onClick={clear}
+          style={{
+            position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+            cursor: "pointer", color: "#bbb", fontSize: 14, lineHeight: 1,
+            userSelect: "none", padding: "0 2px",
+          }}
+          title="清空"
+        >×</span>
       )}
       {open && !disabled && (
         <div style={{
@@ -142,17 +191,19 @@ export default function PortPicker({ value, onChange, placeholder, disabled, sty
               无匹配港口
             </div>
           ) : filtered.map((p, idx) => (
-            <div key={p.code}
-                 onMouseDown={e => { e.preventDefault(); pick(p); }}
-                 onMouseEnter={() => setHighlight(idx)}
-                 style={{
-                   padding: "5px 10px",
-                   cursor: "pointer",
-                   fontSize: 12,
-                   background: idx === highlight ? "#e6f4ff" : "#fff",
-                   borderBottom: idx < filtered.length - 1 ? "1px solid #f5f5f5" : "none",
-                   display: "flex", alignItems: "center", gap: 8,
-                 }}>
+            <div
+              key={p.code}
+              onMouseDown={e => { e.preventDefault(); pick(p); }}
+              onMouseEnter={() => setHighlight(idx)}
+              style={{
+                padding: "5px 10px",
+                cursor: "pointer",
+                fontSize: 12,
+                background: idx === highlight ? "#e6f4ff" : "#fff",
+                borderBottom: idx < filtered.length - 1 ? "1px solid #f5f5f5" : "none",
+                display: "flex", alignItems: "center", gap: 8,
+              }}
+            >
               <span style={{ fontFamily: "Consolas,monospace", fontWeight: 600, color: "#1f3864", minWidth: 50 }}>
                 {p.code}
               </span>

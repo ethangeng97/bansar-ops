@@ -138,7 +138,22 @@ function createClient() {
     return null;
   };
 
-  return { auth, from, api, getSession };
+  // ── RPC: 调用 Supabase Postgres 函数 ──
+  // 用法： const { data, error } = await supabase.rpc("settle_bill", { p_bill_id, p_amount, p_settled_at });
+  // 与 from 链一致返回 {data, error}（不抛异常），方便 UI 统一错误处理。
+  const rpc = async (fn, args = {}) => {
+    try {
+      const data = await api(`/rest/v1/rpc/${encodeURIComponent(fn)}`, {
+        method: "POST",
+        body: JSON.stringify(args || {}),
+      });
+      return { data, error: null };
+    } catch (err) {
+      return { data: null, error: err };
+    }
+  };
+
+  return { auth, from, api, rpc, getSession };
 }
 
 export const supabase = createClient();

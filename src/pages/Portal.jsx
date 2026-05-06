@@ -15,21 +15,22 @@ const MODULES = [
   { key: "sea_import",  zh: "海运进口", icon: "ship",     active: false },
   { key: "air_export",  zh: "空运出口", icon: "plane",    active: false },
   { key: "air_import",  zh: "空运进口", icon: "plane",    active: false },
-  { key: "finance",     zh: "财务管理", icon: "dollar",   active: false },
+  { key: "finance",     zh: "财务管理", icon: "dollar",   active: true  },
   { key: "partners",    zh: "客商管理", icon: "users",    active: true,  href: "#/partners" },
   { key: "master",      zh: "基础数据", icon: "database", active: false },
   { key: "system",      zh: "系统设置", icon: "gear",     active: false },
 ];
 
 // ── 流程图四阶段定义（"模块" tab 用） ──
-const STAGES = [
+// 海运出口模块的流程图（4 阶段）
+const STAGES_SEA = [
   { num: 1, name: "基础数据维护", active: false },
   { num: 2, name: "业务操作",     active: true  },
   { num: 3, name: "费用结算",     active: false },
   { num: 4, name: "统计报表",     active: false },
 ];
 
-const NODES = {
+const NODES_SEA = {
   1: [
     { name: "客商录入维护", icon: "users",    href: "#/partners" },
     { name: "业务类型设置", icon: "tag",      href: null },
@@ -44,10 +45,10 @@ const NODES = {
     { name: "提单确认",     icon: "file",     href: "#/sea_export" },
   ],
   3: [
-    { name: "费用录入",     icon: "dollar",   href: null },
-    { name: "对账单",       icon: "fileline", href: null },
-    { name: "应收发票",     icon: "ticket",   href: null },
-    { name: "收款销账",     icon: "rotate",   href: null },
+    { name: "费用录入",     icon: "dollar",   href: "#/charges" },
+    { name: "账单管理",     icon: "fileline", href: "#/bills" },
+    { name: "对账单管理",   icon: "filelist", href: "#/statements" },
+    { name: "收款销账",     icon: "rotate",   href: "#/payments" },
   ],
   4: [
     { name: "业务综合查询", icon: "search",   href: null },
@@ -55,6 +56,31 @@ const NODES = {
     { name: "利润分析",     icon: "line",     href: null },
     { name: "对账明细",     icon: "filelist", href: null },
   ],
+};
+
+// 财务管理模块的流程图（2 阶段）
+const STAGES_FINANCE = [
+  { num: 1, name: "日常作业", active: true  },
+  { num: 2, name: "结算核销", active: false },
+];
+
+const NODES_FINANCE = {
+  1: [
+    { name: "费用记录",     icon: "dollar",   href: "#/charges" },
+    { name: "账单管理",     icon: "fileline", href: "#/bills" },
+    { name: "对账单管理",   icon: "filelist", href: "#/statements" },
+  ],
+  2: [
+    { name: "开票记录",     icon: "ticket",   href: "#/invoices" },
+    { name: "收付款记录",   icon: "dollar",   href: "#/payments" },
+    { name: "核销管理",     icon: "rotate",   href: "#/settlements" },
+  ],
+};
+
+// 模块 → 流程图数据映射
+const FLOW_BY_MODULE = {
+  sea_export: { stages: STAGES_SEA,     nodes: NODES_SEA     },
+  finance:    { stages: STAGES_FINANCE, nodes: NODES_FINANCE },
 };
 
 // ── Lucide-style SVG icons ──
@@ -219,11 +245,29 @@ export default function Portal({ user, onLogout }) {
             <div className="crumb">
               {tab === "待办"
                 ? <>SOP / <span>待处理订单</span></>
-                : <>{MODULES.find(m => m.key === activeModule)?.zh || "海运出口"} / <span>业务流程</span></>}
+                : <>{MODULES.find(m => m.key === activeModule)?.zh || "海运出口"} / <span>{activeModule === "finance" ? "财务流程" : "业务流程"}</span></>}
             </div>
           </div>
 
-          {tab === "模块" && (
+          {tab === "模块" && (() => {
+            const flow = FLOW_BY_MODULE[activeModule];
+            // 当前模块没有流程图（如 partners / 待开发模块）→ 显示提示
+            if (!flow) {
+              const m = MODULES.find(x => x.key === activeModule);
+              return (
+                <div style={{ padding: 30, color: "#666", lineHeight: 1.8 }}>
+                  <h3 style={{ fontSize: 16, color: "#222", marginBottom: 12 }}>
+                    {m?.zh || activeModule}
+                  </h3>
+                  <p>{m?.active
+                    ? <>该模块入口在左侧菜单，<a href={m.href} target="_blank" rel="noreferrer" style={{ color: "#1990FF" }}>点此打开</a>。</>
+                    : "该模块开发中。"
+                  }</p>
+                </div>
+              );
+            }
+            const { stages: STAGES, nodes: NODES } = flow;
+            return (
             <div className="tms-portal-flow">
               <div className="tms-stages">
                 {STAGES.map((s, i) => (
@@ -258,7 +302,8 @@ export default function Portal({ user, onLogout }) {
                 ))}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {tab === "待办" && (
             <div style={{ padding: 30, color: "#666", lineHeight: 1.8 }}>

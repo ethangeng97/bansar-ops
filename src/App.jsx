@@ -137,6 +137,26 @@ export default function App() {
     return <BillsList onBack={() => { window.location.hash = ""; }} />;
   }
 
+  // ── V5 财务模块占位路由 ──
+  // #/charges      费用记录列表（V5 第二阶段）
+  // #/invoices     开票记录（V5 第四阶段）
+  // #/payments     收付款记录（V5 第三阶段）
+  // #/settlements  核销管理（V5 第三阶段）
+  if (route === "charges" || route === "invoices" || route === "payments" || route === "settlements") {
+    const titleMap = {
+      charges:     "费用记录",
+      invoices:    "开票记录",
+      payments:    "收付款记录",
+      settlements: "核销管理",
+    };
+    return (
+      <TmsPlaceholder
+        title={titleMap[route]}
+        onBack={() => { window.location.hash = ""; }}
+      />
+    );
+  }
+
   // 动态路由：账单详情 #/bills/:id
   if (route.startsWith("bills/")) {
     const billId = route.slice("bills/".length);

@@ -90,7 +90,6 @@ export function OrdersPage({ user, onBack }) {
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [search, setSearch] = useState("");
   const [showFilter, setShowFilter] = useState(true);
-  const [showDetail, setShowDetail] = useState(true);
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
@@ -420,8 +419,8 @@ export function OrdersPage({ user, onBack }) {
       <div className="tms-mn">
         <Mi onClick={clearF}>清除</Mi>
         <Tbl/>
-        <Mi checked={showDetail} onClick={() => setShowDetail(p => !p)}>显示明细</Mi>
-        <Mi onClick={() => setShowFilter(p => !p)}>搜索</Mi>
+        <Mi checked={showFilter} onClick={() => setShowFilter(p => !p)}>显示明细</Mi>
+        <Mi onClick={load}>搜索</Mi>
         <Tbl/>
         <MiDropdown options={[
           { label: "整箱", onClick: () => window.open("#/sea_export?action=new&type=FCL", "_blank") },
@@ -431,7 +430,6 @@ export function OrdersPage({ user, onBack }) {
         <Mi arrow>显示预览</Mi>
         <Mi>统计模板</Mi>
         <Tbl/>
-        <Mi onClick={() => setShowFilter(p => !p)}>{showFilter ? "隐藏面板" : "显示面板"}</Mi>
         <Mi arrow>数据范围</Mi>
         <Tbl/>
         <Mi disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>上页</Mi>

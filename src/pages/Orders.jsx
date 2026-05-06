@@ -175,33 +175,33 @@ export function OrdersPage({ user, onBack }) {
   };
 
   const load = useCallback(async () => {
-    let query = supabase.from("shipments").select("*").order("created_at", { ascending: false });
+    setLoading(true);
+    try {
+      let query = supabase.from("shipments").select("*").order("created_at", { ascending: false });
 
-    // 权限过滤：admin / finance 看全部；operator 看自己操作；sales 看自己销售；agent 看自己代理
-    const userId = user?.id;
-    const userFullName = user?.profile?.full_name;
-    if (role === "operator") {
-      query = query.eq("operator_id", userId);
-    } else if (role === "sales") {
-      query = query.eq("salesperson_id", userId);
-    } else if (role === "customer" || role === "agent") {
-      // 海外代理/客户：用 user_profiles_view 关联的 customer_name 过滤
-      // user.profile.customer_name 来自 user_profiles_view JOIN customers 后的 c.name
-      const customerName = user?.profile?.customer_name;
-      if (customerName) {
-        // overseas_agent 字段匹配（如 "Keplin"）
-        query = query.eq("overseas_agent", customerName);
-      } else {
-        // 兜底：什么都看不到（未关联到 customer）
-        query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+      // 权限过滤：admin / finance 看全部；operator 看自己操作；sales 看自己销售；agent 看自己代理
+      const userId = user?.id;
+      const userFullName = user?.profile?.full_name;
+      if (role === "operator") {
+        query = query.eq("operator_id", userId);
+      } else if (role === "sales") {
+        query = query.eq("salesperson_id", userId);
+      } else if (role === "customer" || role === "agent") {
+        const customerName = user?.profile?.customer_name;
+        if (customerName) {
+          query = query.eq("overseas_agent", customerName);
+        } else {
+          query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+        }
       }
-    }
-    // admin / finance：不加过滤
+      // admin / finance：不加过滤
 
-    const { data, error } = await query;
-    if (error) console.error("load shipments error:", error);
-    setShipments(data || []);
-    setLoading(false);
+      const { data, error } = await query;
+      if (error) console.error("load shipments error:", error);
+      setShipments(data || []);
+    } finally {
+      setLoading(false);
+    }
   }, [role, user?.id, user?.profile?.full_name]);
 
   useEffect(() => { load(); }, [load]);
@@ -420,7 +420,7 @@ export function OrdersPage({ user, onBack }) {
         <Mi onClick={clearF}>清除</Mi>
         <Tbl/>
         <Mi checked={showFilter} onClick={() => setShowFilter(p => !p)}>显示明细</Mi>
-        <Mi onClick={load}>搜索</Mi>
+        <Mi onClick={load} disabled={loading}>{loading ? "搜索中..." : "搜索"}</Mi>
         <Tbl/>
         <MiDropdown options={[
           { label: "整箱", onClick: () => window.open("#/sea_export?action=new&type=FCL", "_blank") },

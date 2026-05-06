@@ -48,6 +48,7 @@ const NODES_SEA = {
     { name: "费用录入",     icon: "dollar",   href: "#/charges" },
     { name: "账单管理",     icon: "fileline", href: "#/bills" },
     { name: "对账单管理",   icon: "filelist", href: "#/statements" },
+    { name: "开票/收票",    icon: "ticket",   href: "#/invoices" },
     { name: "收款销账",     icon: "rotate",   href: "#/payments" },
   ],
   4: [

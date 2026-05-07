@@ -134,11 +134,11 @@ export function OrdersPage({ user, onBack }) {
         const t = decodeURIComponent(tm[1]);
         return ["FCL", "LCL", "Console"].includes(t) ? t : "FCL";
       }
-      // 没 type → null，下面会显示类型选择对话框
+      // 没 type → null，由对话框引导用户选
     }
     return null;
   });
-  // 类型选择对话框（当 URL 有 action=new 但没 type 时显示）
+  // 类型选择对话框（点"新建作业"按钮显示，或 URL 有 action=new 但没 type）
   const [showTypePicker, setShowTypePicker] = useState(() => {
     const m = window.location.hash.match(/[?&]action=([^&]+)/);
     if (m && m[1] === "new") {
@@ -391,66 +391,6 @@ export function OrdersPage({ user, onBack }) {
     </div>
   );
 
-  // 类型选择对话框
-  if (showTypePicker) {
-    const pickType = (t) => {
-      setShowTypePicker(false);
-      setCreateMode(t);
-      window.history.replaceState(null, "", `#/sea_export?action=new&type=${t}`);
-    };
-    const closeTypePicker = () => {
-      setShowTypePicker(false);
-      window.history.replaceState(null, "", "#/sea_export");
-    };
-    const types = [
-      { v: "FCL", label: "整箱", desc: "FCL · Full Container Load", color: "#1990FF" },
-      { v: "LCL", label: "拼箱", desc: "LCL · Less than Container Load", color: "#52c41a" },
-      { v: "Console", label: "自拼柜", desc: "Console · 自营拼箱主单", color: "#faad14" },
-    ];
-    return (
-      <div style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000
-      }}>
-        <div style={{ background: "#fff", borderRadius: 6, width: 480, padding: "24px 28px",
-                      boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>新建作业</div>
-          <div style={{ fontSize: 12, color: "#999", marginBottom: 18 }}>请选择业务类型</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {types.map(t => (
-              <div key={t.v}
-                onClick={() => pickType(t.v)}
-                style={{
-                  padding: "14px 16px", border: "1px solid #e6e6e6", borderRadius: 4,
-                  cursor: "pointer", display: "flex", alignItems: "center", gap: 14,
-                  transition: "all 0.15s",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; e.currentTarget.style.background = "#fafafa"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "#e6e6e6"; e.currentTarget.style.background = "#fff"; }}
-              >
-                <div style={{
-                  width: 38, height: 38, borderRadius: 4, background: t.color + "15",
-                  color: t.color, fontWeight: 700, fontSize: 13, display: "flex",
-                  alignItems: "center", justifyContent: "center",
-                }}>{t.v}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#222" }}>{t.label}</div>
-                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{t.desc}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button onClick={closeTypePicker} style={{
-              padding: "6px 16px", background: "#fff", color: "#666",
-              border: "1px solid #d9d9d9", borderRadius: 3, cursor: "pointer", fontSize: 13,
-            }}>取消</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // 创建模式：渲染空白订单详情页（OrderDetail 用 createMode prop）
   if (createMode) {
     const blankOrder = {
@@ -518,6 +458,63 @@ export function OrdersPage({ user, onBack }) {
   return (
     <div className="tms">
 
+      {/* 类型选择对话框（点"新建作业"按钮触发） */}
+      {showTypePicker && (() => {
+        const pickType = (t) => {
+          setShowTypePicker(false);
+          // 在新标签页打开，避免污染当前列表的 URL
+          window.open(`#/sea_export?action=new&type=${t}`, "_blank");
+        };
+        const types = [
+          { v: "FCL", label: "整箱", desc: "FCL · Full Container Load", color: "#1990FF" },
+          { v: "LCL", label: "拼箱", desc: "LCL · Less than Container Load", color: "#52c41a" },
+          { v: "Console", label: "自拼柜", desc: "Console · 自营拼箱主单", color: "#faad14" },
+        ];
+        return (
+          <div style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000
+          }} onClick={() => setShowTypePicker(false)}>
+            <div style={{ background: "#fff", borderRadius: 6, width: 480, padding: "24px 28px",
+                          boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
+                 onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>新建作业</div>
+              <div style={{ fontSize: 12, color: "#999", marginBottom: 18 }}>请选择业务类型</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {types.map(t => (
+                  <div key={t.v}
+                    onClick={() => pickType(t.v)}
+                    style={{
+                      padding: "14px 16px", border: "1px solid #e6e6e6", borderRadius: 4,
+                      cursor: "pointer", display: "flex", alignItems: "center", gap: 14,
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; e.currentTarget.style.background = "#fafafa"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#e6e6e6"; e.currentTarget.style.background = "#fff"; }}
+                  >
+                    <div style={{
+                      width: 38, height: 38, borderRadius: 4, background: t.color + "15",
+                      color: t.color, fontWeight: 700, fontSize: 13, display: "flex",
+                      alignItems: "center", justifyContent: "center",
+                    }}>{t.v}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#222" }}>{t.label}</div>
+                      <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{t.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button onClick={() => setShowTypePicker(false)} style={{
+                  padding: "6px 16px", background: "#fff", color: "#666",
+                  border: "1px solid #d9d9d9", borderRadius: 3, cursor: "pointer", fontSize: 13,
+                }}>取消</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 标题栏 + 顶部菜单（共享组件） */}
       <TmsTitle title={sopNode ? `海运出口 / ${sopNode.zh} 待办` : "作业 / 海运出口"} user={user} role={role} onClose={onBack} />
 
@@ -528,11 +525,7 @@ export function OrdersPage({ user, onBack }) {
         <Mi checked={showFilter} onClick={() => setShowFilter(p => !p)}>显示明细</Mi>
         <Mi onClick={load} disabled={loading}>{loading ? "搜索中..." : "搜索"}</Mi>
         <Tbl/>
-        <MiDropdown options={[
-          { label: "整箱", onClick: () => window.open("#/sea_export?action=new&type=FCL", "_blank") },
-          { label: "自拼", onClick: () => window.open("#/sea_export?action=new&type=Console", "_blank") },
-          { label: "拼箱", onClick: () => window.open("#/sea_export?action=new&type=LCL", "_blank") },
-        ]}>新建作业</MiDropdown>
+        <Mi onClick={() => setShowTypePicker(true)}>新建作业</Mi>
         <Mi arrow>显示预览</Mi>
         <Mi>统计模板</Mi>
         <Tbl/>

@@ -5,7 +5,7 @@
 // - "待办" tab：SOP 节点列表 + 未完成数量（实时查 Supabase），点击 → 列表过滤页
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { supabase } from "../supabase.js";
 import { SOP_NODES, isNodeDone } from "../lib/constants.js";
 
@@ -38,7 +38,11 @@ const NODES_SEA = {
     { name: "汇率设置",     icon: "refresh",  href: null },
   ],
   2: [
-    { name: "新建作业",     icon: "fileplus", href: "#/sea_export?action=new" },
+    { name: "新建作业", icon: "fileplus", submenu: [
+      { name: "整箱", desc: "FCL", href: "#/sea_export?action=new&type=FCL" },
+      { name: "拼箱", desc: "LCL", href: "#/sea_export?action=new&type=LCL" },
+      { name: "自拼柜", desc: "Console", href: "#/sea_export?action=new&type=Console" },
+    ] },
     { name: "作业列表",     icon: "filelist", href: "#/sea_export" },
     { name: "订舱确认",     icon: "check",    href: "#/sea_export" },
     { name: "装箱确认",     icon: "box",      href: "#/sea_export" },
@@ -164,10 +168,36 @@ export default function Portal({ user, onLogout }) {
     window.open(mod.href, "_blank");
   };
 
-  const openNode = (node) => {
+  // 子菜单浮层：当前展开节点（带 submenu 的节点点击时显示），及其按钮的位置
+  const [submenuFor, setSubmenuFor] = useState(null);  // { stage, idx, rect }
+  const submenuRef = useRef(null);
+
+  const openNode = (node, stage, idx, ev) => {
+    if (node.submenu) {
+      // 切换浮层（点同一个再关闭）
+      if (submenuFor && submenuFor.stage === stage && submenuFor.idx === idx) {
+        setSubmenuFor(null);
+      } else {
+        const rect = ev.currentTarget.getBoundingClientRect();
+        setSubmenuFor({ stage, idx, rect: { left: rect.left, top: rect.bottom + 4, width: rect.width } });
+      }
+      return;
+    }
     if (!node.href) return;
     window.open(node.href, "_blank");
   };
+
+  // 点浮层外关闭
+  useEffect(() => {
+    if (!submenuFor) return;
+    const onDocClick = (e) => {
+      if (submenuRef.current && !submenuRef.current.contains(e.target)) {
+        setSubmenuFor(null);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [submenuFor]);
 
   const openSopNode = (nodeCode) => {
     window.open(`#/sea_export?sop=${nodeCode}`, "_blank");
@@ -286,17 +316,23 @@ export default function Portal({ user, onLogout }) {
                 {STAGES.map((s, i) => (
                   <Fragment key={s.num}>
                     <div className="tms-col">
-                      {NODES[s.num].map((n, ni) => (
-                        <button
-                          key={ni}
-                          className={"tms-node " + (!n.href ? "dim" : "")}
-                          onClick={() => openNode(n)}
-                          disabled={!n.href}
-                        >
-                          <Icon name={n.icon} />
-                          {n.name}
-                        </button>
-                      ))}
+                      {NODES[s.num].map((n, ni) => {
+                        const clickable = !!n.href || !!n.submenu;
+                        const isOpen = submenuFor && submenuFor.stage === s.num && submenuFor.idx === ni;
+                        return (
+                          <button
+                            key={ni}
+                            className={"tms-node " + (!clickable ? "dim" : "")}
+                            onClick={(ev) => openNode(n, s.num, ni, ev)}
+                            disabled={!clickable}
+                            style={isOpen ? { background: "#e6f4ff", borderColor: "#1990FF" } : undefined}
+                          >
+                            <Icon name={n.icon} />
+                            {n.name}
+                            {n.submenu && <span style={{ marginLeft: 6, fontSize: 10, color: "#999" }}>▾</span>}
+                          </button>
+                        );
+                      })}
                     </div>
                     {i < STAGES.length - 1 && <div className="tms-colarr">→</div>}
                   </Fragment>
@@ -318,6 +354,53 @@ export default function Portal({ user, onLogout }) {
         </div>
 
       </div>
+
+      {/* 节点子菜单浮层（如"新建作业"展开整箱/拼箱/自拼柜） */}
+      {submenuFor && (() => {
+        const node = NODES[submenuFor.stage][submenuFor.idx];
+        if (!node?.submenu) return null;
+        return (
+          <div
+            ref={submenuRef}
+            style={{
+              position: "fixed",
+              left: submenuFor.rect.left,
+              top: submenuFor.rect.top,
+              minWidth: Math.max(submenuFor.rect.width, 200),
+              background: "#fff",
+              border: "1px solid #d9d9d9",
+              borderRadius: 4,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+              zIndex: 1000,
+              padding: 4,
+            }}
+          >
+            {node.submenu.map((sub, si) => (
+              <div
+                key={si}
+                onClick={() => {
+                  setSubmenuFor(null);
+                  if (sub.href) window.open(sub.href, "_blank");
+                }}
+                style={{
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  borderRadius: 3,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f7ff"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                <span style={{ color: "#222" }}>{sub.name}</span>
+                {sub.desc && <span style={{ color: "#999", fontSize: 11, marginLeft: 12 }}>{sub.desc}</span>}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }

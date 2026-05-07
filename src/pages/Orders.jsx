@@ -6,6 +6,7 @@ import PortPicker from "../components/PortPicker.jsx";
 import ContainerEditor from "../components/ContainerEditor.jsx";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
+import { filterShipmentPayload } from "../lib/shipment-fields.js";
 import {
   STATUS_COLORS,
   TRADE_TERMS,
@@ -862,7 +863,10 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
         if (k === "id" && payload[k] === null) delete payload[k];  // 让 Postgres 自己生成 id
       });
 
-      const { data, error } = await supabase.from("shipments").insert(payload).select().single();
+      // 过滤：只保留 DB 实际存在的字段，避免 schema cache 错误
+      const cleanPayload = filterShipmentPayload(payload);
+
+      const { data, error } = await supabase.from("shipments").insert(cleanPayload).select().single();
       if (error) { alert("创建失败：" + error.message); return; }
       if (data?.id && onCreated) {
         onCreated(data.id);
@@ -907,7 +911,8 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
     }
 
     if (Object.keys(changes).length) {
-      const { error } = await supabase.from("shipments").update(changes).eq("id", order.id);
+      const cleanChanges = filterShipmentPayload(changes);
+      const { error } = await supabase.from("shipments").update(cleanChanges).eq("id", order.id);
       if (error) { alert(error.message); return; }
     }
     setEditing(false);
@@ -987,7 +992,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
       solicit_type: order.solicit_type,
       lifecycle: '处理中',
     };
-    const { error } = await supabase.from("shipments").insert(newRow);
+    const { error } = await supabase.from("shipments").insert(filterShipmentPayload(newRow));
     if (error) { alert("新建失败：" + error.message); return; }
     // 重新加载分票列表
     const { data: refreshed } = await supabase.from("shipments")
@@ -1260,7 +1265,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
 
                 <Df label="客户编号"><input value={v("po")} onChange={e => ch("po", e.target.value)} disabled={!editing} /></Df>
                 <Df label="付款方式">
-                  <select value={v("payment_term") || ""} onChange={e => ch("payment_term", e.target.value)} disabled={!editing}>
+                  <select value={v("freight_terms") || ""} onChange={e => ch("freight_terms", e.target.value)} disabled={!editing}>
                     <option value=""></option>
                     {FREIGHT_TERMS.map(t => <option key={t}>{t}</option>)}
                   </select>
@@ -2915,7 +2920,7 @@ function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {
   const saveAndClose = async () => {
     if (!validate()) return;
     setSaving(true);
-    const { error } = await supabase.from("shipments").insert(buildPayload());
+    const { error } = await supabase.from("shipments").insert(filterShipmentPayload(buildPayload()));
     setSaving(false);
     if (error) { alert("保存失败：" + error.message); return; }
     onSaved();  // 父组件会刷新列表
@@ -2925,7 +2930,7 @@ function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {
   const saveAndEdit = async () => {
     if (!validate()) return;
     setSaving(true);
-    const { data, error } = await supabase.from("shipments").insert(buildPayload()).select().single();
+    const { data, error } = await supabase.from("shipments").insert(filterShipmentPayload(buildPayload())).select().single();
     setSaving(false);
     if (error) { alert("保存失败：" + error.message); return; }
     if (data?.id) {

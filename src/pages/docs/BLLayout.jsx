@@ -26,18 +26,21 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const [shipment, setShipment] = useState(null);
   const [company, setCompany]   = useState(null);
   const [cargoItems, setCargo]  = useState([]);
+  const [containers, setContainers] = useState([]);  // shipment_containers 关联表
   const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [{ data: s, error: e1 }, { data: c }] = await Promise.all([
+      const [{ data: s, error: e1 }, { data: c }, { data: ctn }] = await Promise.all([
         supabase.from("shipments").select("*").eq("id", shipmentId).single(),
         supabase.from("company_settings").select("*").eq("id", 1).single(),
+        supabase.from("shipment_containers").select("*").eq("shipment_id", shipmentId).order("sort_order"),
       ]);
       if (e1) { alert("加载票号失败: " + e1.message); setLoading(false); return; }
       setShipment(s);
       setCompany(c || {});
+      setContainers(ctn || []);
       if (s?.po) {
         const { data: ci } = await supabase
           .from("container_items").select("*").eq("po", s.po);
@@ -47,7 +50,22 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     })();
   }, [shipmentId]);
 
-  const print = () => window.print();
+  const print = () => {
+    // 临时改 title 让浏览器"另存为 PDF"用合适的文件名
+    // 格式: BLNo-mode-DRAFT/COPY/TELEX  例如 BSNREF260500003-HBL-DRAFT
+    const blNo = shipment?.hbl_no || shipment?.mbl_no || shipment?.order_no || "BL";
+    const tag = mode === "draft" ? "DRAFT"
+              : mode === "copy"  ? "COPY"
+              : mode === "telex" ? "TELEX"
+              : "BL";
+    const docType = shipment?.has_hbl ? "HBL" : "MBL";
+    const filename = `${blNo}-${docType}-${tag}`;
+    const oldTitle = document.title;
+    document.title = filename;
+    window.print();
+    // 打印对话框关闭后恢复 title（setTimeout 因为 print 是同步阻塞）
+    setTimeout(() => { document.title = oldTitle; }, 1000);
+  };
 
   if (loading) return <div style={{ padding: 24 }}>加载中...</div>;
   if (!shipment) return <div style={{ padding: 24 }}>票号不存在</div>;
@@ -55,15 +73,30 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const s = shipment;
   const co = company || {};
 
-  // 货物数据
-  const containerNos = (s.container_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
-  const sealNos = (s.seal_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+  // 货物数据：优先用 shipment_containers 关联表，没有时 fallback 到 shipments 单字段
+  const containerNos = containers.length > 0
+    ? containers.map(c => c.container_no).filter(Boolean)
+    : (s.container_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+  const sealNos = containers.length > 0
+    ? containers.map(c => c.seal_no).filter(Boolean)
+    : (s.seal_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+  // 集装箱箱型箱量汇总（如 "1x40HQ"）
+  const qtyContainerStr = (() => {
+    if (containers.length === 0) return s.qty_container || "";
+    const map = {};
+    for (const c of containers) {
+      const key = `${c.container_size}${c.container_type}`;
+      map[key] = (map[key] || 0) + (parseInt(c.qty) || 0);
+    }
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, q]) => `${q}x${k}`).join(",");
+  })();
 
   let rows = cargoItems.length > 0
     ? cargoItems.map((it, i) => ({
         cnInfo: [
           containerNos[i] || containerNos[0] || "",
-          s.qty_container || "",
+          qtyContainerStr,
           sealNos[i] || sealNos[0] || "",
           s.carrier_service || "CY-CY",
         ].filter(Boolean).join("/"),
@@ -79,12 +112,12 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }))
     : [{
         cnInfo: containerNos.length > 0
-          ? containerNos.map((cn, i) => `${cn}/${s.qty_container || ""}/${sealNos[i] || ""}/${s.carrier_service || "CY-CY"}`).join("\n")
-          : (s.qty_container ? `${s.qty_container}/${s.carrier_service || "CY-CY"}` : ""),
+          ? containerNos.map((cn, i) => `${cn}/${qtyContainerStr}/${sealNos[i] || ""}/${s.carrier_service || "CY-CY"}`).join("\n")
+          : (qtyContainerStr ? `${qtyContainerStr}/${s.carrier_service || "CY-CY"}` : ""),
         marks: s.marks || "N/M",
         pkgs: parseInt(s.qty_packages) || 0,
-        unit: "CARTONS",
-        desc: [s.cargo_type || "GENERAL CARGO",
+        unit: s.pkg_unit || "CARTONS",
+        desc: [s.desc_en || s.description || s.cargo_type || "GENERAL CARGO",
                s.po ? `PO-${s.po}` : null,
               ].filter(Boolean).join("\n"),
         gw: parseFloat(s.weight) || 0,
@@ -114,9 +147,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const isCopy  = mode === "copy";
   const isTelex = mode === "telex";
 
-  const freightTermStr = String(s.freight_term || "").toUpperCase();
-  const isPrepaid = freightTermStr.includes("PREPAID") || (s.freight_term || "").includes("预付");
-  const isCollect = freightTermStr.includes("COLLECT") || (s.freight_term || "").includes("到付");
+  const freightTermStr = String(s.freight_terms || "").toUpperCase();
+  const isPrepaid = freightTermStr.includes("PREPAID") || (s.freight_terms || "").includes("预付");
+  const isCollect = freightTermStr.includes("COLLECT") || (s.freight_terms || "").includes("到付");
 
   const blType = s.bl_type || "正本提单";
   const numOriginals = blType === "电放" ? "ZERO (TELEX RELEASE)"
@@ -207,6 +240,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           <span style={{ marginLeft: 8, color: "#999" }}>· 共 {totalPages} 页</span>
         </span>
         <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: "#999" }}>
+          点 🖨 → "目标"选 <b>"另存为 PDF"</b> → 文件名已自动生成
+        </span>
         <button onClick={print} style={btnPrimary}>🖨 打印 / 另存为 PDF</button>
       </div>
 
@@ -275,7 +311,7 @@ function CargoPage({
         {/* Row 1: Shipper | 标题区 */}
         <div className="bl-cell" style={{ minHeight: 110 }}>
           <div className="bl-cell-label">Shipper</div>
-          <div className="bl-cell-val" style={{ fontWeight: 600 }}>{s.shipper_name || "—"}</div>
+          <div className="bl-cell-val" style={{ fontWeight: 600 }}>{s.shipper || "—"}</div>
         </div>
         <div style={{
           padding: "14px 10px 8px", textAlign: "center", borderBottom: "1px solid #555",
@@ -315,7 +351,7 @@ function CargoPage({
         {/* Row 2: Consignee | For delivery of goods */}
         <div className="bl-cell" style={{ minHeight: 110 }}>
           <div className="bl-cell-label">Consignee (if "To Order" so indicate)</div>
-          <div className="bl-cell-val">{s.consignee_name || "—"}</div>
+          <div className="bl-cell-val">{s.consignee || "—"}</div>
         </div>
         <div className="bl-cell" style={{ minHeight: 110 }}>
           <div className="bl-cell-label">For delivery of goods please apply to:</div>
@@ -461,7 +497,7 @@ function CargoPage({
                                             border: "1px solid #555", borderTop: 0,
                                             borderRight: 0, borderLeft: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
-                      <div><b>{(s.freight_term || "FREIGHT AS ARRANGED").toUpperCase()}</b></div>
+                      <div><b>{(s.freight_terms || "FREIGHT AS ARRANGED").toUpperCase()}</b></div>
                       <div><b>SHIPPED ON BOARD: {onBoardDate}</b></div>
                     </div>
                   </td>

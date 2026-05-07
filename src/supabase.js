@@ -107,29 +107,33 @@ function createClient() {
       update: (data) => { method = "PATCH"; body = JSON.stringify(data); returnData = true; return builder; },
       upsert: (data, { onConflict } = {}) => { method = "POST"; body = JSON.stringify(data); returnData = true; prefer = "resolution=merge-duplicates"; if (onConflict) params.push(`on_conflict=${onConflict}`); return builder; },
       delete: () => { method = "DELETE"; return builder; },
-      then: async (resolve, reject) => {
-        try {
-          const all = [...params, ...filters];
-          const query = all.length ? `?${all.join("&")}` : "";
-          const h = {};
-          const preferParts = [];
-          if (returnData) preferParts.push("return=representation");
-          if (prefer) preferParts.push(prefer);
-          if (preferParts.length) h["Prefer"] = preferParts.join(",");
-          let res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, { method, headers: { ...headers(), ...h }, body });
-          if (res.status === 401 && refreshToken && await refreshIfNeeded()) {
-            res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, { method, headers: { ...headers(), ...h }, body });
+      then: function (onFulfilled, onRejected) {
+        // 把执行包装成真正的 Promise，让链式 .then(...).then(...) 正常工作
+        const exec = async () => {
+          try {
+            const all = [...params, ...filters];
+            const query = all.length ? `?${all.join("&")}` : "";
+            const h = {};
+            const preferParts = [];
+            if (returnData) preferParts.push("return=representation");
+            if (prefer) preferParts.push(prefer);
+            if (preferParts.length) h["Prefer"] = preferParts.join(",");
+            let res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, { method, headers: { ...headers(), ...h }, body });
+            if (res.status === 401 && refreshToken && await refreshIfNeeded()) {
+              res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, { method, headers: { ...headers(), ...h }, body });
+            }
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              throw new Error(err.message || err.hint || res.statusText);
+            }
+            const text = await res.text();
+            const result = text ? JSON.parse(text) : [];
+            return { data: isSingle ? result[0] || null : result, error: null };
+          } catch (err) {
+            return { data: null, error: err };
           }
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.message || err.hint || res.statusText);
-          }
-          const text = await res.text();
-          const result = text ? JSON.parse(text) : [];
-          resolve({ data: isSingle ? result[0] || null : result, error: null });
-        } catch (err) {
-          resolve({ data: null, error: err });
-        }
+        };
+        return exec().then(onFulfilled, onRejected);
       },
     };
     return builder;

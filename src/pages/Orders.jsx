@@ -728,8 +728,8 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
   const [pkgUnits, setPkgUnits] = useState([]);
   const [cargoTypes, setCargoTypes] = useState([]);
   useEffect(() => {
-    getCachedRef("pkg_units").then(setPkgUnits).catch(()=>{});
-    getCachedRef("cargo_types").then(setCargoTypes).catch(()=>{});
+    getCachedRef("pkg_units").then(d => setPkgUnits(d || [])).catch(()=>{});
+    getCachedRef("cargo_types").then(d => setCargoTypes(d || [])).catch(()=>{});
   }, []);
 
   // 设置浏览器标签页标题（方便多标签场景识别）
@@ -1359,7 +1359,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                         <ComboBox
                           value={v("pkg_unit") || ""}
                           onChange={val => ch("pkg_unit", val ? liveUpper(val) : null)}
-                          options={pkgUnits.map(u => u.code)}
+                          options={(pkgUnits || []).map(u => u.code)}
                           placeholder="CARTONS"
                         />
                       </span>
@@ -1396,7 +1396,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                               disabled={!editing}
                               style={{ ...tmStyles.input, width: 110 }}>
                         {cargoTypes.length === 0 && <option value="general">普通货</option>}
-                        {cargoTypes.map(t => <option key={t.code} value={t.code}>{t.name_zh}</option>)}
+                        {(cargoTypes || []).map(t => <option key={t.code} value={t.code}>{t.name_zh}</option>)}
                       </select>
                     </div>
                   </div>

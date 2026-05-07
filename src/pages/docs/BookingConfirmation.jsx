@@ -132,7 +132,7 @@ export default function BookingConfirmation({ shipmentId, onBack }) {
             <Cell label="卸货港 POD"            value={s.pod} />
             <Cell label="预计开航 ETD"          value={s.etd} />
             <Cell label="预计到港 ETA"          value={s.eta} />
-            <Cell label="服务类型 Service"      value={s.carrier_service || "CY-CY"} />
+            <Cell label="服务类型 Service"      value={s.service_type || "CY-CY"} />
             <Cell label="付款方式 Payment"      value={s.carrier_payment_term || "预付"} />
           </Grid>
         </Section>

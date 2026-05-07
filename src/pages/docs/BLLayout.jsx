@@ -98,7 +98,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           containerNos[i] || containerNos[0] || "",
           qtyContainerStr,
           sealNos[i] || sealNos[0] || "",
-          s.carrier_service || "CY-CY",
+          s.service_type || "CY-CY",
         ].filter(Boolean).join("/"),
         marks: it.marks || s.marks || "N/M",
         pkgs: it.qty_packages || 0,
@@ -112,8 +112,8 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }))
     : [{
         cnInfo: containerNos.length > 0
-          ? containerNos.map((cn, i) => `${cn}/${qtyContainerStr}/${sealNos[i] || ""}/${s.carrier_service || "CY-CY"}`).join("\n")
-          : (qtyContainerStr ? `${qtyContainerStr}/${s.carrier_service || "CY-CY"}` : ""),
+          ? containerNos.map((cn, i) => `${cn}/${qtyContainerStr}/${sealNos[i] || ""}/${s.service_type || "CY-CY"}`).join("\n")
+          : (qtyContainerStr ? `${qtyContainerStr}/${s.service_type || "CY-CY"}` : ""),
         marks: s.marks || "N/M",
         pkgs: parseInt(s.qty_packages) || 0,
         unit: s.pkg_unit || "CARTONS",
@@ -356,7 +356,7 @@ function CargoPage({
         <div className="bl-cell" style={{ minHeight: 110 }}>
           <div className="bl-cell-label">For delivery of goods please apply to:</div>
           <div className="bl-cell-val" style={{ fontSize: 10 }}>
-            {s.destination_agent || <span style={{ color: "#999", fontStyle: "italic" }}>—</span>}
+            {s.destination_agent || s.overseas_agent || <span style={{ color: "#999", fontStyle: "italic" }}>—</span>}
           </div>
         </div>
 

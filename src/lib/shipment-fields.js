@@ -55,6 +55,9 @@ export const SHIPMENT_DB_COLUMNS = new Set([
   "swb_no", "swb_date",
   "issue_place_code", "issue_place_name", "issue_date",
   "third_party_payer_id", "third_party_payer_name", "third_party_payer_code",
+
+  // Migration 005 加的列
+  "service_type",
 ]);
 
 /**

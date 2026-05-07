@@ -1742,7 +1742,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                   <Df label="交货地"><input value={v("place_of_delivery_code")} disabled={!editing} onChange={e => ch("place_of_delivery_code", e.target.value)} /></Df>
                   <Df label="目的地"><input value={v("destination_code")} disabled={!editing} onChange={e => ch("destination_code", e.target.value)} /></Df>
                   <Df label="付款方式"><input value={v("carrier_payment_term") || "预付"} disabled={!editing} onChange={e => ch("carrier_payment_term", e.target.value)} /></Df>
-                  <Df label="服务类型"><input value={v("carrier_service") || "CY-CY"} disabled={!editing} onChange={e => ch("carrier_service", e.target.value)} /></Df>
+                  <Df label="服务类型"><input value={v("service_type") || "CY-CY"} disabled={!editing} onChange={e => ch("service_type", e.target.value)} /></Df>
                   <Df label="企业代码" required><input value={v("enterprise_code")} disabled={!editing} onChange={e => ch("enterprise_code", e.target.value)} /></Df>
                 </div>
               )}

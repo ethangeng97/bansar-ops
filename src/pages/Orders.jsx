@@ -371,10 +371,8 @@ export function OrdersPage({ user, onBack }) {
       shipment_type: createMode,
       lifecycle: "处理中",
       finance_status: "未创建",
-      qc_status: "未启动",
-      space_status: "未启动",
-      mbl_status: "未启动",
-      hbl_status: "未启动",
+      // qc_status / space_status / mbl_status / hbl_status 不在此设默认值
+      // 让 DB 用各自的 DEFAULT 填（避免和 CHECK 约束的允许值冲突）
       has_hbl: false,
       overseas_agent: "Keplin",
       solicit_type: "代理货",

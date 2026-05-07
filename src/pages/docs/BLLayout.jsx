@@ -51,19 +51,17 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   }, [shipmentId]);
 
   const print = () => {
-    // 临时改 title 让浏览器"另存为 PDF"用合适的文件名
-    // 格式: BLNo-mode-DRAFT/COPY/TELEX  例如 BSNREF260500003-HBL-DRAFT
-    const blNo = shipment?.hbl_no || shipment?.mbl_no || shipment?.order_no || "BL";
+    // 文件名规则: {MBL号}+BL_{DRAFT/COPY/TELEX}
+    // 例如: OOLU2168454750+BL_DRAFT
+    const blNo = shipment?.mbl_no || shipment?.booking_no || shipment?.hbl_no || shipment?.order_no || "BL";
     const tag = mode === "draft" ? "DRAFT"
               : mode === "copy"  ? "COPY"
               : mode === "telex" ? "TELEX"
-              : "BL";
-    const docType = shipment?.has_hbl ? "HBL" : "MBL";
-    const filename = `${blNo}-${docType}-${tag}`;
+              : "DRAFT";
+    const filename = `${blNo}+BL_${tag}`;
     const oldTitle = document.title;
     document.title = filename;
     window.print();
-    // 打印对话框关闭后恢复 title（setTimeout 因为 print 是同步阻塞）
     setTimeout(() => { document.title = oldTitle; }, 1000);
   };
 

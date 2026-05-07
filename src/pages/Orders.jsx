@@ -744,6 +744,29 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
   const [cargoTypes, setCargoTypes] = useState([]);
+  // 集装箱汇总（由 ContainerEditor onChange 回调更新，托单信息 tab 单行汇总用）
+  const [containerSummary, setContainerSummary] = useState("");
+
+  // OrderDetail mount / order.id 变化时预拉 shipment_containers 计算汇总（托单信息 tab 单行用）
+  useEffect(() => {
+    if (!order?.id) { setContainerSummary(""); return; }
+    supabase.from("shipment_containers")
+      .select("container_size, container_type, qty")
+      .eq("shipment_id", order.id)
+      .then(({ data }) => {
+        const rows = data || [];
+        const map = {};
+        for (const r of rows) {
+          const key = `${r.container_size}${r.container_type}`;
+          map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
+        }
+        const text = Object.entries(map)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, q]) => `${q}x${k}`)
+          .join(",");
+        setContainerSummary(text);
+      });
+  }, [order?.id]);
   useEffect(() => {
     getCachedRef("pkg_units").then(d => setPkgUnits(d || [])).catch(()=>{});
     getCachedRef("cargo_types").then(d => setCargoTypes(d || [])).catch(()=>{});
@@ -1353,9 +1376,8 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                       <label style={{ ...tmStyles.label, ...tmStyles.labelReadonly, ...tmStyles.labelNotnull }}>集装箱</label>
                       <input
                         value={(() => {
-                          // 这里聚合显示 shipment_containers，但因为 ContainerEditor 在子 tab 编辑
-                          // 这里只显示当前 qty_container 旧字段（向后兼容）或提示
-                          return v("qty_container") || "";
+                          // 优先用 ContainerEditor 实时汇总（如果用户刚操作过），fallback 到 DB 上的 qty_container 字段
+                          return containerSummary || v("qty_container") || "";
                         })()}
                         readOnly
                         placeholder="点右侧 + 跳到集装箱子 tab 编辑"
@@ -1762,6 +1784,19 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                   <ContainerEditor
                     shipmentId={order?.id}
                     readOnly={!editing && !isCreating}
+                    onChange={(rows) => {
+                      // 聚合 rows 为 "1x40HQ,2x20GP" 字符串，给托单信息 tab 单行汇总用
+                      const map = {};
+                      for (const r of rows) {
+                        const key = `${r.container_size}${r.container_type}`;
+                        map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
+                      }
+                      const text = Object.entries(map)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([k, q]) => `${q}x${k}`)
+                        .join(",");
+                      setContainerSummary(text);
+                    }}
                   />
                 </div>
               )}

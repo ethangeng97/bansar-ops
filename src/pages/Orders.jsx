@@ -89,6 +89,18 @@ export function OrdersPage({ user, onBack }) {
     const m = window.location.hash.match(/[?&]id=([^&]+)/);
     return m ? decodeURIComponent(m[1]) : null;
   });
+  // 详情页用的完整订单数据（列表 select 精简了字段，详情页要全字段）
+  const [fullOrder, setFullOrder] = useState(null);
+  const [fullOrderLoading, setFullOrderLoading] = useState(false);
+  useEffect(() => {
+    if (!selectedId) { setFullOrder(null); return; }
+    setFullOrderLoading(true);
+    supabase.from("shipments").select("*").eq("id", selectedId).single()
+      .then(({ data, error }) => {
+        if (!error && data) setFullOrder(data);
+        setFullOrderLoading(false);
+      });
+  }, [selectedId]);
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [search, setSearch] = useState("");
   const [showFilter, setShowFilter] = useState(true);
@@ -348,12 +360,16 @@ export function OrdersPage({ user, onBack }) {
 
   const clearF = () => { setFilters({}); setSearch(""); };
 
-  const selOrder = shipments.find(o => o.id === selectedId);
+  // 详情态优先用完整数据（含所有字段），fallback 到列表精简数据
+  const selOrder = fullOrder && fullOrder.id === selectedId
+    ? fullOrder
+    : shipments.find(o => o.id === selectedId);
 
   if (loading) return <Spinner />;
 
   // 从外部 URL ?id=xxx 进来但找不到该订单 → 显示提示
-  if (selectedId && !selOrder) return (
+  // （但 fullOrder 还在拉时，不算"未找到"，先等）
+  if (selectedId && !selOrder && !fullOrderLoading) return (
     <div style={{ padding: 50, textAlign: "center", color: "#999" }}>
       <div style={{ fontSize: 16, marginBottom: 12 }}>订单未找到</div>
       <div style={{ fontSize: 12, marginBottom: 20 }}>该订单可能已被删除，或您没有访问权限</div>
@@ -392,8 +408,10 @@ export function OrdersPage({ user, onBack }) {
           setCreateMode(null);
           load();
         }}
-        onCreated={(newId) => {
+        onCreated={(newId, newData) => {
           // 保存成功后跳转到该订单详情态（同标签内切换 mode）
+          // INSERT returning 已带完整数据，直接放入 fullOrder 省一次 fetch
+          if (newData) setFullOrder(newData);
           setCreateMode(null);
           setSelectedId(newId);
           window.history.replaceState(null, "", `#/sea_export?id=${newId}`);
@@ -867,7 +885,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
       const { data, error } = await supabase.from("shipments").insert(cleanPayload).select().single();
       if (error) { alert("创建失败：" + error.message); return; }
       if (data?.id && onCreated) {
-        onCreated(data.id);
+        onCreated(data.id, data);
       }
       return;
     }

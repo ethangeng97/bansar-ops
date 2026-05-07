@@ -1076,6 +1076,69 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
   // 创建模式下的主拼判定（订单还没保存，order_no 为空）
   const isCreatingMaster = isCreating && createMode === "Console";
 
+  // 复制订单：基于当前订单创建新订单，但 MBL/HBL/Booking 等单号 + 系统字段不复制
+  const cloneOrder = async () => {
+    if (!order?.id) return;
+    if (!window.confirm(`确认复制本订单？\n\n复制内容：除单号（MBL/HBL/Booking）外的所有字段。\n创建后会在新标签页打开。`)) return;
+
+    // 拉完整数据（fullOrder 可能是 prop 也可能没拉）
+    const { data: src, error: e1 } = await supabase.from("shipments")
+      .select("*").eq("id", order.id).single();
+    if (e1) { alert("加载源订单失败：" + e1.message); return; }
+
+    // 排除字段（系统生成 / 单号 / 状态 / 关联键 / 备份）
+    const EXCLUDE = new Set([
+      "id", "order_no",
+      "mbl_no", "hbl_no", "booking_no", "e_booking_no", "supplier_order_no",
+      "created_at", "updated_at", "completed_at",
+      "created_by", "completed_by",
+      "entry_done", "entry_number",
+      "qc_status", "space_status", "mbl_status", "hbl_status", "finance_status",
+      "parent_id",
+      "_customer_backup", "_supplier_backup", "_order_no_backup",
+      "lifecycle",  // 让新订单从"处理中"开始
+    ]);
+    const newRow = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (!EXCLUDE.has(k) && v !== null) newRow[k] = v;
+    }
+    newRow.lifecycle = "处理中";
+
+    const cleaned = filterShipmentPayload(newRow);
+    const { data: created, error: e2 } = await supabase.from("shipments")
+      .insert(cleaned).select().single();
+    if (e2) { alert("复制失败：" + e2.message); return; }
+
+    // 同时复制集装箱关联表
+    const { data: ctnSrc } = await supabase.from("shipment_containers")
+      .select("container_size, container_type, qty, container_no, seal_no, notes, sort_order")
+      .eq("shipment_id", order.id);
+    if (ctnSrc && ctnSrc.length > 0) {
+      const newContainers = ctnSrc.map(c => ({
+        ...c,
+        shipment_id: created.id,
+        container_no: null,  // 箱号不复制（每个订单独立）
+        seal_no: null,       // 封号不复制
+      }));
+      await supabase.from("shipment_containers").insert(newContainers);
+    }
+
+    // 同步 qty_container 字段（V4 兼容）
+    if (ctnSrc && ctnSrc.length > 0) {
+      const map = {};
+      for (const c of ctnSrc) {
+        const key = `${c.container_size}${c.container_type}`;
+        map[key] = (map[key] || 0) + (parseInt(c.qty) || 0);
+      }
+      const text = Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, q]) => `${q}x${k}`).join(",");
+      await supabase.from("shipments").update({ qty_container: text }).eq("id", created.id);
+    }
+
+    // 新标签页打开新订单
+    window.open(`#/sea_export?id=${created.id}`, "_blank");
+  };
+
   // 创建分票
   const createSubTicket = async () => {
     if (!isMaster) return;
@@ -1180,8 +1243,8 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
           </>
         ) : (
           <>
-            <Mi disabled={isLocked}>新建</Mi>
-            <Mi disabled={isLocked}>复制</Mi>
+            <Mi disabled={isLocked} onClick={() => { window.location.hash = "#/sea_export?action=new"; }}>新建</Mi>
+            <Mi disabled={isLocked} onClick={cloneOrder}>复制</Mi>
             {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
             <Mi disabled={isLocked}>删除</Mi>
             <Tbl/>

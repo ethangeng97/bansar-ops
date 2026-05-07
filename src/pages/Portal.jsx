@@ -357,7 +357,9 @@ export default function Portal({ user, onLogout }) {
 
       {/* 节点子菜单浮层（如"新建作业"展开整箱/拼箱/自拼柜） */}
       {submenuFor && (() => {
-        const node = NODES[submenuFor.stage][submenuFor.idx];
+        const flow = FLOW_BY_MODULE[activeModule];
+        if (!flow) return null;
+        const node = flow.nodes[submenuFor.stage]?.[submenuFor.idx];
         if (!node?.submenu) return null;
         return (
           <div

@@ -92,14 +92,50 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       .map(([k, q]) => `${q}x${k}`).join(",");
   })();
 
+  // 集装箱信息块多行格式（业内标准）：
+  //   BEAU6236829
+  //   1x40'HQ
+  //   OOLJPJ6360
+  //   FCL/CY-CY
+  // 多箱子时多组重复
+  const isFCL = (s.shipment_type || "").toUpperCase().includes("FCL") || (s.shipment_type || "") === "整箱";
+  const fclTag = isFCL ? "FCL/" : "";
+  const buildContainerBlock = () => {
+    if (containers.length === 0) {
+      // 没有关联表数据时 fallback 到旧字段
+      const lines = [];
+      if (containerNos.length > 0) {
+        containerNos.forEach((cn, i) => {
+          if (cn) lines.push(cn);
+          if (i === 0 && qtyContainerStr) lines.push(formatQty(qtyContainerStr));
+          if (sealNos[i]) lines.push(sealNos[i]);
+        });
+        lines.push(`${fclTag}${s.service_type || "CY-CY"}`);
+      } else if (qtyContainerStr) {
+        lines.push(formatQty(qtyContainerStr));
+        lines.push(`${fclTag}${s.service_type || "CY-CY"}`);
+      }
+      return lines.join("\n");
+    }
+    // 有关联表：每个箱子一组（箱号 / 箱型 / 封号）
+    const lines = [];
+    containers.forEach((c, i) => {
+      if (c.container_no) lines.push(c.container_no);
+      lines.push(`${c.qty || 1}x${c.container_size}'${c.container_type}`);
+      if (c.seal_no) lines.push(c.seal_no);
+      if (i < containers.length - 1) lines.push("");  // 多箱之间空行分隔
+    });
+    lines.push(`${fclTag}${s.service_type || "CY-CY"}`);
+    return lines.join("\n");
+  };
+  // 把 "1x40HQ" → "1x40'HQ"（业内习惯加引号）
+  function formatQty(str) {
+    return str.replace(/(\d+x\d+)([A-Z]+)/g, "$1'$2");
+  }
+
   let rows = cargoItems.length > 0
     ? cargoItems.map((it, i) => ({
-        cnInfo: [
-          containerNos[i] || containerNos[0] || "",
-          qtyContainerStr,
-          sealNos[i] || sealNos[0] || "",
-          s.service_type || "CY-CY",
-        ].filter(Boolean).join("/"),
+        cnInfo: buildContainerBlock(),
         marks: it.marks || s.marks || "N/M",
         pkgs: it.qty_packages || 0,
         unit: it.pkg_unit || "CARTONS",
@@ -111,9 +147,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         cbm: parseFloat(it.volume) || 0,
       }))
     : [{
-        cnInfo: containerNos.length > 0
-          ? containerNos.map((cn, i) => `${cn}/${qtyContainerStr}/${sealNos[i] || ""}/${s.service_type || "CY-CY"}`).join("\n")
-          : (qtyContainerStr ? `${qtyContainerStr}/${s.service_type || "CY-CY"}` : ""),
+        cnInfo: buildContainerBlock(),
         marks: s.marks || "N/M",
         pkgs: parseInt(s.qty_packages) || 0,
         unit: s.pkg_unit || "CARTONS",
@@ -193,7 +227,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           font-size: 9px; color: #444; margin-bottom: 4px;
         }
         .bl-cell-val {
-          font-size: 10.5px; line-height: 1.5; white-space: pre-wrap;
+          font-size: 10.5px; line-height: 1.5; white-space: pre-wrap; font-weight: 600;
         }
 
         .chk {
@@ -302,6 +336,14 @@ function CargoPage({
           <div style={{ fontSize: 9.5, fontWeight: 700, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.3 }}>
             {blNo}
           </div>
+          {s.booking_no && (
+            <>
+              <div style={{ fontSize: 8, color: "#444", marginTop: 6 }}>Booking No.</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.3 }}>
+                {s.booking_no}
+              </div>
+            </>
+          )}
         </div>
       </header>
 

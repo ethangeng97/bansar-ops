@@ -8,8 +8,28 @@ import { LIFECYCLE, lifecycleOf, SOP_NODES, nodeStatusOf, applicableNodesFor } f
 
 /* ── 标题栏 ─────────────────────────────────────────────────── */
 export function TmsTitle({ title, user, role, onClose }) {
+  const goHome = () => {
+    if (window.confirm("确认返回主页？\n\n当前页面未保存的内容将丢失。")) {
+      window.location.hash = "#/";
+    }
+  };
   return (
     <div className="tms-tb">
+      <span
+        className="tms-home-btn"
+        onClick={goHome}
+        title="返回主页"
+        style={{
+          cursor: "pointer", marginRight: 10, padding: "0 8px",
+          display: "inline-flex", alignItems: "center", height: "100%",
+          color: "#fff", opacity: 0.85, fontSize: 16, lineHeight: 1,
+          borderRight: "1px solid rgba(255,255,255,0.2)",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.opacity = 1; e.currentTarget.style.background = "rgba(255,255,255,0.12)"; }}
+        onMouseLeave={e => { e.currentTarget.style.opacity = 0.85; e.currentTarget.style.background = "transparent"; }}
+      >
+        ⌂
+      </span>
       <span className="tt">{title}</span>
       <div className="ri">
         <span className="mi">{user?.profile?.name || user?.email?.split("@")[0] || "用户"}<span className="ar"></span></span>

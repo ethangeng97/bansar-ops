@@ -462,52 +462,74 @@ export function OrdersPage({ user, onBack }) {
       {showTypePicker && (() => {
         const pickType = (t) => {
           setShowTypePicker(false);
-          // 在新标签页打开，避免污染当前列表的 URL
           window.open(`#/sea_export?action=new&type=${t}`, "_blank");
         };
         const types = [
-          { v: "FCL", label: "整箱", desc: "FCL · Full Container Load", color: "#1990FF" },
-          { v: "LCL", label: "拼箱", desc: "LCL · Less than Container Load", color: "#52c41a" },
-          { v: "Console", label: "自拼柜", desc: "Console · 自营拼箱主单", color: "#faad14" },
+          { v: "FCL", label: "整箱", desc: "Full Container Load" },
+          { v: "LCL", label: "拼箱", desc: "Less than Container Load" },
+          { v: "Console", label: "自拼柜", desc: "自营拼箱主单" },
         ];
         return (
           <div style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
           }} onClick={() => setShowTypePicker(false)}>
-            <div style={{ background: "#fff", borderRadius: 6, width: 480, padding: "24px 28px",
-                          boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
-                 onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>新建作业</div>
-              <div style={{ fontSize: 12, color: "#999", marginBottom: 18 }}>请选择业务类型</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{
+              background: "#fff", border: "1px solid #abadb3", borderRadius: 3,
+              width: 380, boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+            }} onClick={e => e.stopPropagation()}>
+              {/* 标题栏（同系统对话框风格） */}
+              <div style={{
+                background: "linear-gradient(to bottom, #f4f6f9, #e8ecf2)",
+                borderBottom: "1px solid #abadb3", padding: "8px 14px",
+                fontSize: 13, fontWeight: 600, color: "#222", display: "flex",
+                justifyContent: "space-between", alignItems: "center",
+              }}>
+                <span>新建作业 - 请选择业务类型</span>
+                <span onClick={() => setShowTypePicker(false)} style={{
+                  cursor: "pointer", color: "#888", fontSize: 14, padding: "0 4px",
+                }}>×</span>
+              </div>
+              {/* 内容区 */}
+              <div style={{ padding: 12 }}>
                 {types.map(t => (
                   <div key={t.v}
                     onClick={() => pickType(t.v)}
                     style={{
-                      padding: "14px 16px", border: "1px solid #e6e6e6", borderRadius: 4,
-                      cursor: "pointer", display: "flex", alignItems: "center", gap: 14,
-                      transition: "all 0.15s",
+                      padding: "8px 12px", border: "1px solid #c1c1c1", borderRadius: 2,
+                      cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                      marginBottom: 6, background: "#fff", fontSize: 13,
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; e.currentTarget.style.background = "#fafafa"; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#e6e6e6"; e.currentTarget.style.background = "#fff"; }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = "#1990FF";
+                      e.currentTarget.style.background = "#e6f4ff";
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = "#c1c1c1";
+                      e.currentTarget.style.background = "#fff";
+                    }}
                   >
                     <div style={{
-                      width: 38, height: 38, borderRadius: 4, background: t.color + "15",
-                      color: t.color, fontWeight: 700, fontSize: 13, display: "flex",
-                      alignItems: "center", justifyContent: "center",
+                      width: 50, height: 26, border: "1px solid #1990FF", borderRadius: 2,
+                      color: "#1990FF", fontWeight: 700, fontSize: 11, fontFamily: "Consolas,monospace",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "#fff",
                     }}>{t.v}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "#222" }}>{t.label}</div>
-                      <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{t.desc}</div>
+                      <span style={{ color: "#222", fontWeight: 600 }}>{t.label}</span>
+                      <span style={{ color: "#888", fontSize: 11, marginLeft: 8 }}>{t.desc}</span>
                     </div>
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              {/* 底部按钮区 */}
+              <div style={{
+                borderTop: "1px solid #e4d3a8", background: "#fff0e3",
+                padding: "6px 12px", display: "flex", justifyContent: "flex-end",
+              }}>
                 <button onClick={() => setShowTypePicker(false)} style={{
-                  padding: "6px 16px", background: "#fff", color: "#666",
-                  border: "1px solid #d9d9d9", borderRadius: 3, cursor: "pointer", fontSize: 13,
+                  padding: "3px 14px", fontSize: 12, background: "#fff",
+                  border: "1px solid #c1c1c1", borderRadius: 2, cursor: "pointer", color: "#333",
                 }}>取消</button>
               </div>
             </div>

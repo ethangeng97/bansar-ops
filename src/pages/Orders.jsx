@@ -793,7 +793,13 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
       getCachedRef("customers"),
       getCachedRef("staff"),
     ]).then(([suppliers, customers, staff]) => {
-      setRefData({ suppliers, customers, ports: [], staff });
+      // 防御：任何字段为 undefined 时回退到 []
+      setRefData({
+        suppliers: suppliers || [],
+        customers: customers || [],
+        ports: [],
+        staff: staff || [],
+      });
     }).catch(err => console.error("loadRefs error:", err));
 
     if (order.po || order.customer_po) {
@@ -1161,13 +1167,13 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                   {editing ? (
                     <select value={v("operator_id") || ""} onChange={e => ch("operator_id", e.target.value || null)}>
                       <option value="">— 未指派 —</option>
-                      {refData.staff.filter(u => u.role === "operator" || u.role === "admin").map(u => (
+                      {(refData.staff || []).filter(u => u.role === "operator" || u.role === "admin").map(u => (
                         <option key={u.id} value={u.id}>{u.display_name || u.full_name || u.email}</option>
                       ))}
                     </select>
                   ) : (
                     <input value={(() => {
-                      const u = refData.staff.find(u => u.id === v("operator_id"));
+                      const u = (refData.staff || []).find(u => u.id === v("operator_id"));
                       return u ? (u.display_name || u.full_name || u.email) : (v("operator") || "");
                     })()} disabled />
                   )}
@@ -1176,13 +1182,13 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                   {editing ? (
                     <select value={v("salesperson_id") || ""} onChange={e => ch("salesperson_id", e.target.value || null)}>
                       <option value="">— 未指派 —</option>
-                      {refData.staff.filter(u => u.role === "sales" || u.role === "admin").map(u => (
+                      {(refData.staff || []).filter(u => u.role === "sales" || u.role === "admin").map(u => (
                         <option key={u.id} value={u.id}>{u.display_name || u.full_name || u.email}</option>
                       ))}
                     </select>
                   ) : (
                     <input value={(() => {
-                      const u = refData.staff.find(u => u.id === v("salesperson_id"));
+                      const u = (refData.staff || []).find(u => u.id === v("salesperson_id"));
                       return u ? (u.display_name || u.full_name || u.email) : (v("salesperson") || "");
                     })()} disabled />
                   )}

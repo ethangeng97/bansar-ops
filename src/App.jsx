@@ -186,7 +186,7 @@ export default function App() {
   // ── V5 财务模块路由 ──
   // #/invoices 开票/收票记录
   if (route === "invoices") {
-    return <InvoicesList onBack={() => { window.location.hash = ""; }} />;
+    return <InvoicesList user={user} onBack={() => { window.location.hash = ""; }} />;
   }
 
   // #/payments 收付款记录

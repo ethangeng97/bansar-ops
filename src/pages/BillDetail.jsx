@@ -47,6 +47,7 @@ export default function BillDetail({ billId, onBack }) {
   const [partner, setPartner] = useState(null);
   const [charges, setCharges] = useState([]);
   const [chargeItems, setChargeItems] = useState([]);
+  const [linkedInvoices, setLinkedInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const reload = async () => {
@@ -68,6 +69,22 @@ export default function BillDetail({ billId, onBack }) {
     setPartner(pt);
     setCharges(chs || []);
     setChargeItems(items || []);
+
+    // 拉关联发票（invoice_bills join invoices）
+    const { data: ibs } = await supabase.from("invoice_bills")
+      .select("id, applied_amount, invoice_id").eq("bill_id", billId);
+    if (ibs && ibs.length > 0) {
+      const invIds = ibs.map(x => x.invoice_id);
+      const { data: invs } = await supabase.from("invoices")
+        .select("id, invoice_no, invoice_date, amount_total, currency, kind, direction")
+        .in("id", invIds);
+      const invMap = {};
+      (invs || []).forEach(x => { invMap[x.id] = x; });
+      setLinkedInvoices(ibs.map(ib => ({ ...ib, ...(invMap[ib.invoice_id] || {}) })));
+    } else {
+      setLinkedInvoices([]);
+    }
+
     setLoading(false);
   };
 
@@ -296,6 +313,58 @@ export default function BillDetail({ billId, onBack }) {
             </tfoot>
           </table>
         </div>
+
+        {/* 已开发票（关联 invoices） */}
+        {linkedInvoices.length > 0 && (
+          <div style={{ marginTop: 14, border: "1px solid #f0f0f0", borderRadius: 3 }}>
+            <div style={{ padding: "8px 12px", background: "#fafafa", fontWeight: 600, fontSize: 12,
+                          borderBottom: "1px solid #f0f0f0",
+                          display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>已开发票 <span style={{ color: "#888", fontWeight: 400 }}>共 {linkedInvoices.length} 张</span></span>
+              <a href="#/invoices" style={{ fontSize: 11, color: "#1990ff", textDecoration: "none" }}>
+                去发票列表管理 →
+              </a>
+            </div>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#fff", color: "#444" }}>
+                  <th style={th}>发票号</th>
+                  <th style={th}>开票日期</th>
+                  <th style={{ ...th, width: 70 }}>类型</th>
+                  <th style={{ ...th, textAlign: "right" }}>发票金额</th>
+                  <th style={{ ...th, textAlign: "right" }}>分摊到本账单</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linkedInvoices.map(li => (
+                  <tr key={li.id} style={{ borderTop: "1px solid #f5f5f5" }}>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace", color: BRAND, fontWeight: 600 }}>
+                      {li.invoice_no}
+                    </td>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace" }}>
+                      {li.invoice_date ? String(li.invoice_date).slice(0, 10) : "—"}
+                    </td>
+                    <td style={td}>
+                      <span style={{
+                        padding: "1px 6px", fontSize: 11, borderRadius: 2,
+                        background: li.kind === "non_business" ? "#fff7e6" : "#f0f7ff",
+                        color: li.kind === "non_business" ? "#fa8c16" : "#1990ff",
+                      }}>
+                        {li.kind === "non_business" ? "非业务" : "业务"}
+                      </span>
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "Consolas,monospace" }}>
+                      {li.currency} {Number(li.amount_total).toFixed(2)}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "Consolas,monospace", color: "#1990ff", fontWeight: 600 }}>
+                      {Number(li.applied_amount).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
       </div>
     </div>

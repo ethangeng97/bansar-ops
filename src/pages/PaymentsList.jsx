@@ -75,6 +75,7 @@ export default function PaymentsList({ onBack }) {
           (p.payment_no || "").toLowerCase().includes(k) ||
           (p.partner_name || "").toLowerCase().includes(k) ||
           (p.bank_account || "").toLowerCase().includes(k) ||
+          (p.bank_flow_no || "").toLowerCase().includes(k) ||
           (p.notes || "").toLowerCase().includes(k)
         );
       }
@@ -140,7 +141,7 @@ export default function PaymentsList({ onBack }) {
   const onExportCsv = () => {
     const header = [
       "单号", "方向", "日期", "对方", "币种", "金额",
-      "汇率", "折CNY", "付款方式", "银行账号", "备注",
+      "汇率", "折CNY", "付款方式", "银行账号", "银行流水号", "备注",
       "状态", "挂账单号", "挂账单金额合计",
     ];
     const lines = [csvRow(header)];
@@ -159,6 +160,7 @@ export default function PaymentsList({ onBack }) {
         Number(p.amount_cny || 0).toFixed(2),
         METHOD_LABELS[p.payment_method] || "",
         p.bank_account || "",
+        p.bank_flow_no || "",
         (p.notes || "").replace(/\n/g, " "),
         STATUS_LABELS[p.status]?.label || p.status,
         billNos,
@@ -282,6 +284,7 @@ export default function PaymentsList({ onBack }) {
                 <th style={{ ...th, textAlign: "right" }}>折 CNY</th>
                 <th style={{ ...th, textAlign: "center" }}>挂账单</th>
                 <th style={{ ...th, textAlign: "center" }}>方式</th>
+                <th style={th}>银行流水号</th>
                 <th style={{ ...th, textAlign: "center", width: 70 }}>状态</th>
                 <th style={{ ...th, textAlign: "center", minWidth: 110 }}>操作</th>
               </tr>
@@ -324,6 +327,9 @@ export default function PaymentsList({ onBack }) {
                       <td style={{ ...td, textAlign: "center", color: "#666" }}>
                         {METHOD_LABELS[p.payment_method] || "—"}
                       </td>
+                      <td style={{ ...td, fontFamily: "Consolas,monospace", color: "#888", fontSize: 11 }}>
+                        {p.bank_flow_no || "—"}
+                      </td>
                       <td style={{ ...td, textAlign: "center" }}>
                         <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 3,
                                        background: sLabel.bg, color: sLabel.color, fontSize: 11, fontWeight: 600 }}>
@@ -346,7 +352,7 @@ export default function PaymentsList({ onBack }) {
                     {isExp && linked.length > 0 && (
                       <tr style={{ background: "#fafbfc" }}>
                         <td></td>
-                        <td colSpan={9} style={{ padding: "8px 12px 12px 0" }}>
+                        <td colSpan={10} style={{ padding: "8px 12px 12px 0" }}>
                           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
                             <thead>
                               <tr style={{ color: "#666" }}>

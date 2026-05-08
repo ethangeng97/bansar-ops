@@ -39,6 +39,7 @@ export default function PaymentEditor({ payment, direction, onClose, onSaved }) 
     partner_id:     payment?.partner_id || "",
     partner_name:   payment?.partner_name || "",
     bank_account:   payment?.bank_account || "",
+    bank_flow_no:   payment?.bank_flow_no || "",
     payment_method: payment?.payment_method || "transfer",
     notes:          payment?.notes || "",
   });
@@ -166,6 +167,7 @@ export default function PaymentEditor({ payment, direction, onClose, onSaved }) 
           partner_id:     form.partner_id,
           partner_name:   form.partner_name,
           bank_account:   form.bank_account || null,
+          bank_flow_no:   form.bank_flow_no || null,
           payment_method: form.payment_method,
           notes:          form.notes || null,
           status:         "active",
@@ -182,6 +184,7 @@ export default function PaymentEditor({ payment, direction, onClose, onSaved }) 
           partner_id:     form.partner_id,
           partner_name:   form.partner_name,
           bank_account:   form.bank_account || null,
+          bank_flow_no:   form.bank_flow_no || null,
           payment_method: form.payment_method,
           notes:          form.notes || null,
         }).eq("id", paymentId);
@@ -268,6 +271,12 @@ export default function PaymentEditor({ payment, direction, onClose, onSaved }) 
                      onChange={e => setForm({ ...form, bank_account: e.target.value })}
                      placeholder="(可选)我方收/付款的银行账号"
                      style={inp} />
+            </Field>
+            <Field label="银行流水号" wide>
+              <input value={form.bank_flow_no}
+                     onChange={e => setForm({ ...form, bank_flow_no: e.target.value })}
+                     placeholder="(可选)对账单上的交易流水号，用于核对"
+                     style={{ ...inp, fontFamily: "Consolas,monospace" }} />
             </Field>
             <Field label="备注" wide>
               <input value={form.notes}

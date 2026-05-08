@@ -190,7 +190,9 @@ export default function InvoicesList({ onBack }) {
 
         {/* 筛选 */}
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
-          <input placeholder="发票号 / 客户 / 账单号 / 提单号 / 作业号"
+          <input placeholder={direction === "AP"
+            ? "发票号 / 供应商 / 账单号 / 提单号 / 作业号"
+            : "发票号 / 客户 / 账单号 / 提单号 / 作业号"}
                  value={filters.keyword}
                  onChange={e => setFilters({...filters, keyword: e.target.value})}
                  onKeyDown={e => e.key === "Enter" && load()}

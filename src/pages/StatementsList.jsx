@@ -179,7 +179,7 @@ export default function StatementsList({ onBack }) {
 
         {/* 筛选 */}
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
-          <input placeholder="对账单号 / 客户名"
+          <input placeholder={direction === "AP" ? "对账单号 / 供应商名" : "对账单号 / 客户名"}
                  value={filters.keyword}
                  onChange={e => setFilters({...filters, keyword: e.target.value})}
                  onKeyDown={e => e.key === "Enter" && load()}

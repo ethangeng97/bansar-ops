@@ -274,8 +274,10 @@ export default function BillsList({ onBack }) {
     });
     return sum;
   };
+  // 汇总展示：有数字时按"USD 1234.56\nCNY 7890.00"换行显示；
+  // 都为 0 时给"0.00"而不是 —，避免被误以为缺数据
   const renderCcySum = (obj) =>
-    Object.entries(obj).filter(([_, v]) => v !== 0).map(([c, v]) => `${c} ${v.toFixed(2)}`).join("\n") || "—";
+    Object.entries(obj).filter(([_, v]) => v !== 0).map(([c, v]) => `${c} ${v.toFixed(2)}`).join("\n") || "0.00";
 
   const allSum = calcSummary(bills);
   const selSum = calcSummary(bills.filter(b => selected.has(b.id)));
@@ -583,29 +585,31 @@ export default function BillsList({ onBack }) {
           )}
         </div>
 
-        {/* 底部小计 */}
+        {/* 底部小计 — 未选中时省去"选中"行，避免一排 0/— 让用户误判 */}
         {bills.length > 0 && (
           <div style={{ marginTop: 14, padding: "10px 12px",
                         background: "#fafafa", border: "1px solid #f0f0f0",
                         borderRadius: 3, fontSize: 12 }}>
+            {selected.size > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "6px 16px",
+                             marginBottom: 8, paddingBottom: 8, borderBottom: "1px dashed #ddd" }}>
+                <div><span style={{ color: "#888" }}>总计 (选中)：</span><b style={{ color: BRAND }}>{selected.size} 条</b></div>
+                <div><span style={{ color: "#888" }}>应收：</span>
+                  <b style={{ color: "#52c41a", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.ar)}</b>
+                </div>
+                <div><span style={{ color: "#888" }}>应付：</span>
+                  <b style={{ color: "#fa541c", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.ap)}</b>
+                </div>
+                <div><span style={{ color: "#888" }}>已核销：</span>
+                  <b style={{ color: "#52c41a", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.settled)}</b>
+                </div>
+                <div><span style={{ color: "#888" }}>未核销：</span>
+                  <b style={{ color: "#c00", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.unsettled)}</b>
+                </div>
+                <div></div>
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "6px 16px" }}>
-              <div><span style={{ color: "#888" }}>总计 (选中)：</span><b style={{ color: BRAND }}>{selected.size} 条</b></div>
-              <div><span style={{ color: "#888" }}>应收：</span>
-                <b style={{ color: "#52c41a", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.ar)}</b>
-              </div>
-              <div><span style={{ color: "#888" }}>应付：</span>
-                <b style={{ color: "#fa541c", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.ap)}</b>
-              </div>
-              <div><span style={{ color: "#888" }}>已核销：</span>
-                <b style={{ color: "#52c41a", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.settled)}</b>
-              </div>
-              <div><span style={{ color: "#888" }}>未核销：</span>
-                <b style={{ color: "#c00", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(selSum.unsettled)}</b>
-              </div>
-              <div></div>
-            </div>
-            <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #ddd",
-                          display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "6px 16px" }}>
               <div><span style={{ color: "#888" }}>总计 (全部)：</span><b style={{ color: BRAND }}>{bills.length} 条</b></div>
               <div><span style={{ color: "#888" }}>应收：</span>
                 <b style={{ color: "#52c41a", fontFamily: "Consolas,monospace", whiteSpace: "pre-line" }}>{renderCcySum(allSum.ar)}</b>

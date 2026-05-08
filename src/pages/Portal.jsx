@@ -33,9 +33,9 @@ const STAGES_SEA = [
 const NODES_SEA = {
   1: [
     { name: "客商录入维护", icon: "users",    href: "#/partners" },
-    { name: "业务类型设置", icon: "tag",      href: null },
-    { name: "费用项维护",   icon: "circle",   href: null },
-    { name: "汇率设置",     icon: "refresh",  href: null },
+    { name: "业务类型设置", icon: "tag",      href: null, todo: "开发中" },
+    { name: "费用项维护",   icon: "circle",   href: null, todo: "开发中" },
+    { name: "汇率设置",     icon: "refresh",  href: null, todo: "开发中" },
   ],
   2: [
     { name: "新建作业", icon: "fileplus", submenu: [
@@ -53,13 +53,14 @@ const NODES_SEA = {
     { name: "账单管理",     icon: "fileline", href: "#/bills" },
     { name: "对账单管理",   icon: "filelist", href: "#/statements" },
     { name: "开票/收票",    icon: "ticket",   href: "#/invoices" },
-    { name: "收款销账",     icon: "rotate",   href: "#/payments" },
+    // 与财务模块菜单和页面标题保持一致（页面标题是"收付款记录"）
+    { name: "收付款记录",   icon: "rotate",   href: "#/payments" },
   ],
   4: [
-    { name: "业务综合查询", icon: "search",   href: null },
-    { name: "箱量统计",     icon: "bar",      href: null },
-    { name: "利润分析",     icon: "line",     href: null },
-    { name: "对账明细",     icon: "filelist", href: null },
+    { name: "业务综合查询", icon: "search",   href: null, todo: "开发中" },
+    { name: "箱量统计",     icon: "bar",      href: null, todo: "开发中" },
+    { name: "利润分析",     icon: "line",     href: null, todo: "开发中" },
+    { name: "对账明细",     icon: "filelist", href: null, todo: "开发中" },
   ],
 };
 
@@ -128,7 +129,7 @@ function Icon({ name, ...rest }) {
 
 export default function Portal({ user, onLogout }) {
   const [activeModule, setActiveModule] = useState("sea_export");
-  const [tab, setTab] = useState("模块");
+  const [tab, setTab] = useState("看板");
   const [todoCounts, setTodoCounts] = useState({});
   const [sopCollapsed, setSopCollapsed] = useState(false);
 
@@ -136,6 +137,8 @@ export default function Portal({ user, onLogout }) {
   const userName = user?.profile?.name || user?.email?.split("@")[0] || "用户";
 
   // ── 加载待办数量（每次进入"待办" tab 时刷新） ──
+  // status 字段为 NULL 视作"未维护"——历史订单常常完全没填过这些字段，
+  // 旧版把 NULL 和"进行中"混算一起，导致 4 个节点全显示同样的总订单数，迷惑用户
   useEffect(() => {
     if (tab !== "待办") return;
     let cancelled = false;
@@ -150,11 +153,10 @@ export default function Portal({ user, onLogout }) {
       const all = (data || []).filter(o => o.lifecycle !== "已关闭" && o.lifecycle !== "已完结");
       const counts = {};
       for (const node of SOP_NODES) {
-        if (node.requiresHbl) {
-          counts[node.code] = all.filter(o => o.has_hbl && !isNodeDone(node, o[node.field])).length;
-        } else {
-          counts[node.code] = all.filter(o => !isNodeDone(node, o[node.field])).length;
-        }
+        const pool = node.requiresHbl ? all.filter(o => o.has_hbl) : all;
+        const untouched = pool.filter(o => !o[node.field]).length;
+        const inProgress = pool.filter(o => o[node.field] && !isNodeDone(node, o[node.field])).length;
+        counts[node.code] = { untouched, inProgress, total: untouched + inProgress };
       }
       setTodoCounts(counts);
     })();
@@ -224,7 +226,7 @@ export default function Portal({ user, onLogout }) {
 
         <div className="tms-portal-side">
           <div className="tabs">
-            {["模块", "待办"].map(t => (
+            {["看板", "模块", "待办"].map(t => (
               <div key={t} className={"tb2 " + (tab === t ? "act" : "")} onClick={() => setTab(t)}>
                 {t}
               </div>
@@ -251,11 +253,24 @@ export default function Portal({ user, onLogout }) {
                   SOP
                 </div>
                 {!sopCollapsed && SOP_NODES.map(n => {
-                  const cnt = todoCounts[n.code] ?? 0;
+                  const c = todoCounts[n.code] || { untouched: 0, inProgress: 0, total: 0 };
+                  // 进行中 = status 已设但未到 done；未维护 = status 还是 NULL，多见于历史单
+                  const tip = `进行中 ${c.inProgress}・未维护 ${c.untouched}`;
                   return (
-                    <div key={n.code} className="it-todo" onClick={() => openSopNode(n.code)}>
+                    <div key={n.code} className="it-todo" onClick={() => openSopNode(n.code)} title={tip}>
                       <span>{n.zh}</span>
-                      <span className={"badge-num " + (cnt === 0 ? "zero" : "")}>{cnt}</span>
+                      <span className={"badge-num " + (c.total === 0 ? "zero" : "")}>
+                        {c.inProgress > 0 && (
+                          <b style={{ color: "#fa541c" }}>{c.inProgress}</b>
+                        )}
+                        {c.inProgress > 0 && c.untouched > 0 && (
+                          <span style={{ color: "#bbb", margin: "0 3px" }}>+</span>
+                        )}
+                        {c.untouched > 0 && (
+                          <span style={{ color: "#999" }}>{c.untouched}</span>
+                        )}
+                        {c.total === 0 && <span>0</span>}
+                      </span>
                     </div>
                   );
                 })}
@@ -271,14 +286,18 @@ export default function Portal({ user, onLogout }) {
           <div className="tms-portal-bar">
             <div className="tt">
               <Icon name="filelist" />
-              {tab === "待办" ? "待办事项" : "操作导航"}
+              {tab === "看板" ? "经营看板" : tab === "待办" ? "待办事项" : "操作导航"}
             </div>
             <div className="crumb">
-              {tab === "待办"
+              {tab === "看板"
+                ? <>首页 / <span>本月概览</span></>
+                : tab === "待办"
                 ? <>SOP / <span>待处理订单</span></>
                 : <>{MODULES.find(m => m.key === activeModule)?.zh || "海运出口"} / <span>{activeModule === "finance" ? "财务流程" : "业务流程"}</span></>}
             </div>
           </div>
+
+          {tab === "看板" && <Dashboard />}
 
           {tab === "模块" && (() => {
             const flow = FLOW_BY_MODULE[activeModule];
@@ -325,6 +344,7 @@ export default function Portal({ user, onLogout }) {
                             className={"tms-node " + (!clickable ? "dim" : "")}
                             onClick={(ev) => openNode(n, s.num, ni, ev)}
                             disabled={!clickable}
+                            title={!clickable ? (n.todo || "暂未开放") : undefined}
                             style={isOpen ? { background: "#e6f4ff", borderColor: "#1990FF" } : undefined}
                           >
                             <Icon name={n.icon} />
@@ -346,6 +366,10 @@ export default function Portal({ user, onLogout }) {
             <div style={{ padding: 30, color: "#666", lineHeight: 1.8 }}>
               <h3 style={{ fontSize: 16, color: "#222", marginBottom: 12 }}>SOP 节点待办</h3>
               <p style={{ marginBottom: 8 }}>左侧 SOP 列表显示每个节点下"未完成的订单数量"。点击任一节点（如 <b style={{ color: "#1990FF" }}>验货</b>），将在新标签页打开海运出口列表，自动筛选出所有该节点未完成的订单。</p>
+              <p style={{ marginBottom: 8, color: "#888", fontSize: 12 }}>
+                · 数字格式：<b style={{ color: "#fa541c" }}>进行中</b> + <span style={{ color: "#999" }}>未维护</span>。
+                "进行中"表示状态字段已设但还没到完成态，"未维护"表示该字段从未被填写（多为历史单）。
+              </p>
               <p style={{ marginBottom: 8, color: "#888", fontSize: 12 }}>· HB 提单节点只统计已勾选「签 HBL」的订单。</p>
               <p style={{ marginBottom: 8, color: "#888", fontSize: 12 }}>· 已完结、已关闭的订单不计入待办。</p>
               <p style={{ marginTop: 24, fontSize: 12, color: "#999" }}>配置入口（添加/编辑 SOP 节点）：开发中。</p>
@@ -404,5 +428,151 @@ export default function Portal({ user, onLogout }) {
         );
       })()}
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Dashboard — 经营看板（"看板" tab 内容）
+// 数据：本月新单 / 在执行 / 本月新账单 / 未销账金额 + 近期 10 单 + SOP 未完成
+// ═══════════════════════════════════════════════════════════════
+
+function Dashboard() {
+  const [stats, setStats] = useState({
+    monthOrders: 0, openOrders: 0,
+    monthBills: 0, unsettledCny: 0,
+    sopUntouched: {}, recent: [],
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    (async () => {
+      const [shipsRes, billsRes, recentRes] = await Promise.all([
+        supabase.from("shipments")
+          .select("id, lifecycle, has_hbl, qc_status, space_status, hbl_status, mbl_status, finance_status, created_at"),
+        supabase.from("bills")
+          .select("amount_total, amount_cny, settled_amount, created_at, status"),
+        supabase.from("shipments")
+          .select("id, order_no, customer, pol, pod, etd, lifecycle, created_at")
+          .order("created_at", { ascending: false }).limit(10),
+      ]);
+
+      const ships = shipsRes.data || [];
+      const monthOrders = ships.filter(s => s.created_at >= monthStart).length;
+      const openOrders = ships.filter(s => s.lifecycle !== "已关闭" && s.lifecycle !== "已完结").length;
+
+      // 各 SOP 节点未完成数（取 active 单）
+      const active = ships.filter(s => s.lifecycle !== "已关闭" && s.lifecycle !== "已完结");
+      const sopUntouched = {};
+      for (const node of SOP_NODES) {
+        const pool = node.requiresHbl ? active.filter(o => o.has_hbl) : active;
+        sopUntouched[node.code] = pool.filter(o => !isNodeDone(node, o[node.field])).length;
+      }
+
+      const bills = billsRes.data || [];
+      const monthBills = bills.filter(b => b.created_at >= monthStart).length;
+      // 已销账记原币，未销 CNY = amount_cny × (未销原币 / amount_total)
+      const unsettledCny = bills.reduce((s, b) => {
+        const total = Number(b.amount_total || 0);
+        const settled = Number(b.settled_amount || 0);
+        const cny = Number(b.amount_cny || 0);
+        if (total <= 0) return s;
+        const ratio = Math.max(0, 1 - settled / total);
+        return s + cny * ratio;
+      }, 0);
+
+      setStats({
+        monthOrders, openOrders, monthBills,
+        unsettledCny: Math.round(unsettledCny),
+        sopUntouched,
+        recent: recentRes.data || [],
+      });
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#888" }}>加载中...</div>;
+
+  return (
+    <div style={{ padding: 20 }}>
+      {/* 数字卡 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
+        <Card label="本月新单" value={stats.monthOrders} unit="票" color="#1990ff" href="#/sea_export" />
+        <Card label="在执行订单" value={stats.openOrders} unit="票" color="#52c41a" href="#/sea_export" />
+        <Card label="本月新账单" value={stats.monthBills} unit="张" color="#fa8c16" href="#/bills" />
+        <Card label="未销账金额" value={`¥${stats.unsettledCny.toLocaleString()}`} unit="" color="#cf1322" href="#/charges" />
+      </div>
+
+      {/* SOP 待处理 */}
+      <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 4, padding: 16, marginBottom: 18 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#444", marginBottom: 12 }}>SOP 待处理</div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${SOP_NODES.length}, 1fr)`, gap: 10 }}>
+          {SOP_NODES.map(n => {
+            const cnt = stats.sopUntouched[n.code] || 0;
+            return (
+              <a key={n.code} href={`#/sea_export?sop=${n.code}`}
+                 style={{ display: "block", padding: "12px 10px", background: cnt > 0 ? "#fff7e6" : "#fafafa",
+                          border: "1px solid " + (cnt > 0 ? "#ffd591" : "#f0f0f0"),
+                          borderRadius: 3, textAlign: "center", textDecoration: "none", color: "inherit" }}>
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{n.zh}</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: cnt > 0 ? "#fa541c" : "#aaa" }}>{cnt}</div>
+              </a>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 近期订单 */}
+      <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 4, padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>近期订单</span>
+          <a href="#/sea_export" style={{ fontSize: 12, color: "#1990ff", textDecoration: "none" }}>查看全部 →</a>
+        </div>
+        {stats.recent.length === 0 ? (
+          <div style={{ padding: 20, textAlign: "center", color: "#aaa", fontSize: 12 }}>暂无</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: "#888", borderBottom: "1px solid #f0f0f0" }}>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>订单号</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>委托方</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>POL → POD</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>ETD</th>
+                <th style={{ padding: "6px 8px", textAlign: "center" }}>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.recent.map(r => (
+                <tr key={r.id} style={{ borderBottom: "1px solid #fafafa" }}>
+                  <td style={{ padding: "6px 8px", fontFamily: "monospace" }}>{r.order_no || "—"}</td>
+                  <td style={{ padding: "6px 8px" }}>{r.customer || "—"}</td>
+                  <td style={{ padding: "6px 8px", color: "#666" }}>{r.pol || "—"} → {r.pod || "—"}</td>
+                  <td style={{ padding: "6px 8px" }}>{r.etd ? String(r.etd).slice(0, 10) : "—"}</td>
+                  <td style={{ padding: "6px 8px", textAlign: "center", color: "#888" }}>{r.lifecycle || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Card({ label, value, unit, color, href }) {
+  return (
+    <a href={href} style={{
+      display: "block", textDecoration: "none",
+      background: "#fff", border: "1px solid #f0f0f0", borderRadius: 4,
+      padding: "16px 18px", color: "inherit", borderLeft: `3px solid ${color}`,
+    }}>
+      <div style={{ fontSize: 12, color: "#888", marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 600, color: "#222" }}>
+        {value}
+        {unit && <span style={{ fontSize: 13, color: "#888", marginLeft: 4, fontWeight: 400 }}>{unit}</span>}
+      </div>
+    </a>
   );
 }

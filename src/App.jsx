@@ -21,6 +21,9 @@ import StatementsList from "./pages/StatementsList.jsx";
 import StatementNew from "./pages/StatementNew.jsx";
 import StatementDetail from "./pages/StatementDetail.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
+import PaymentsList from "./pages/PaymentsList.jsx";
+import ChargesList from "./pages/ChargesList.jsx";
+import SettlementsList from "./pages/SettlementsList.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -46,6 +49,15 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // 会话失效：supabase.js 在 401 + refresh 失败时 dispatch 'bansar:session-expired'
+  // 这里弹横幅，点"重新登录"清 session 回登录页
+  useEffect(() => {
+    const onExpired = () => setSessionExpired(true);
+    window.addEventListener("bansar:session-expired", onExpired);
+    return () => window.removeEventListener("bansar:session-expired", onExpired);
+  }, []);
 
   // ── 加载会话 ──
   useEffect(() => {
@@ -73,9 +85,12 @@ export default function App() {
   // ── 登录 ──
   const login = async () => {
     setAuthError("");
-    const { error } = await supabase.auth.signIn(email, password);
-    if (error) { setAuthError(error.message); return; }
-    window.location.reload();
+    try {
+      await supabase.auth.signIn(email, password);
+      window.location.reload();
+    } catch (e) {
+      setAuthError(e.message);
+    }
   };
   const logout = () => {
     supabase.auth.signOut();
@@ -129,6 +144,34 @@ export default function App() {
 
   // ── 已登录 ──
 
+  // 会话失效横幅：点"重新登录"清 session 回登录页
+  const expiredBanner = sessionExpired ? (
+    <div style={{
+      position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
+      padding: "10px 20px", background: "#fff1f0", borderBottom: "1px solid #ffa39e",
+      color: "#a8071a", fontSize: 13, display: "flex", alignItems: "center", gap: 12,
+    }}>
+      <span style={{ fontSize: 16 }}>⚠</span>
+      <span>登录已过期，部分数据可能加载失败。</span>
+      <button
+        onClick={logout}
+        style={{ marginLeft: "auto", padding: "4px 14px", background: "#cf1322", color: "#fff",
+                  border: "none", borderRadius: 3, cursor: "pointer", fontSize: 12 }}
+      >重新登录</button>
+      <button
+        onClick={() => setSessionExpired(false)}
+        style={{ padding: "4px 12px", background: "transparent", color: "#a8071a",
+                  border: "1px solid #ffa39e", borderRadius: 3, cursor: "pointer", fontSize: 12 }}
+      >关闭</button>
+    </div>
+  ) : null;
+
+  // 内部分发逻辑保持不变，套一层 Fragment 让横幅在所有子页面都能浮出来
+  const page = renderRoute();
+  return <>{expiredBanner}{page}</>;
+
+  function renderRoute() {
+
   // 没有 hash 路由 → 显示门户首页
   if (!route) {
     return <Portal user={user} onLogout={logout} />;
@@ -145,21 +188,19 @@ export default function App() {
     return <InvoicesList onBack={() => { window.location.hash = ""; }} />;
   }
 
-  // #/charges      费用记录列表（V5 第二阶段）
-  // #/payments     收付款记录（V5 第三阶段）
-  // #/settlements  核销管理（V5 第三阶段）
-  if (route === "charges" || route === "payments" || route === "settlements") {
-    const titleMap = {
-      charges:     "费用记录",
-      payments:    "收付款记录",
-      settlements: "核销管理",
-    };
-    return (
-      <TmsPlaceholder
-        title={titleMap[route]}
-        onBack={() => { window.location.hash = ""; }}
-      />
-    );
+  // #/payments 收付款记录
+  if (route === "payments") {
+    return <PaymentsList onBack={() => { window.location.hash = ""; }} />;
+  }
+
+  // #/charges 费用记录(全局只读视图)
+  if (route === "charges") {
+    return <ChargesList onBack={() => { window.location.hash = ""; }} />;
+  }
+
+  // #/settlements 核销管理(以账单为视角的反向视图)
+  if (route === "settlements") {
+    return <SettlementsList onBack={() => { window.location.hash = ""; }} />;
   }
 
   // 动态路由：账单详情 #/bills/:id
@@ -300,4 +341,5 @@ export default function App() {
       onBack={() => { window.location.hash = ""; }}
     />
   );
+  }
 }

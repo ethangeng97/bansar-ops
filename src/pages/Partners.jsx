@@ -242,7 +242,13 @@ export function PartnersPage({ user, onBack }) {
               {cols.map(c => (
                 <th key={c.k} className={c.link ? "link" : ""}>
                   {c.k === "chk" ? <input type="checkbox" disabled /> : <span className="ht">{c.label}</span>}
-                  <span className="col-resize" onMouseDown={e => startColResize(c.k, e)} onDoubleClick={() => resetColWidth(c.k)} title="拖动调整列宽" />
+                  {/* col-resize handle: hint 用 aria-label，并 aria-hidden 不让它被读到列名里 */}
+                  <span
+                    className="col-resize"
+                    onMouseDown={e => startColResize(c.k, e)}
+                    onDoubleClick={() => resetColWidth(c.k)}
+                    aria-hidden="true"
+                  />
                 </th>
               ))}
             </tr>
@@ -252,24 +258,30 @@ export function PartnersPage({ user, onBack }) {
               const evenOdd = i % 2 === 0 ? "even" : "odd";
               const useCount = orderCounts[p.name] || 0;
               const isChangeOpen = changeTypeFor === p.id;
+              // 整行点击进详情：之前只有名称 span 可点，用户点编号/英文名/联系人都没反应，
+              // 误以为整个列表"假可点"。统一处理：除复选框/操作列外都进详情
+              const rowClickProps = {
+                style: { cursor: "pointer" },
+                onClick: () => setSelectedId(p.id),
+              };
               return (
                 <tr key={p.id} className={evenOdd}>
-                  <td className="center"><input type="checkbox" /></td>
-                  <td><b style={{ color: "#666" }}>{p.code || "—"}</b></td>
-                  <td><span className="lk" onClick={() => setSelectedId(p.id)}>{p.name}</span></td>
-                  <td>{p.name_en || ""}</td>
-                  <td>{p.name_short || ""}</td>
-                  <td>{p.contact_name || ""}</td>
-                  <td>{p.contact_phone || ""}</td>
-                  <td>{p.contact_email || ""}</td>
-                  <td>{p.credit_terms || ""}</td>
-                  <td className="center">
+                  <td className="center" onClick={e => e.stopPropagation()}><input type="checkbox" /></td>
+                  <td {...rowClickProps}><b style={{ color: "#666" }}>{p.code || "—"}</b></td>
+                  <td {...rowClickProps}><span className="lk">{p.name}</span></td>
+                  <td {...rowClickProps}>{p.name_en || ""}</td>
+                  <td {...rowClickProps}>{p.name_short || ""}</td>
+                  <td {...rowClickProps}>{p.contact_name || ""}</td>
+                  <td {...rowClickProps}>{p.contact_phone || ""}</td>
+                  <td {...rowClickProps}>{p.contact_email || ""}</td>
+                  <td {...rowClickProps}>{p.credit_terms || ""}</td>
+                  <td className="center" {...rowClickProps}>
                     {p.active === false
                       ? <span style={{ color: "#999", fontSize: 11 }}>已停用</span>
                       : <span style={{ color: "#52c41a", fontSize: 11 }}>● 启用</span>}
                   </td>
-                  <td className="center">{useCount > 0 ? <b style={{ color: "#1990FF" }}>{useCount}</b> : <span style={{ color: "#bbb" }}>—</span>}</td>
-                  <td className="center" style={{ position: "relative" }}>
+                  <td className="center" {...rowClickProps}>{useCount > 0 ? <b style={{ color: "#1990FF" }}>{useCount}</b> : <span style={{ color: "#bbb" }}>—</span>}</td>
+                  <td className="center" style={{ position: "relative" }} onClick={e => e.stopPropagation()}>
                     <span
                       className="lk"
                       onClick={(e) => { e.stopPropagation(); setChangeTypeFor(isChangeOpen ? null : p.id); }}

@@ -248,6 +248,28 @@ export function OrdersPage({ user, onBack }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // 缩写搜索用：拉 customers_full（含 name_short/name_en/code）建反查
+  const [customersFull, setCustomersFull] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    getCachedRef("customers_full").then(list => { if (alive) setCustomersFull(list || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // 给定搜索词 q，返回所有别名（name_short/name_en/code）命中 q 的 customer.name 集合
+  const aliasMatchedNames = useCallback((q) => {
+    if (!q) return null;
+    const lq = q.toLowerCase();
+    const set = new Set();
+    for (const c of customersFull) {
+      const aliases = [c.name_short, c.name_en, c.code].filter(Boolean);
+      if (aliases.some(a => String(a).toLowerCase().includes(lq))) {
+        if (c.name) set.add(c.name);
+      }
+    }
+    return set;
+  }, [customersFull]);
+
   const refs = useMemo(() => {
     const ex = (f) => [...new Set(shipments.map(o => o[f]).filter(Boolean))].sort();
     return {
@@ -290,11 +312,20 @@ export function OrdersPage({ user, onBack }) {
     if (f.etd_to && o.etd && o.etd > f.etd_to) return false;
     if (search) {
       const q = search.toLowerCase();
-      const pool = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.voyage, o.supplier, o.order_no, o.customer, o.pol, o.pod];
-      if (!pool.filter(Boolean).some(x => String(x).toLowerCase().includes(q))) return false;
+      const pool = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.voyage, o.supplier, o.order_no, o.customer, o.pol, o.pod, o.overseas_agent, o.end_customer];
+      const directHit = pool.filter(Boolean).some(x => String(x).toLowerCase().includes(q));
+      if (!directHit) {
+        // 缩写匹配：q 命中某 customer 的 name_short/name_en/code 时，
+        // 该 customer.name 等价匹配
+        const aliasNames = aliasMatchedNames(search);
+        const aliasHit = aliasNames && aliasNames.size > 0 && [
+          o.customer, o.supplier, o.overseas_agent, o.end_customer,
+        ].some(v => v && aliasNames.has(v));
+        if (!aliasHit) return false;
+      }
     }
     return true;
-  }), [shipments, filters, search, sopNode]);
+  }), [shipments, filters, search, sopNode, aliasMatchedNames]);
 
   useEffect(() => { setPage(0); }, [filters, search]);
 
@@ -328,7 +359,8 @@ export function OrdersPage({ user, onBack }) {
             return na - nb;
           });
 
-        rows.push({ t: "s", d: master });
+        // 主拼行带 subCount，列表渲染时拿来做父行"委托单位"列的聚合显示
+        rows.push({ t: "s", d: master, subCount: subs.length });
         subs.forEach(c => rows.push({ t: "sub", d: c }));
       });
 
@@ -711,7 +743,7 @@ export function OrdersPage({ user, onBack }) {
                     className="col-resize"
                     onMouseDown={e => startColResize(c.k, e)}
                     onDoubleClick={() => resetColWidth(c.k)}
-                    title="拖动调整列宽，双击恢复默认"
+                    aria-hidden="true"
                   />
                 </th>
               ))}
@@ -743,7 +775,13 @@ export function OrdersPage({ user, onBack }) {
                   <td><a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.vessel || ""}</a></td>
                   <td>{o.voyage || ""}</td>
                   <td>{o.etd || ""}</td>
-                  <td>{o.customer || ""}</td>
+                  <td>
+                    {o.customer
+                      ? o.customer
+                      : r.subCount
+                        ? <span style={{ color: "#888", fontStyle: "italic" }}>自拼 ({r.subCount} 票)</span>
+                        : ""}
+                  </td>
                   <td>{o.overseas_agent || ""}</td>
                   <td>{cleanPort(o.pol)}</td>
                   <td>{cleanPort(o.pod)}</td>
@@ -2044,7 +2082,7 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
                         className="col-resize"
                         onMouseDown={e => startTxColResize(c.k, e)}
                         onDoubleClick={() => resetTxColWidth(c.k)}
-                        title="拖动调整列宽，双击恢复默认"
+                        aria-hidden="true"
                       />
                     </th>
                   ))}

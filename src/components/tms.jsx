@@ -239,7 +239,10 @@ export function Df({ label, required, refLabel, optional, children, span }) {
   const colCls = span === 2 ? "full2" : span === 3 ? "full3" : span === 4 ? "full4" : span === 6 ? "full6" : "";
   return (
     <div className={"tms-df " + colCls}>
-      <label className={cls}>{label}</label>
+      <label className={cls}>
+        {required && <span style={{ color: "#ff4d4f", marginRight: 2 }}>*</span>}
+        {label}
+      </label>
       <div className="tms-df-blk">{children}</div>
     </div>
   );

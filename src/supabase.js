@@ -34,19 +34,30 @@ function createClient() {
     ...extra,
   });
 
+  // 通知 App 用户会话失效（401 重试失败 / refresh 失败）→ 弹 toast + 引导重登
+  // 用 Custom Event 是为了让 supabase.js 不依赖 React，App.jsx 单点监听
+  let signaledExpired = false;
+  const signalSessionExpired = () => {
+    if (signaledExpired) return;       // 一次会话只发一次，避免 toast 风暴
+    if (typeof window === "undefined") return;
+    signaledExpired = true;
+    try { window.dispatchEvent(new CustomEvent("bansar:session-expired")); } catch { /* IE/无 CustomEvent 环境忽略 */ }
+  };
+
   const refreshIfNeeded = async () => {
-    if (!refreshToken) return false;
+    if (!refreshToken) { signalSessionExpired(); return false; }
     try {
       const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY },
         body: JSON.stringify({ refresh_token: refreshToken }),
       });
-      if (!res.ok) return false;
+      if (!res.ok) { signalSessionExpired(); return false; }
       const data = await res.json();
       accessToken = data.access_token; refreshToken = data.refresh_token; currentUser = data.user; persist();
+      signaledExpired = false;          // 重新有效，清掉防抖
       return true;
-    } catch { return false; }
+    } catch { signalSessionExpired(); return false; }
   };
 
   const api = async (path, opts = {}) => {
@@ -54,6 +65,8 @@ function createClient() {
     if (res.status === 401 && refreshToken && await refreshIfNeeded()) {
       res = await fetch(`${SUPABASE_URL}${path}`, { ...opts, headers: { ...headers(), ...opts.headers } });
     }
+    // 登录请求本身的 401 是密码错，不算会话失效，由调用方处理
+    if (res.status === 401 && !path.startsWith("/auth/v1/token")) signalSessionExpired();
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.message || err.msg || err.error_description || res.statusText);
@@ -122,6 +135,7 @@ function createClient() {
             if (res.status === 401 && refreshToken && await refreshIfNeeded()) {
               res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, { method, headers: { ...headers(), ...h }, body });
             }
+            if (res.status === 401) signalSessionExpired();   // 刷不动了
             if (!res.ok) {
               const err = await res.json().catch(() => ({}));
               throw new Error(err.message || err.hint || res.statusText);

@@ -34,7 +34,7 @@ const NODES_SEA = {
   1: [
     { name: "客商录入维护", icon: "users",    href: "#/partners" },
     { name: "业务类型设置", icon: "tag",      href: null, todo: "开发中" },
-    { name: "费用项维护",   icon: "circle",   href: null, todo: "开发中" },
+    { name: "费用项维护",   icon: "circle",   href: "#/charge_types" },
     { name: "汇率设置",     icon: "refresh",  href: null, todo: "开发中" },
   ],
   2: [

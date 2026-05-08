@@ -25,6 +25,11 @@ const fetchers = {
     supabase.from("customers").select("name").order("name")
       .then(({ data }) => (data || []).map(r => r.name)),
 
+  // 含别名字段（name_short/name_en/code），用于订单列表搜索缩写匹配
+  customers_full: () =>
+    supabase.from("customers").select("name, name_short, name_en, code").order("name")
+      .then(({ data }) => data || []),
+
   staff: () =>
     supabase.from("user_profiles_view")
       .select("id, email, role, full_name, display_name, active")

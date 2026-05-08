@@ -24,6 +24,7 @@ import InvoicesList from "./pages/InvoicesList.jsx";
 import PaymentsList from "./pages/PaymentsList.jsx";
 import ChargesList from "./pages/ChargesList.jsx";
 import SettlementsList from "./pages/SettlementsList.jsx";
+import ChargeTypesList from "./pages/ChargeTypesList.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -201,6 +202,11 @@ export default function App() {
   // #/settlements 核销管理(以账单为视角的反向视图)
   if (route === "settlements") {
     return <SettlementsList onBack={() => { window.location.hash = ""; }} />;
+  }
+
+  // #/charge_types 费用类型 CRUD
+  if (route === "charge_types") {
+    return <ChargeTypesList onBack={() => { window.location.hash = ""; }} />;
   }
 
   // 动态路由：账单详情 #/bills/:id

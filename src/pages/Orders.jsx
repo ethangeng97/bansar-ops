@@ -2415,6 +2415,8 @@ function ChargesPanel({ order, role, user, isLocked }) {
   const [selectedAp, setSelectedAp] = useState(new Set());
   const [draggingId, setDraggingId] = useState(null);
   const [bills, setBills] = useState([]);   // 本票相关账单（用于显示账单号）
+  const [batchMenuOpen, setBatchMenuOpen] = useState(null);   // 'AR' | 'AP' | null
+  const [batchModal, setBatchModal] = useState(null);         // {direction, action, rowIds} | null
 
   const isAdmin = role === "admin" || role === "finance";
   const canEdit = !isLocked ? (isAdmin || role === "operator") : isAdmin;
@@ -2698,6 +2700,47 @@ function ChargesPanel({ order, role, user, isLocked }) {
     await load();
   };
 
+  // 复制成应付：把选中的应收行镜像到应付（清空结算单位/账单/状态，留待用户编辑）
+  const copyArToAp = (rowIds) => {
+    const ids = new Set(rowIds);
+    const src = arRows.filter(r => ids.has(r.id || r._id));
+    if (src.length === 0) return;
+    const drafts = src.map(r => ({
+      _draft: true,
+      _id: "draft-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+      direction: "应付",
+      charge_item_id: r.charge_item_id,
+      partner_id: "",        // 供应商需另选
+      partner_name: "",
+      unit: r.unit || "票",
+      quantity: r.quantity,
+      unit_price: r.unit_price,
+      tax_rate: r.tax_rate,
+      currency: r.currency || "CNY",
+      exchange_rate: r.exchange_rate || 1,
+      remark: r.remark || "",
+      status: "草稿",
+    }));
+    setApRows(p => [...p, ...drafts]);
+    setSelectedAr(new Set());
+  };
+
+  // 批量改字段（仅本地状态；保存按钮统一持久化）
+  const batchUpdateField = (direction, rowIds, patch) => {
+    const ids = new Set(rowIds);
+    const setter = direction === "应收" ? setArRows : setApRows;
+    setter(prev => prev.map(r => {
+      const id = r.id || r._id;
+      if (!ids.has(id)) return r;
+      const next = { ...r, ...patch };
+      // 币种变化时同步默认汇率（除非 patch 同时给了 exchange_rate）
+      if (patch.currency && patch.currency !== r.currency && patch.exchange_rate === undefined) {
+        next.exchange_rate = rates[patch.currency] || 1;
+      }
+      return next;
+    }));
+  };
+
   // 利润分析
   const profit = useMemo(() => {
     const all = [...arRows, ...apRows];
@@ -2770,7 +2813,7 @@ function ChargesPanel({ order, role, user, isLocked }) {
           <span style={{ fontSize: 13, fontWeight: "bold", color: color.text }}>{title}</span>
           <span style={{ fontSize: 11, color: "#666" }}>({rows.length} 项 / 合计 {totalCny.toFixed(2)} CNY)</span>
 
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, position: "relative" }}>
             {canEdit && (
               <>
                 <button onClick={() => addBlankRow(direction)} style={btnSmallPrimary(color.text)}>+ 费用名称</button>
@@ -2779,14 +2822,20 @@ function ChargesPanel({ order, role, user, isLocked }) {
                     <button onClick={() => createBill(direction)} style={btnSmallPrimary("#13c2c2")}>
                       创建账单 ({selected.size})
                     </button>
-                    {selectedHasBound && (
-                      <button onClick={() => unbindBill(direction)} style={btnSmallPrimary("#8c8c8c")}>
-                        解绑账单
-                      </button>
-                    )}
-                    <button onClick={() => deleteRows(direction, [...selected])} style={btnSmallDanger}>
-                      删除 ({selected.size})
-                    </button>
+                    <BatchOpsMenu
+                      direction={direction}
+                      open={batchMenuOpen === direction}
+                      onToggle={() => setBatchMenuOpen(prev => prev === direction ? null : direction)}
+                      onClose={() => setBatchMenuOpen(null)}
+                      selectedCount={selected.size}
+                      selectedHasBound={selectedHasBound}
+                      onDelete={() => deleteRows(direction, [...selected])}
+                      onUnbind={() => unbindBill(direction)}
+                      onCopyToAp={() => copyArToAp([...selected])}
+                      onModifyPartner={() => setBatchModal({ direction, action: "partner", rowIds: [...selected] })}
+                      onModifyCurrency={() => setBatchModal({ direction, action: "currency", rowIds: [...selected] })}
+                      onModifyRate={() => setBatchModal({ direction, action: "rate", rowIds: [...selected] })}
+                    />
                   </>
                 )}
               </>
@@ -3080,6 +3129,144 @@ function ChargesPanel({ order, role, user, isLocked }) {
           利润信息仅管理员、财务、销售可见
         </div>
       )}
+
+      {/* 批量编辑模态：修改结算单位 / 币种 / 汇率 */}
+      {batchModal && (
+        <BatchEditModal
+          {...batchModal}
+          partners={partners}
+          rates={rates}
+          onCreatePartner={handleCreatePartner}
+          onApply={(patch) => { batchUpdateField(batchModal.direction, batchModal.rowIds, patch); setBatchModal(null); }}
+          onClose={() => setBatchModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// 批量操作下拉菜单
+function BatchOpsMenu({ direction, open, onToggle, onClose, selectedCount, selectedHasBound,
+                       onDelete, onUnbind, onCopyToAp, onModifyPartner, onModifyCurrency, onModifyRate }) {
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const fn = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, [open, onClose]);
+
+  const item = (label, onClick, opts = {}) => (
+    <div
+      key={label}
+      onClick={() => { if (opts.disabled) return; onClick(); onClose(); }}
+      style={{
+        padding: "7px 14px", fontSize: 12, cursor: opts.disabled ? "not-allowed" : "pointer",
+        color: opts.disabled ? "#ccc" : (opts.danger ? "#cf1322" : "#333"),
+        whiteSpace: "nowrap",
+      }}
+      onMouseEnter={e => { if (!opts.disabled) e.currentTarget.style.background = "#f5f5f5"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+    >
+      {label}
+    </div>
+  );
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button onClick={onToggle} style={btnSmallPrimary("#1990ff")}>
+        批量操作 ({selectedCount}) ▾
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200,
+          background: "#fff", border: "1px solid #d9d9d9", borderRadius: 4,
+          boxShadow: "0 2px 8px rgba(0,0,0,.12)", minWidth: 160,
+        }}>
+          {item("修改结算单位", onModifyPartner)}
+          {item("修改币种", onModifyCurrency)}
+          {item("修改汇率", onModifyRate)}
+          {direction === "应收" && item("复制成应付", onCopyToAp)}
+          {item("解绑账单", onUnbind, { disabled: !selectedHasBound })}
+          <div style={{ height: 1, background: "#f0f0f0", margin: "4px 0" }} />
+          {item("删除", onDelete, { danger: true })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 批量编辑模态（修改结算单位/币种/汇率）
+function BatchEditModal({ direction, action, rowIds, partners, rates, onCreatePartner, onApply, onClose }) {
+  const [partnerId, setPartnerId] = useState("");
+  const [currency, setCurrency] = useState("CNY");
+  const [rate, setRate] = useState("1");
+
+  const partnerFilter = direction === "应收"
+    ? ["客户", "海外代理"]
+    : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"];
+  const partnerOptions = partners.filter(p => partnerFilter.includes(p.partner_type));
+  const defaultPartnerType = direction === "应收" ? "客户" : "供应商";
+
+  const titleMap = { partner: "修改结算单位", currency: "修改币种", rate: "修改汇率" };
+  const apply = () => {
+    if (action === "partner") {
+      if (!partnerId) { alert("请选择结算单位"); return; }
+      const p = partners.find(x => x.id === partnerId);
+      onApply({ partner_id: partnerId, partner_name: p?.name || "" });
+    } else if (action === "currency") {
+      onApply({ currency });
+    } else if (action === "rate") {
+      const v = parseFloat(rate);
+      if (!Number.isFinite(v) || v <= 0) { alert("汇率需为正数"); return; }
+      onApply({ exchange_rate: v });
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }} onClick={onClose}>
+      <div style={{
+        background: "#fff", borderRadius: 6, minWidth: 360, padding: 18,
+        boxShadow: "0 4px 24px rgba(0,0,0,.2)",
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, color: "#1f3864" }}>
+          {titleMap[action]}（应用到 {rowIds.length} 条）
+        </div>
+
+        {action === "partner" && (
+          <PartnerCombo
+            value={partnerId}
+            options={partnerOptions}
+            defaultPartnerType={defaultPartnerType}
+            onChange={setPartnerId}
+            onCreateNew={onCreatePartner}
+          />
+        )}
+        {action === "currency" && (
+          <select value={currency} onChange={e => setCurrency(e.target.value)}
+            style={{ width: "100%", padding: "6px 8px", fontSize: 12, border: "1px solid #d9d9d9", borderRadius: 3 }}>
+            {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        )}
+        {action === "rate" && (
+          <input type="number" step="0.0001" value={rate} onChange={e => setRate(e.target.value)}
+            placeholder="例如 7.20"
+            style={{ width: "100%", padding: "6px 8px", fontSize: 12, border: "1px solid #d9d9d9", borderRadius: 3 }} />
+        )}
+
+        <div style={{ marginTop: 8, fontSize: 10, color: "#999" }}>
+          {action === "currency" && (rates[currency] ? `当前默认汇率：${rates[currency]} → CNY` : "（无默认汇率，将设为 1）")}
+          {action === "partner" && "应用后保存按钮才会持久化到数据库。"}
+        </div>
+
+        <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onClose} style={{ padding: "5px 14px", border: "1px solid #d9d9d9", background: "#fff", borderRadius: 3, fontSize: 12, cursor: "pointer" }}>取消</button>
+          <button onClick={apply} style={{ ...btnSmallPrimary("#1990ff"), padding: "5px 14px" }}>应用</button>
+        </div>
+      </div>
     </div>
   );
 }

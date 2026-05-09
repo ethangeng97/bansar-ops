@@ -7,11 +7,12 @@
 // 联动:payment_bills 行变动会触发 DB trigger 重算 bills.settled_amount
 // ============================================================================
 
-import { useEffect, useState, Fragment, useMemo } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { supabase } from "../supabase.js";
 import PaymentEditor from "./PaymentEditor.jsx";
 
 const BRAND = "#1f3864";
+const PAGE_SIZE = 50;
 
 const STATUS_LABELS = {
   active: { label: "有效", color: "#52c41a", bg: "#f6ffed" },
@@ -41,7 +42,7 @@ const csvRow = (cells) => cells.map(csvCell).join(",");
 
 export default function PaymentsList({ onBack }) {
   const [direction, setDirection] = useState("AR");      // AR=收款 / AP=付款
-  const [payments, setPayments] = useState([]);          // 当前 direction 的 payment 数组
+  const [payments, setPayments] = useState([]);          // 当前页的 payment 数组(最多 PAGE_SIZE 行)
   const [billsByPayment, setBillsByPayment] = useState({}); // { [payment_id]: [{bill, applied_amount}] }
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -50,37 +51,54 @@ export default function PaymentsList({ onBack }) {
   });
   const [expanded, setExpanded] = useState(new Set());
   const [editing, setEditing] = useState(null);          // null | {} (新建) | payment 对象(编辑)
+  const [page, setPage] = useState(0);                   // 0-indexed
+  // 头部统计:走单独 RPC,绕过 PostgREST 1000 行上限,反映"全量符合筛选条件"的真实数字
+  const [headerSummary, setHeaderSummary] = useState({ cnt: 0, total_cny: 0, by_currency: [] });
+  // 提交版筛选:keyword/date/currency 改了不立即查,等用户按"查询"或回车;改后 bump 触发 load
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // 把 keyword 包进 PostgREST .or(ilike) 表达式;.or() 不自动 url-encode,且有自己的语法字符
+  // (`,()*%`),需要先剥掉再 encodeURIComponent 余下部分(中文字符也要编码)
+  const buildKeywordOr = (kw) => {
+    const cleaned = kw.replace(/[,()*%]/g, "").trim();
+    if (!cleaned) return null;
+    const pat = encodeURIComponent(`*${cleaned}*`);
+    return [
+      `payment_no.ilike.${pat}`,
+      `partner_name.ilike.${pat}`,
+      `bank_account.ilike.${pat}`,
+      `bank_flow_no.ilike.${pat}`,
+      `notes.ilike.${pat}`,
+    ].join(",");
+  };
+
+  // 给查询 builder 应用筛选条件(列表 + CSV 导出共用)
+  const applyFilters = (q) => {
+    if (filters.status)    q = q.eq("status", filters.status);
+    if (filters.currency)  q = q.eq("currency", filters.currency);
+    if (filters.date_from) q = q.gte("payment_date", filters.date_from);
+    if (filters.date_to)   q = q.lte("payment_date", filters.date_to);
+    const orExpr = buildKeywordOr(filters.keyword || "");
+    if (orExpr) q = q.or(orExpr);
+    return q;
+  };
 
   const load = async () => {
     setLoading(true);
     try {
+      // ── 主查询(只拉当前页 PAGE_SIZE 行)──
       let q = supabase.from("payments").select("*")
         .eq("direction", direction)
         .order("payment_date", { ascending: false })
-        .order("created_at", { ascending: false });
-
-      if (filters.status)    q = q.eq("status", filters.status);
-      if (filters.currency)  q = q.eq("currency", filters.currency);
-      if (filters.date_from) q = q.gte("payment_date", filters.date_from);
-      if (filters.date_to)   q = q.lte("payment_date", filters.date_to);
+        .order("created_at", { ascending: false })
+        .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+      q = applyFilters(q);
 
       const { data, error } = await q;
       if (error) { alert("加载失败: " + error.message); setLoading(false); return; }
-      let rows = data || [];
+      const rows = data || [];
 
-      // 客户端关键字过滤(单号 / 对方 / 银行 / 备注)
-      if (filters.keyword) {
-        const k = filters.keyword.toLowerCase().trim();
-        rows = rows.filter(p =>
-          (p.payment_no || "").toLowerCase().includes(k) ||
-          (p.partner_name || "").toLowerCase().includes(k) ||
-          (p.bank_account || "").toLowerCase().includes(k) ||
-          (p.bank_flow_no || "").toLowerCase().includes(k) ||
-          (p.notes || "").toLowerCase().includes(k)
-        );
-      }
-
-      // 拉关联的 bills(展开时用)
+      // ── 拉当前页 payment 关联的 bills(展开时显示)──
       const pids = rows.map(p => p.id);
       let bMap = {};
       if (pids.length > 0) {
@@ -104,6 +122,28 @@ export default function PaymentsList({ onBack }) {
 
       setPayments(rows);
       setBillsByPayment(bMap);
+
+      // ── 头部 summary RPC(全量,无分页限制)──
+      const { data: sumData, error: sumErr } = await supabase.rpc("payments_summary", {
+        p_direction:  direction,
+        p_status:     filters.status || null,
+        p_currency:   filters.currency || null,
+        p_keyword:    (filters.keyword || "").replace(/[*%]/g, "").trim() || null,
+        p_date_from:  filters.date_from || null,
+        p_date_to:    filters.date_to || null,
+      });
+      if (sumErr) {
+        // 头部统计失败不阻塞列表;降级显示当前页的近似值
+        console.warn("payments_summary failed:", sumErr.message);
+        setHeaderSummary({ cnt: rows.length, total_cny: 0, by_currency: [] });
+      } else {
+        const row = Array.isArray(sumData) ? sumData[0] : sumData;
+        setHeaderSummary({
+          cnt: Number(row?.cnt || 0),
+          total_cny: Number(row?.total_cny || 0),
+          by_currency: Array.isArray(row?.by_currency) ? row.by_currency : [],
+        });
+      }
     } catch (err) {
       alert("加载失败: " + (err.message || err));
     } finally {
@@ -112,7 +152,13 @@ export default function PaymentsList({ onBack }) {
   };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [direction, filters.status]);
+  useEffect(() => { load(); }, [direction, filters.status, page, reloadKey]);
+
+  // "查询"按钮 / 回车 / 重置:回到第一页并强制 reload(即使 page 已经是 0)
+  const commitFilters = () => {
+    if (page === 0) setReloadKey(k => k + 1);
+    else setPage(0);
+  };
 
   const toggleExpand = (id) => {
     const next = new Set(expanded);
@@ -138,55 +184,96 @@ export default function PaymentsList({ onBack }) {
     await load();
   };
 
-  const onExportCsv = () => {
-    const header = [
-      "单号", "方向", "日期", "对方", "币种", "金额",
-      "汇率", "折CNY", "付款方式", "银行账号", "银行流水号", "备注",
-      "状态", "挂账单号", "挂账单金额合计",
-    ];
-    const lines = [csvRow(header)];
-    for (const p of payments) {
-      const linked = billsByPayment[p.id] || [];
-      const billNos = linked.map(x => x.bill?.bill_no).filter(Boolean).join(" ");
-      const linkedSum = linked.reduce((s, x) => s + x.applied_amount, 0).toFixed(2);
-      lines.push(csvRow([
-        p.payment_no,
-        p.direction === "AR" ? "收款" : "付款",
-        formatDate(p.payment_date),
-        p.partner_name || "",
-        p.currency,
-        Number(p.amount).toFixed(2),
-        Number(p.exchange_rate || 1).toFixed(4),
-        Number(p.amount_cny || 0).toFixed(2),
-        METHOD_LABELS[p.payment_method] || "",
-        p.bank_account || "",
-        p.bank_flow_no || "",
-        (p.notes || "").replace(/\n/g, " "),
-        STATUS_LABELS[p.status]?.label || p.status,
-        billNos,
-        linkedSum,
-      ]));
+  // CSV 导出:导"当前筛选条件下的全部记录"(不仅是当前页)。
+  // PostgREST 单次最多 1000 行,所以按 1000 一批循环拉直到拿不满为止;关联 bill 也分批查。
+  const [exporting, setExporting] = useState(false);
+  const onExportCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const CHUNK = 1000;
+      const allRows = [];
+      for (let from = 0; ; from += CHUNK) {
+        let q = supabase.from("payments").select("*")
+          .eq("direction", direction)
+          .order("payment_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .range(from, from + CHUNK - 1);
+        q = applyFilters(q);
+        const { data, error } = await q;
+        if (error) throw error;
+        const batch = data || [];
+        allRows.push(...batch);
+        if (batch.length < CHUNK) break;
+      }
+
+      // 关联 bills:payment_ids 也可能 > 1000,IN 列表分批避免 URL 过长
+      const allPids = allRows.map(p => p.id);
+      const bMap = {};
+      const IN_CHUNK = 200;
+      for (let i = 0; i < allPids.length; i += IN_CHUNK) {
+        const slice = allPids.slice(i, i + IN_CHUNK);
+        const { data: pbs } = await supabase.from("payment_bills")
+          .select("payment_id, bill_id, applied_amount").in("payment_id", slice);
+        const billIds = [...new Set((pbs || []).map(x => x.bill_id))];
+        let billLookup = {};
+        if (billIds.length > 0) {
+          const { data: bs } = await supabase.from("bills")
+            .select("id, bill_no").in("id", billIds);
+          (bs || []).forEach(b => { billLookup[b.id] = b; });
+        }
+        (pbs || []).forEach(pb => {
+          (bMap[pb.payment_id] ||= []).push({
+            applied_amount: Number(pb.applied_amount || 0),
+            bill: billLookup[pb.bill_id] || { id: pb.bill_id, bill_no: "(已删除)" },
+          });
+        });
+      }
+
+      const header = [
+        "单号", "方向", "日期", "对方", "币种", "金额",
+        "汇率", "折CNY", "付款方式", "银行账号", "银行流水号", "备注",
+        "状态", "挂账单号", "挂账单金额合计",
+      ];
+      const lines = [csvRow(header)];
+      for (const p of allRows) {
+        const linked = bMap[p.id] || [];
+        const billNos = linked.map(x => x.bill?.bill_no).filter(Boolean).join(" ");
+        const linkedSum = linked.reduce((s, x) => s + x.applied_amount, 0).toFixed(2);
+        lines.push(csvRow([
+          p.payment_no,
+          p.direction === "AR" ? "收款" : "付款",
+          formatDate(p.payment_date),
+          p.partner_name || "",
+          p.currency,
+          Number(p.amount).toFixed(2),
+          Number(p.exchange_rate || 1).toFixed(4),
+          Number(p.amount_cny || 0).toFixed(2),
+          METHOD_LABELS[p.payment_method] || "",
+          p.bank_account || "",
+          p.bank_flow_no || "",
+          (p.notes || "").replace(/\n/g, " "),
+          STATUS_LABELS[p.status]?.label || p.status,
+          billNos,
+          linkedSum,
+        ]));
+      }
+      // BOM 确保 Excel 正确识别 UTF-8 中文
+      const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `payments_${direction}_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("导出失败: " + (err.message || err));
+    } finally {
+      setExporting(false);
     }
-    // BOM 确保 Excel 正确识别 UTF-8 中文
-    const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `payments_${direction}_${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
   };
 
-  // 顶部汇总
-  const summary = useMemo(() => {
-    const byCcy = {};
-    let cny = 0;
-    for (const p of payments) {
-      byCcy[p.currency] = (byCcy[p.currency] || 0) + Number(p.amount || 0);
-      cny += Number(p.amount_cny || 0);
-    }
-    return { count: payments.length, byCcy, cny };
-  }, [payments]);
+  const totalPages = Math.max(1, Math.ceil(headerSummary.cnt / PAGE_SIZE));
 
   return (
     <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
@@ -198,16 +285,19 @@ export default function PaymentsList({ onBack }) {
             {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
             <span style={{ fontSize: 16, fontWeight: 700 }}>收付款记录</span>
             <span style={{ marginLeft: 4, color: "#888", fontSize: 12 }}>
-              共 {summary.count} 笔 · 折 CNY ¥ {summary.cny.toFixed(2)}
-              {Object.keys(summary.byCcy).length > 1 && (
+              共 {headerSummary.cnt} 笔 · 折 CNY ¥ {headerSummary.total_cny.toFixed(2)}
+              {headerSummary.by_currency.length > 1 && (
                 <span style={{ color: "#aaa", marginLeft: 8 }}>
-                  ({Object.entries(summary.byCcy).map(([c, v]) => `${c} ${v.toFixed(2)}`).join(" / ")})
+                  ({headerSummary.by_currency.map(c => `${c.currency} ${Number(c.total).toFixed(2)}`).join(" / ")})
                 </span>
               )}
             </span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onExportCsv} style={btn} disabled={payments.length === 0}>导出 CSV</button>
+            <button onClick={onExportCsv} style={btn}
+                    disabled={exporting || headerSummary.cnt === 0}>
+              {exporting ? "导出中..." : "导出 CSV"}
+            </button>
             <button onClick={() => setEditing({})}
                     style={{ ...btn, background: BRAND, color: "#fff", borderColor: BRAND }}>
               + 新建{direction === "AR" ? "收款" : "付款"}
@@ -219,7 +309,7 @@ export default function PaymentsList({ onBack }) {
         <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
           {[["AR", "收款记录(应收)"], ["AP", "付款记录(应付)"]].map(([key, label]) => (
             <div key={key}
-                 onClick={() => setDirection(key)}
+                 onClick={() => { setDirection(key); setPage(0); }}
                  style={{
                    padding: "10px 24px", cursor: "pointer",
                    color: direction === key ? BRAND : "#666",
@@ -238,7 +328,7 @@ export default function PaymentsList({ onBack }) {
           <input placeholder={`单号 / ${direction === "AR" ? "客户" : "供应商"} / 银行 / 备注`}
                  value={filters.keyword}
                  onChange={e => setFilters({...filters, keyword: e.target.value})}
-                 onKeyDown={e => e.key === "Enter" && load()}
+                 onKeyDown={e => e.key === "Enter" && commitFilters()}
                  style={{ flex: "0 0 280px", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }} />
           <span style={{ color: "#888" }}>日期</span>
           <input type="date" value={filters.date_from}
@@ -255,13 +345,16 @@ export default function PaymentsList({ onBack }) {
             <option value="EUR">EUR</option>
             <option value="GBP">GBP</option>
           </select>
-          <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={selStyle}>
+          <select value={filters.status} onChange={e => { setFilters({...filters, status: e.target.value}); setPage(0); }} style={selStyle}>
             <option value="active">仅有效</option>
             <option value="voided">仅作废</option>
             <option value="">全部</option>
           </select>
-          <button onClick={load} style={btn}>查询</button>
-          <button onClick={() => { setFilters({ keyword: "", date_from: "", date_to: "", currency: "", status: "active" }); }}
+          <button onClick={commitFilters} style={btn}>查询</button>
+          <button onClick={() => {
+                    setFilters({ keyword: "", date_from: "", date_to: "", currency: "", status: "active" });
+                    commitFilters();
+                  }}
                   style={btn}>重置</button>
         </div>
 
@@ -404,6 +497,30 @@ export default function PaymentsList({ onBack }) {
             </tbody>
           </table>
         )}
+
+        {/* 分页 */}
+        {!loading && headerSummary.cnt > 0 && (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 14, paddingTop: 12, borderTop: "1px solid #f0f0f0", fontSize: 12, color: "#666" }}>
+            <button onClick={() => setPage(0)} disabled={page === 0} style={pgBtn(page === 0)}>« 首页</button>
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={pgBtn(page === 0)}>← 上一页</button>
+            <span style={{ margin: "0 6px" }}>
+              第
+              <input type="number" min={1} max={totalPages} value={page + 1}
+                     onChange={e => {
+                       const v = parseInt(e.target.value, 10);
+                       if (!Number.isFinite(v)) return;
+                       setPage(Math.max(0, Math.min(totalPages - 1, v - 1)));
+                     }}
+                     style={{ width: 48, textAlign: "center", padding: "3px 4px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, margin: "0 4px" }} />
+              / {totalPages} 页
+              <span style={{ color: "#aaa", marginLeft: 10 }}>
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, headerSummary.cnt)} / 共 {headerSummary.cnt} 条
+              </span>
+            </span>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page + 1 >= totalPages} style={pgBtn(page + 1 >= totalPages)}>下一页 →</button>
+            <button onClick={() => setPage(totalPages - 1)} disabled={page + 1 >= totalPages} style={pgBtn(page + 1 >= totalPages)}>末页 »</button>
+          </div>
+        )}
       </div>
 
       {editing && (
@@ -425,3 +542,9 @@ const subTd = { padding: "5px 6px" };
 const btn = { padding: "5px 14px", background: "#fff", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, cursor: "pointer" };
 const selStyle = { padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 };
 const linkStyle = { color: "#1990ff", cursor: "pointer", fontSize: 11 };
+const pgBtn = (disabled) => ({
+  padding: "4px 10px", background: "#fff",
+  border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12,
+  cursor: disabled ? "not-allowed" : "pointer",
+  color: disabled ? "#bbb" : "#444",
+});

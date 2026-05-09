@@ -115,6 +115,13 @@ function createClient() {
       or:  (expr) => { filters.push(`or=(${expr})`); return builder; },
       order: (c, { ascending = true } = {}) => { params.push(`order=${c}.${ascending ? "asc" : "desc"}`); return builder; },
       limit: (n) => { params.push(`limit=${n}`); return builder; },
+      // .range(from, to) — 两端含,模仿 supabase-js;内部用 offset+limit。
+      // 不要和 .limit() 同时用(后者会被覆盖,PostgREST 取最后一个 limit 参数)。
+      range: (fromIdx, toIdx) => {
+        params.push(`offset=${fromIdx}`);
+        params.push(`limit=${toIdx - fromIdx + 1}`);
+        return builder;
+      },
       single: () => { isSingle = true; params.push("limit=1"); return builder; },
       insert: (data) => { method = "POST"; body = JSON.stringify(data); returnData = true; return builder; },
       update: (data) => { method = "PATCH"; body = JSON.stringify(data); returnData = true; return builder; },

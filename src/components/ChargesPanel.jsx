@@ -149,7 +149,7 @@ export default function ChargesPanel({ shipment, currentUser, canEdit = true, on
   const reload = useCallback(async () => {
     setLoading(true)
     const [{ data: items }, { data: pts }, { data: rs }, { data: bs }, { data: chs }] = await Promise.all([
-      supabase.from('charge_items').select('*').order('sort_order'),
+      supabase.from('charge_items').select('*').order('sort'),
       supabase.from('customers').select('id,code,name,name_en,partner_type,active').eq('active', true).order('name'),
       supabase.from('exchange_rates').select('*').order('currency'),
       supabase.from('bills').select('*').eq('shipment_id', shipment.id).order('bill_no', { ascending: false }),
@@ -524,7 +524,7 @@ function ChargeSection({
                     >
                       <option value="">— 选择 —</option>
                       {chargeItems.map(it => (
-                        <option key={it.id} value={it.id}>{it.code} {it.name_cn}</option>
+                        <option key={it.id} value={it.id}>{it.code} {it.name_zh}</option>
                       ))}
                     </select>
                   </td>

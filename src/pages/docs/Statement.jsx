@@ -36,9 +36,9 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
         setCompany(c || {});
 
         // 2. charge_items 字典
-        const { data: items } = await supabase.from("charge_items").select("id,name_cn");
+        const { data: items } = await supabase.from("charge_items").select("id,name_zh");
         const im = {};
-        (items || []).forEach(i => { im[i.id] = i.name_cn; });
+        (items || []).forEach(i => { im[i.id] = i.name_zh; });
         setChargeItemMap(im);
 
         let shipIds = [];

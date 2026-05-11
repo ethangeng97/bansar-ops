@@ -70,9 +70,11 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           .from("shipments").select("*").in("id", shipIds);
         setShipments(ships || []);
 
-        // 4. 取 charges
-        const { data: chargesAll } = await supabase
+        // 4. 取 charges。单票模式只取应收（对账单是给客户的），多票模式按 bills 已经过滤好的
+        let chargeQuery = supabase
           .from("charges").select("*").in("shipment_id", shipIds);
+        if (isSingle) chargeQuery = chargeQuery.eq("direction", "应收");
+        const { data: chargesAll } = await chargeQuery;
 
         const map = {};
         (chargesAll || []).forEach(ch => {

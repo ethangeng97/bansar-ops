@@ -188,7 +188,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
                      : blType === "海运单" ? "ZERO (SEAWAY BILL)"
                      : "THREE (3)";
 
-  const carrierName = s.carrier_name || s.shipping_line || "";
+  const carrierName = s.carrier_name || s.carrier || s.shipping_line || "";
 
   return (
     <div className="doc-page">

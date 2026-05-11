@@ -327,9 +327,9 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
 // ============================================================================
 function ShipHeader({ ship }) {
   const cells = [
-    [["客户业务编号", ship.customer_po || ""], ["订单编号", ship.order_no || ""]],
+    [["客户业务编号", ship.customer_po || ship.po || ""], ["订单编号", ship.order_no || ""]],
     [["主单号", ship.mbl_no || ""], ["分单号", ship.hbl_no || ""]],
-    [["SO号", ship.so_no || ""], ["起运港", ship.pol || ""]],
+    [["SO号", ship.booking_no || ""], ["起运港", ship.pol || ""]],
     [["件数", ship.qty_packages || "0"], ["目的港", ship.pod || ""]],
     [["毛重", `${ship.weight || "0"} KGS`], ["船名航次", `${ship.vessel || ""}${ship.voyage ? "/" + ship.voyage : ""}`]],
     [["体积", `${ship.volume || "0"} CBM`], ["ETD", ship.etd ? formatDate(ship.etd) : ""]],

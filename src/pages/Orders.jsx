@@ -2764,6 +2764,12 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
   const byBox  = useColResize("cargoLines.cols.byBox.v1",  CARGO_BYBOX_DEFAULTS);
   const byHblC = useColResize("cargoLines.cols.byHbl.v1",  CARGO_BYHBL_DEFAULTS);
 
+  // 只读视图按提单号字母序排（A/B/C...），编辑时保持用户输入顺序避免行跳
+  const displayLines = useMemo(() => {
+    if (editing) return lines;
+    return [...lines].sort((a, b) => (a.hbl_no || "").localeCompare(b.hbl_no || ""));
+  }, [lines, editing]);
+
   const updateRow = (idx, field, value) => {
     const next = lines.map((r, i) => i === idx ? { ...r, [field]: value } : r);
     onChange(next);
@@ -2847,9 +2853,12 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
               <tr><td colSpan={editing ? 16 : 15} style={{ padding: 16, textAlign: "center", color: "#999" }}>
                 {editing ? "暂无货物明细，点下面 + 添加" : "暂无货物明细"}
               </td></tr>
-            ) : lines.map((r, i) => (
-              <tr key={r.id || r._tmp || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
-                <td style={cellBody}>{(i + 1) * 10}</td>
+            ) : displayLines.map((r, dispI) => {
+              // 当 editing=false 时 displayLines 是排序后的，但 updateRow 操作的是 lines 原数组的索引
+              const i = editing ? dispI : lines.indexOf(r);
+              return (
+              <tr key={r.id || r._tmp || dispI} style={{ background: dispI % 2 ? "#fafafa" : "#fff" }}>
+                <td style={cellBody}>{(dispI + 1) * 10}</td>
                 <td style={cellBody}><input style={cellInput} value={r.warehouse_in_no || ""} onChange={e => updateRow(i, "warehouse_in_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.hbl_no || ""} onChange={e => updateRow(i, "hbl_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.container_no || ""} onChange={e => updateRow(i, "container_no", e.target.value)} disabled={!editing} /></td>
@@ -2866,7 +2875,8 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                 <td style={cellBody}><input style={cellInput} value={r.cl || ""} onChange={e => updateRow(i, "cl", e.target.value)} disabled={!editing} /></td>
                 {editing && <td style={cellBody}><button onClick={() => delRow(i)} style={{ padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>删</button></td>}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -2893,7 +2903,9 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
               </tr>
             </thead>
             <tbody>
-              {Object.values(byContainer).map((g, i) => (
+              {Object.values(byContainer)
+                .sort((a, b) => (a.container_no || "").localeCompare(b.container_no || ""))
+                .map((g, i) => (
                 <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
                   <td style={cellBody}>{g.container_no || "—"}</td>
                   <td style={cellBody}>{g.seal_no || "—"}</td>
@@ -2925,7 +2937,9 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
               </tr>
             </thead>
             <tbody>
-              {Object.values(byHbl).map((g, i) => (
+              {Object.values(byHbl)
+                .sort((a, b) => (a.hbl_no || "").localeCompare(b.hbl_no || ""))
+                .map((g, i) => (
                 <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
                   <td style={cellBody}>{g.hbl_no || "—"}</td>
                   <td style={cellBody}>{g.names.join(" / ")}</td>

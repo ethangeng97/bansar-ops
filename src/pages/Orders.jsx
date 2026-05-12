@@ -302,8 +302,13 @@ export function OrdersPage({ user, onBack }) {
     if (f.pol && o.pol !== f.pol) return false;
     if (f.pod && o.pod !== f.pod) return false;
     if (f.destination && o.destination !== f.destination) return false;
-    if (f.booking_no && !(o.booking_no || "").toLowerCase().includes(String(f.booking_no).toLowerCase())) return false;
-    if (f.booking_no && !(o.booking_no || "").toLowerCase().includes(String(f.booking_no).toLowerCase())) return false;
+    if (f.booking_no) {
+      const q = String(f.booking_no).toLowerCase();
+      const hit = (o.booking_no || "").toLowerCase().includes(q)
+        || (o.mbl_no || "").toLowerCase().includes(q)
+        || (o.e_booking_no || "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
     if (f.container_no && !(o.container_no || "").toLowerCase().includes(String(f.container_no).toLowerCase())) return false;
     if (f.order_no && !(o.order_no || "").toLowerCase().includes(String(f.order_no).toLowerCase())) return false;
     if (f.po && !(o.po || "").toLowerCase().includes(String(f.po).toLowerCase())) return false;
@@ -312,7 +317,7 @@ export function OrdersPage({ user, onBack }) {
     if (f.etd_to && o.etd && o.etd > f.etd_to) return false;
     if (search) {
       const q = search.toLowerCase();
-      const pool = [o.po, o.customer_po, o.booking_no, o.container_no, o.vessel, o.voyage, o.supplier, o.order_no, o.customer, o.pol, o.pod, o.overseas_agent, o.end_customer];
+      const pool = [o.po, o.customer_po, o.booking_no, o.mbl_no, o.e_booking_no, o.container_no, o.vessel, o.voyage, o.supplier, o.order_no, o.customer, o.pol, o.pod, o.overseas_agent, o.end_customer];
       const directHit = pool.filter(Boolean).some(x => String(x).toLowerCase().includes(q));
       if (!directHit) {
         // 缩写匹配：q 命中某 customer 的 name_short/name_en/code 时，
@@ -403,6 +408,14 @@ export function OrdersPage({ user, onBack }) {
 
   const clearF = () => { setFilters({}); setSearch(""); };
 
+  // 保存成功后立即把 update returning 的行推回到本地状态，省去一次刷新
+  // （supabase wrapper 默认带 Prefer: return=representation）
+  const applyUpdated = useCallback((row) => {
+    if (!row || !row.id) return;
+    setFullOrder(prev => prev && prev.id === row.id ? { ...prev, ...row } : prev);
+    setShipments(prev => prev.map(s => s.id === row.id ? { ...s, ...row } : s));
+  }, []);
+
   // 详情态优先用完整数据（含所有字段），fallback 到列表精简数据
   const selOrder = fullOrder && fullOrder.id === selectedId
     ? fullOrder
@@ -451,6 +464,7 @@ export function OrdersPage({ user, onBack }) {
           setCreateMode(null);
           load();
         }}
+        onUpdated={applyUpdated}
         onCreated={(newId, newData) => {
           // 保存成功后跳转到该订单详情态（同标签内切换 mode）
           // INSERT returning 已带完整数据，直接放入 fullOrder 省一次 fetch
@@ -481,6 +495,7 @@ export function OrdersPage({ user, onBack }) {
         load();
       }}
       onReload={load}
+      onUpdated={applyUpdated}
     />
   );
 
@@ -855,7 +870,7 @@ function OrderNoField({ order, editing, onChange }) {
 }
 
 
-function OrderDetail({ order, role, user, onBack, onReload, createMode = null, onCreated = null }) {
+function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, createMode = null, onCreated = null }) {
   const isCreating = !!createMode;
   // 创建模式：editing 默认 true，初始 ed 已填默认值
   const [editing, setEditing] = useState(isCreating);
@@ -1075,18 +1090,18 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
 
     if (Object.keys(changes).length) {
       const cleanChanges = filterShipmentPayload(changes);
-      const { error } = await supabase.from("shipments").update(cleanChanges).eq("id", order.id);
+      const { data, error } = await supabase.from("shipments").update(cleanChanges).eq("id", order.id).select().single();
       if (error) { alert(error.message); return; }
+      if (data && onUpdated) onUpdated(data);
     }
     setEditing(false);
-    onReload();
   };
 
   // 单字段直接保存（SOP 节点状态变更、has_hbl 切换、生命周期变更等）
   const updateField = async (field, value) => {
-    const { error } = await supabase.from("shipments").update({ [field]: value }).eq("id", order.id);
+    const { data, error } = await supabase.from("shipments").update({ [field]: value }).eq("id", order.id).select().single();
     if (error) { alert(error.message); return; }
-    onReload();
+    if (data && onUpdated) onUpdated(data); else onReload();
   };
 
   const setLifecycle = async (lc) => {
@@ -1095,9 +1110,9 @@ function OrderDetail({ order, role, user, onBack, onReload, createMode = null, o
       updates.completed_at = new Date().toISOString();
       updates.completed_by = user?.id || null;
     }
-    const { error } = await supabase.from("shipments").update(updates).eq("id", order.id);
+    const { data, error } = await supabase.from("shipments").update(updates).eq("id", order.id).select().single();
     if (error) { alert(error.message); return; }
-    onReload();
+    if (data && onUpdated) onUpdated(data); else onReload();
   };
 
   const v = (f) => editing ? (ed[f] ?? "") : (order[f] ?? "");

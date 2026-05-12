@@ -1161,8 +1161,24 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     && order.order_no
     && !/-\d+$/.test(order.order_no);
 
+  // 分票判定：自拼柜 且 order_no 含 -N 后缀
+  const isSubTicket = order.shipment_type === "Console"
+    && order.order_no
+    && /-\d+$/.test(order.order_no);
+  const masterOrderNo = isSubTicket ? order.order_no.replace(/-\d+$/, "") : null;
+
   // 创建模式下的主拼判定（订单还没保存，order_no 为空）
   const isCreatingMaster = isCreating && createMode === "Console";
+
+  // 当前分票对应的母单是否存在（null=未查 / true=有 / false=无 → 显示"补建母单"）
+  const [masterExists, setMasterExists] = useState(null);
+  useEffect(() => {
+    if (!masterOrderNo) { setMasterExists(null); return; }
+    let alive = true;
+    supabase.from("shipments").select("id").eq("order_no", masterOrderNo).limit(1)
+      .then(({ data }) => { if (alive) setMasterExists((data || []).length > 0); });
+    return () => { alive = false; };
+  }, [masterOrderNo]);
 
   // 复制订单：基于当前订单创建新订单，但 MBL/HBL/Booking 等单号 + 系统字段不复制
   const cloneOrder = async () => {
@@ -1225,6 +1241,41 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
     // 新标签页打开新订单
     window.open(`#/sea_export?id=${created.id}`, "_blank");
+  };
+
+  // 补建母单：当前分票发现没有母单时调用，从分票数据复制 booking 级字段建一条 Console 壳行
+  const createMaster = async () => {
+    if (!isSubTicket || !masterOrderNo) return;
+    if (masterExists) { alert("母单已存在"); return; }
+    if (!window.confirm(`确认补建母单 ${masterOrderNo} ？\n\n会从当前分票复制 booking 级字段（船名/航次/箱号/POL/POD 等），票级字段（PO/客户/件数等）保持空。`)) return;
+    const newRow = {
+      order_no: masterOrderNo,
+      shipment_type: "Console",
+      booking_no: order.booking_no,
+      e_booking_no: order.e_booking_no,
+      mbl_no: order.mbl_no,
+      vessel: order.vessel,
+      voyage: order.voyage,
+      etd: order.etd,
+      pol: order.pol,
+      pod: order.pod,
+      destination: order.destination,
+      carrier: order.carrier,
+      container_no: order.container_no,
+      qty_container: order.qty_container,
+      overseas_agent: order.overseas_agent,
+      solicit_type: order.solicit_type,
+      lifecycle: "处理中",
+    };
+    const cleaned = filterShipmentPayload(newRow);
+    const { data, error } = await supabase.from("shipments").insert(cleaned).select().single();
+    if (error) { alert("补建失败：" + error.message); return; }
+    setMasterExists(true);
+    if (data?.id) {
+      // 新标签打开补建好的母单详情
+      window.open(`#/sea_export?id=${data.id}`, "_blank");
+    }
+    onReload();
   };
 
   // 创建分票
@@ -1334,6 +1385,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             <Mi disabled={isLocked} onClick={() => { window.location.hash = "#/sea_export?action=new"; }}>新建</Mi>
             <Mi disabled={isLocked} onClick={cloneOrder}>复制</Mi>
             {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
+            {isSubTicket && masterExists === false && <Mi disabled={isLocked} onClick={createMaster}>补建母单</Mi>}
             <Mi disabled={isLocked}>删除</Mi>
             <Tbl/>
             <Mi disabled={isLocked}>舱单确认</Mi>

@@ -1688,6 +1688,34 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   };
 
   // 删除分票
+  // 删除当前作业（工具栏"删除"按钮）
+  const deleteOrder = async () => {
+    if (!order?.id) return;
+    if (isLocked) { alert("已关闭/完结的作业不能删除"); return; }
+    // 自拼母单：先看下面有没有分票，有就劝退
+    if (isMaster && subTickets.length > 0) {
+      alert(`这是自拼母单，下面还挂着 ${subTickets.length} 个分票，请先逐个删掉分票再删母单`);
+      return;
+    }
+    const ref = order.order_no || order.id.slice(0, 8);
+    if (!window.confirm(`确定删除作业 ${ref}？\n\n会一并清理：\n  - 货物明细（cargo_items）\n  - 集装箱（shipment_containers）\n  - portal 装箱明细（container_items）\n\n此操作不可恢复。`)) return;
+
+    try {
+      // 显式删 portal container_items（即便 FK on delete set null 也建议清掉）
+      await supabase.from("container_items").delete().eq("shipment_id", order.id);
+      // shipments 主表删（cargo_items / shipment_containers 有 CASCADE）
+      const { error } = await supabase.from("shipments").delete().eq("id", order.id);
+      if (error) { alert("删除失败：" + error.message); return; }
+      // 自拼分票被删 → 重算母单合计
+      if (isSubTicket && masterOrderNo) {
+        recomputeMasterTotals(masterOrderNo).catch(e => console.error("recompute master totals error:", e));
+      }
+      onBack();
+    } catch (e) {
+      alert("删除失败：" + (e?.message || e));
+    }
+  };
+
   const deleteSubTicket = async (subTicket) => {
     if (!confirm(`确定删除分票 ${subTicket.order_no} ？此操作不可恢复。`)) return;
     const { error } = await supabase.from("shipments").delete().eq("id", subTicket.id);
@@ -1786,7 +1814,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             <Mi disabled={isLocked} onClick={cloneOrder}>复制</Mi>
             {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
             {isSubTicket && masterExists === false && <Mi disabled={isLocked} onClick={createMaster}>补建母单</Mi>}
-            <Mi disabled={isLocked}>删除</Mi>
+            <Mi disabled={isLocked} onClick={deleteOrder}>删除</Mi>
             <Tbl/>
             <Mi disabled={isLocked}>舱单确认</Mi>
             <Mi disabled={isLocked}>航线确认</Mi>

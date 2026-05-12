@@ -1051,7 +1051,7 @@ async function recomputeShipmentTotalsFromCargo(shipmentId) {
   await supabase.from("shipments").update({
     qty_packages: pkg || null,
     weight: wt ? Number(wt.toFixed(3)) : null,
-    volume: vol ? Number(vol.toFixed(3)) : null,
+    volume: vol ? Number(vol.toFixed(4)) : null,
   }).eq("id", shipmentId);
 }
 
@@ -1071,7 +1071,7 @@ async function recomputeMasterTotals(masterOrderNo) {
   await supabase.from("shipments").update({
     qty_packages: pkg || null,
     weight: wt ? Number(wt.toFixed(3)) : null,
-    volume: vol ? Number(vol.toFixed(3)) : null,
+    volume: vol ? Number(vol.toFixed(4)) : null,
   }).eq("order_no", masterOrderNo);
 }
 
@@ -1160,6 +1160,9 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   // 新货物明细（cargo_items 表）：分票视图，集装箱 tab 编辑
   const [cargoLines, setCargoLines] = useState([]);          // 当前已加载的明细
   const [cargoLinesDraft, setCargoLinesDraft] = useState([]); // editing 时的草稿（保存时 diff）
+  // 自拼母单聚合视图：从所有分票聚合而来，只读
+  const [masterAggContainers, setMasterAggContainers] = useState([]);
+  const [masterAggCargoLines, setMasterAggCargoLines] = useState([]);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -1294,7 +1297,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       });
     }
 
-    // 主拼：加载所有分票
+    // 主拼：加载所有分票 + 聚合分票的 shipment_containers / cargo_items（母单视图只读用）
     const isMasterCheck = order.shipment_type === "Console"
       && order.order_no
       && !/-\d+$/.test(order.order_no);
@@ -1310,6 +1313,20 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             return na - nb;
           });
           setSubTickets(sorted);
+          // 聚合分票的箱信息和货物明细
+          const ids = sorted.map(s => s.id);
+          if (ids.length > 0) {
+            Promise.all([
+              supabase.from("shipment_containers").select("*").in("shipment_id", ids).order("sort_order", { ascending: true }),
+              supabase.from("cargo_items").select("*").in("shipment_id", ids).order("sort_order", { ascending: true }),
+            ]).then(([ctnRes, cargoRes]) => {
+              setMasterAggContainers(ctnRes.data || []);
+              setMasterAggCargoLines(cargoRes.data || []);
+            });
+          } else {
+            setMasterAggContainers([]);
+            setMasterAggCargoLines([]);
+          }
         });
     }
   }, [order.id]);
@@ -1697,7 +1714,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       n: subTickets.length,
       qty_packages: totalPkg || null,
       weight: totalWt ? totalWt.toFixed(3) : null,
-      volume: totalVol ? totalVol.toFixed(3) : null,
+      volume: totalVol ? totalVol.toFixed(4) : null,
       description: descriptions.join("\n") || null,
     };
   }, [isMaster, subTickets]);
@@ -2377,40 +2394,53 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
               {subtab === "集装箱" && (
                 <div style={{ overflow: "auto" }}>
-                  {/* 段 1：集装箱明细（shipment_containers，箱型/数量/箱号/封号）
-                      自拼分票（isSubTicket）不显示：分票的箱信息归母单管 */}
-                  {!isSubTicket && (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6 }}>集装箱</div>
-                      <ContainerEditor
-                        shipmentId={order?.id}
-                        readOnly={!editing && !isCreating}
-                        onChange={(rows) => {
-                          // 聚合 rows 为 "1x40HQ,2x20GP" 字符串，给托单信息 tab 单行汇总用
-                          const map = {};
-                          for (const r of rows) {
-                            const key = `${r.container_size}${r.container_type}`;
-                            map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
-                          }
-                          const text = Object.entries(map)
-                            .sort(([a], [b]) => a.localeCompare(b))
-                            .map(([k, q]) => `${q}x${k}`)
-                            .join(",");
-                          setContainerSummary(text);
-                        }}
-                      />
-                    </div>
-                  )}
+                  {/* 三种场景分支：
+                      A. 自拼母单（isMaster && Console）→ 聚合显示所有分票的箱+货物，只读
+                      B. 自拼分票（isSubTicket）→ 只货物明细 editable，箱信息归母单
+                      C. 整箱/拼箱单票 → ContainerEditor + CargoLinesEditor 都在本票 */}
+                  {isMaster && order.shipment_type === "Console" ? (
+                    <ConsoleMasterContainerView
+                      containers={masterAggContainers}
+                      cargoLines={masterAggCargoLines}
+                      subTickets={subTickets}
+                      blLabel={order.has_hbl ? "HBL" : "MBL"}
+                    />
+                  ) : (
+                    <>
+                      {/* 集装箱编辑（仅非自拼分票） */}
+                      {!isSubTicket && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6 }}>集装箱</div>
+                          <ContainerEditor
+                            shipmentId={order?.id}
+                            readOnly={!editing && !isCreating}
+                            onChange={(rows) => {
+                              const map = {};
+                              for (const r of rows) {
+                                const key = `${r.container_size}${r.container_type}`;
+                                map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
+                              }
+                              const text = Object.entries(map)
+                                .sort(([a], [b]) => a.localeCompare(b))
+                                .map(([k, q]) => `${q}x${k}`)
+                                .join(",");
+                              setContainerSummary(text);
+                            }}
+                          />
+                        </div>
+                      )}
 
-                  {/* 段 2：货物明细（cargo_items，品名级） */}
-                  <CargoLinesEditor
-                    shipmentId={order?.id}
-                    defaultHbl={order.has_hbl ? order.hbl_no : order.booking_no}
-                    blLabel={order.has_hbl ? "HBL" : "MBL"}
-                    editing={editing && !isCreating}
-                    lines={cargoLinesDraft}
-                    onChange={setCargoLinesDraft}
-                  />
+                      {/* 货物明细 editable */}
+                      <CargoLinesEditor
+                        shipmentId={order?.id}
+                        defaultHbl={order.has_hbl ? order.hbl_no : order.booking_no}
+                        blLabel={order.has_hbl ? "HBL" : "MBL"}
+                        editing={editing && !isCreating}
+                        lines={cargoLinesDraft}
+                        onChange={setCargoLinesDraft}
+                      />
+                    </>
+                  )}
                 </div>
               )}
 
@@ -2791,7 +2821,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                   <td style={cellBody}>{g.names.join(" / ")}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.qty || "—"}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.wt ? g.wt.toFixed(3) : "—"}</td>
-                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.vol ? g.vol.toFixed(3) : "—"}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.vol ? g.vol.toFixed(4) : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -2822,13 +2852,79 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.qty || "—"}</td>
                   <td style={cellBody}>{g.pkg_unit || "CARTONS"}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.wt ? g.wt.toFixed(3) : "—"}</td>
-                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.vol ? g.vol.toFixed(3) : "—"}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.vol ? g.vol.toFixed(4) : "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ConsoleMasterContainerView — 自拼母单只读聚合视图
+// 把所有分票的 shipment_containers + cargo_items 合并展示。
+// 编辑入口在分票详情页，母单不在此处编辑。
+// ═══════════════════════════════════════════════════════════════
+function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabel }) {
+  // 分票 id → 分票尾数（用于"来源"列）
+  const subTailById = {};
+  for (const s of subTickets) {
+    const tail = (s.order_no || "").match(/-(\d+)$/)?.[1];
+    if (s.id && tail) subTailById[s.id] = tail;
+  }
+
+  return (
+    <div>
+      {/* 集装箱聚合（只读） */}
+      <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6 }}>
+        集装箱（汇总自分票，只读 — 编辑请到对应分票）
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
+        <thead>
+          <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
+            <th style={cellHead}>来源分票</th>
+            <th style={cellHead}>箱型</th>
+            <th style={cellHead}>类型</th>
+            <th style={cellHead}>数量</th>
+            <th style={cellHead}>箱号</th>
+            <th style={cellHead}>封号</th>
+            <th style={cellHead}>备注</th>
+          </tr>
+        </thead>
+        <tbody>
+          {containers.length === 0 ? (
+            <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: "#999" }}>分票未录入集装箱</td></tr>
+          ) : containers.map((c, i) => (
+            <tr key={c.id || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+              <td style={cellBody}>-{subTailById[c.shipment_id] || "?"}</td>
+              <td style={cellBody}>{c.container_size || "—"}</td>
+              <td style={cellBody}>{c.container_type || "—"}</td>
+              <td style={{ ...cellBody, textAlign: "right" }}>{c.qty || "—"}</td>
+              <td style={cellBody}>{c.container_no || "—"}</td>
+              <td style={cellBody}>{c.seal_no || "—"}</td>
+              <td style={cellBody}>{c.notes || ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* 货物明细聚合（只读，复用 CargoLinesEditor 但 editing=false） */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+          货物明细（汇总自分票，只读 — 编辑请到对应分票）
+        </div>
+        <CargoLinesEditor
+          shipmentId="master-readonly"
+          defaultHbl=""
+          blLabel={blLabel}
+          editing={false}
+          lines={cargoLines}
+          onChange={() => {}}
+        />
+      </div>
     </div>
   );
 }

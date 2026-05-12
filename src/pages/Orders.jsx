@@ -1750,6 +1750,18 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     };
   }, [cargoLines, masterAggCargoLines, isMaster, order.shipment_type]);
 
+  // shipment_id → 委托方名（货物明细"委托方"列只读显示）
+  // 母单视图：覆盖所有分票；分票/单票视图：就本票一条
+  const customerByShipmentId = useMemo(() => {
+    const m = {};
+    if (isMaster && order.shipment_type === "Console") {
+      (subTickets || []).forEach(s => { if (s.id) m[s.id] = s.customer || ""; });
+    } else if (order?.id) {
+      m[order.id] = order.customer || "";
+    }
+    return m;
+  }, [isMaster, order.shipment_type, order.id, order.customer, subTickets]);
+
   // 按箱合计：cargo_items.qty group by container_no
   // 给 ContainerEditor 的"件数"列只读用
   const cargoQtyByContainerNo = useMemo(() => {
@@ -2480,6 +2492,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                       cargoLines={masterAggCargoLines}
                       subTickets={subTickets}
                       blLabel={order.has_hbl ? "HBL" : "MBL"}
+                      customerByShipmentId={customerByShipmentId}
                     />
                   ) : (
                     <>
@@ -2515,6 +2528,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                         editing={editing && !isCreating}
                         lines={cargoLinesDraft}
                         onChange={setCargoLinesDraft}
+                        customerByShipmentId={customerByShipmentId}
                       />
                     </>
                   )}
@@ -2752,11 +2766,11 @@ function ResizableTh({ widths, startResize, resetCol, k, children, extraStyle })
   );
 }
 
-const CARGO_DETAIL_DEFAULTS = { seq: 40, wh_in: 120, bl: 140, cont_no: 110, seal: 100, type: 80, name: 220, hs: 110, qty: 80, pkg: 90, wt: 110, vol: 100, marks: 100, un: 60, cl: 60, del: 48 };
+const CARGO_DETAIL_DEFAULTS = { seq: 40, customer: 140, wh_in: 120, bl: 140, cont_no: 110, seal: 100, type: 80, name: 220, hs: 110, qty: 80, pkg: 90, wt: 110, vol: 100, marks: 100, un: 60, cl: 60, del: 48 };
 const CARGO_BYBOX_DEFAULTS = { cont_no: 130, seal: 110, type: 80, names: 320, qty: 100, wt: 120, vol: 110 };
 const CARGO_BYHBL_DEFAULTS = { hbl: 160, names: 360, qty: 100, pkg: 90, wt: 120, vol: 110 };
 
-function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, lines, onChange }) {
+function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, lines, onChange, customerByShipmentId = {} }) {
   const cellInput = { width: "100%", padding: "2px 4px", fontSize: 12, border: "1px solid #ccc", boxSizing: "border-box", background: editing ? "#fff" : "#f5f5f5" };
   const cellInputNum = { ...cellInput, textAlign: "right", fontFamily: "Consolas,monospace" };
 
@@ -2831,6 +2845,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
           <thead>
             <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
               <ResizableTh {...detail} k="seq">#</ResizableTh>
+              <ResizableTh {...detail} k="customer">委托方</ResizableTh>
               <ResizableTh {...detail} k="wh_in">进仓号</ResizableTh>
               <ResizableTh {...detail} k="bl">{blLabel}</ResizableTh>
               <ResizableTh {...detail} k="cont_no">箱号</ResizableTh>
@@ -2850,17 +2865,31 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
           </thead>
           <tbody>
             {lines.length === 0 ? (
-              <tr><td colSpan={editing ? 16 : 15} style={{ padding: 16, textAlign: "center", color: "#999" }}>
+              <tr><td colSpan={editing ? 17 : 16} style={{ padding: 16, textAlign: "center", color: "#999" }}>
                 {editing ? "暂无货物明细，点下面 + 添加" : "暂无货物明细"}
               </td></tr>
             ) : displayLines.map((r, dispI) => {
               // 当 editing=false 时 displayLines 是排序后的，但 updateRow 操作的是 lines 原数组的索引
               const i = editing ? dispI : lines.indexOf(r);
+              const customerName = customerByShipmentId[r.shipment_id] || "";
               return (
               <tr key={r.id || r._tmp || dispI} style={{ background: dispI % 2 ? "#fafafa" : "#fff" }}>
                 <td style={cellBody}>{(dispI + 1) * 10}</td>
+                <td style={{ ...cellBody, color: "#666" }} title="对应分票的委托方（不可编辑）">{customerName}</td>
                 <td style={cellBody}><input style={cellInput} value={r.warehouse_in_no || ""} onChange={e => updateRow(i, "warehouse_in_no", e.target.value)} disabled={!editing} /></td>
-                <td style={cellBody}><input style={cellInput} value={r.hbl_no || ""} onChange={e => updateRow(i, "hbl_no", e.target.value)} disabled={!editing} /></td>
+                <td style={{ ...cellBody, position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                    <input style={{ ...cellInput, flex: 1 }} value={r.hbl_no || ""} onChange={e => updateRow(i, "hbl_no", e.target.value)} disabled={!editing} />
+                    {r.shipment_id && (
+                      <button
+                        type="button"
+                        title="跳到对应分票详情页"
+                        onClick={() => window.open(`#/sea_export?id=${r.shipment_id}`, "_blank")}
+                        style={{ flexShrink: 0, padding: "0 4px", fontSize: 11, lineHeight: "16px", border: "1px solid #d9d9d9", background: "#fafafa", cursor: "pointer", color: "#1990ff" }}
+                      >↗</button>
+                    )}
+                  </div>
+                </td>
                 <td style={cellBody}><input style={cellInput} value={r.container_no || ""} onChange={e => updateRow(i, "container_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.seal_no || ""} onChange={e => updateRow(i, "seal_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input list="cargo-container-types" style={cellInput} value={r.container_type || ""} onChange={e => updateRow(i, "container_type", e.target.value)} disabled={!editing} /></td>
@@ -2962,7 +2991,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
 // 把所有分票的 shipment_containers + cargo_items 合并展示。
 // 编辑入口在分票详情页，母单不在此处编辑。
 // ═══════════════════════════════════════════════════════════════
-function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabel }) {
+function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabel, customerByShipmentId }) {
   // 分票 id → 分票尾数（用于"来源"列）
   const subTailById = {};
   for (const s of subTickets) {
@@ -3017,6 +3046,7 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
           editing={false}
           lines={cargoLines}
           onChange={() => {}}
+          customerByShipmentId={customerByShipmentId}
         />
       </div>
     </div>

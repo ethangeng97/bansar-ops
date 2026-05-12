@@ -973,6 +973,15 @@ async function deleteContainerItemForSub(subId) {
   await supabase.from("container_items").delete().eq("shipment_id", subId);
 }
 
+// 校验 qty_container 字符串格式：数量x箱型，多段逗号分隔
+// 合法：1x40HQ / 2x20GP,1x40HQ / 1*40HQ（兼容 * 分隔）
+// 非法：1x1x40HQ / 40HQ / abc
+function isValidQtyContainer(s) {
+  if (!s || !s.trim()) return true;  // 空字符串视为合法（不强填）
+  const seg = /^\d+\s*[x*]\s*(20|40|45|53)(GP|HQ|HC|RF|OT|FR|TK|BU)$/i;
+  return s.split(/[,，]/).map(p => p.trim()).every(p => seg.test(p));
+}
+
 // ───────────────────────────────────────────────────────────────
 // cargo_items（货物明细，品名级）helpers
 // ───────────────────────────────────────────────────────────────
@@ -1159,6 +1168,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [containerSummary, setContainerSummary] = useState("");
 
   // OrderDetail mount / order.id 变化时预拉 shipment_containers 计算汇总（托单信息 tab 单行用）
+  // 顺带自愈：DB 上 shipments.qty_container 字段和算出来的汇总不一致就改 DB（修脏数据）
   useEffect(() => {
     if (!order?.id) { setContainerSummary(""); return; }
     supabase.from("shipment_containers")
@@ -1176,8 +1186,22 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           .map(([k, q]) => `${q}x${k}`)
           .join(",");
         setContainerSummary(text);
+        // 自愈：算出来非空 + 跟 DB 字段不一致 → 静默 sync DB
+        // 仅在 text 非空时修；text 为空（这票真没 shipment_containers 行）时
+        // 保留 DB 上原有的 qty_container 不动（可能是旧数据手填的）
+        if (text && text !== (order.qty_container || "")) {
+          supabase.from("shipments")
+            .update({ qty_container: text })
+            .eq("id", order.id)
+            .select()
+            .single()
+            .then(({ data: updated }) => {
+              if (updated && onUpdated) onUpdated(updated);
+            })
+            .catch(e => console.error("qty_container self-heal error:", e));
+        }
       });
-  }, [order?.id]);
+  }, [order?.id, order?.qty_container, onUpdated]);
   useEffect(() => {
     getCachedRef("pkg_units").then(d => setPkgUnits(d || [])).catch(()=>{});
     getCachedRef("cargo_types").then(d => setCargoTypes(d || [])).catch(()=>{});
@@ -3910,6 +3934,10 @@ function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {
     if (!form.shipment_type) { alert("请选择出运类型"); return false; }
     if (!isConsole && !form.customer?.trim()) { alert("委托单位 必填"); return false; }
     if (!form.booking_no?.trim()) { alert("MB/L No. 必填"); return false; }
+    if (form.qty_container?.trim() && !isValidQtyContainer(form.qty_container)) {
+      alert("箱型箱量 格式不对，应为 数量x箱型 例如 1x40HQ 或 2x20GP,1x40HQ");
+      return false;
+    }
     return true;
   };
 

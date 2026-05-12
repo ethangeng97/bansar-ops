@@ -26,7 +26,7 @@ const TYPE_LABELS = {
   BU: "BU - 散货箱",
 };
 
-export default function ContainerEditor({ shipmentId, readOnly, onChange }) {
+export default function ContainerEditor({ shipmentId, readOnly, onChange, cargoQtyByContainerNo = {} }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingRows, setSavingRows] = useState(new Set()); // id 集合
@@ -214,12 +214,9 @@ export default function ContainerEditor({ shipmentId, readOnly, onChange }) {
                            onBlur={e => updateRow(r.id, { seal_no: liveUpper(e.target.value) || null })}
                            style={{ ...inpStyle, fontFamily: "Consolas,monospace", width: "100%" }} />}
                 </td>
-                <td style={{ ...td, textAlign: "right" }}>
-                  {readOnly ? (r.cargo_qty || "—") :
-                    <input type="number" min="0" value={r.cargo_qty || ""}
-                           onChange={e => setRows(prev => prev.map(x => x.id === r.id ? { ...x, cargo_qty: e.target.value } : x))}
-                           onBlur={e => updateRow(r.id, { cargo_qty: e.target.value === "" ? null : parseInt(e.target.value) })}
-                           style={{ ...inpStyle, textAlign: "right", width: 70, fontFamily: "Consolas,monospace" }} />}
+                <td style={{ ...td, textAlign: "right", color: "#666", fontFamily: "Consolas,monospace" }}
+                    title="按箱合计自动算（cargo_items.qty）">
+                  {cargoQtyByContainerNo[r.container_no] || "—"}
                 </td>
                 <td style={{ ...td, textAlign: "right" }}>
                   {readOnly ? (r.cargo_weight || "—") :

@@ -1721,6 +1721,18 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     };
   }, [cargoLines, masterAggCargoLines, isMaster, order.shipment_type]);
 
+  // 按箱合计：cargo_items.qty group by container_no
+  // 给 ContainerEditor 的"件数"列只读用
+  const cargoQtyByContainerNo = useMemo(() => {
+    const src = (isMaster && order.shipment_type === "Console") ? masterAggCargoLines : cargoLines;
+    const map = {};
+    (src || []).forEach(l => {
+      if (!l.container_no) return;
+      map[l.container_no] = (map[l.container_no] || 0) + (parseInt(l.qty) || 0);
+    });
+    return map;
+  }, [cargoLines, masterAggCargoLines, isMaster, order.shipment_type]);
+
   // 集装箱字段实时合计（托单信息顶上那行 "1x40HQ + N件" 从这里取）
   // 母单视图用 masterAggContainers，单票视图用空（containerSummary 已经够用）
   const containerLineSummary = useMemo(() => {
@@ -2449,6 +2461,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           <ContainerEditor
                             shipmentId={order?.id}
                             readOnly={!editing && !isCreating}
+                            cargoQtyByContainerNo={cargoQtyByContainerNo}
                             onChange={(rows) => {
                               const map = {};
                               for (const r of rows) {

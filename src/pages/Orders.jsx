@@ -4,6 +4,7 @@ import { Spinner, ComboBox } from "../components/ui.jsx";
 import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
 import PortPicker from "../components/PortPicker.jsx";
 import ContainerEditor from "../components/ContainerEditor.jsx";
+import BLImportModal from "../components/BLImportModal.jsx";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
 import { filterShipmentPayload } from "../lib/shipment-fields.js";
@@ -1164,6 +1165,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   // 自拼母单聚合视图：从所有分票聚合而来，只读
   const [masterAggContainers, setMasterAggContainers] = useState([]);
   const [masterAggCargoLines, setMasterAggCargoLines] = useState([]);
+  // 解析提单 modal 开关
+  const [blImportOpen, setBlImportOpen] = useState(false);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -1334,6 +1337,38 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
   const startEdit = () => { setEd({ ...order }); setCargoLinesDraft(cargoLines); setEditing(true); };
   const cancel = () => { setCargoLinesDraft(cargoLines); setEditing(false); };
+
+  // 从解析提单 modal 应用字段：合并到 ed（主字段）+ cargoLinesDraft（货物明细）
+  // 集装箱信息走另一条路：直接写 shipment_containers（带用户上下文，trigger 不拦）
+  const applyBLImport = async (fields, extras) => {
+    if (!editing) {
+      // 自动进编辑态再合并
+      setEd(prev => ({ ...order, ...prev, ...fields }));
+      setEditing(true);
+    } else {
+      setEd(prev => ({ ...prev, ...fields }));
+    }
+    // 货物明细：追加一行（用户可在集装箱 tab 进一步编辑）
+    if (extras?.cargoItem) {
+      setCargoLinesDraft(prev => [
+        ...prev,
+        { _tmp: Date.now() + Math.random(), sort_order: prev.length + 1, ...extras.cargoItem },
+      ]);
+    }
+    // 集装箱：直接写 DB（ContainerEditor 自己拉数据，用户编辑保存后会持久化；
+    // 这里如果没有现成行则插一条新的）
+    if (extras?.container && order?.id) {
+      try {
+        await supabase.from("shipment_containers").insert({
+          shipment_id: order.id,
+          ...extras.container,
+          sort_order: 0,
+        });
+      } catch (e) {
+        console.error("BL import: insert shipment_containers error:", e);
+      }
+    }
+  };
   const save = async () => {
     // ── 创建模式：INSERT 新订单 ──
     if (isCreating) {
@@ -1809,6 +1844,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
   return (
     <div className="tms">
+      <BLImportModal
+        open={blImportOpen}
+        onClose={() => setBlImportOpen(false)}
+        onApply={applyBLImport}
+      />
       <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
       {/* 第一行工具栏：主操作（白底） */}
@@ -1903,6 +1943,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             <Mi onClick={cancel}>取消</Mi>
           </>
         )}
+        <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
         <Mi arrow>订舱模板</Mi>
         <Mi arrow>费用确认</Mi>
         <Mi arrow>相关操作</Mi>

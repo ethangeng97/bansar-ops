@@ -240,7 +240,31 @@ export function OrdersPage({ user, onBack }) {
 
       const { data, error } = await query;
       if (error) console.error("load shipments error:", error);
-      setShipments(data || []);
+      let result = data || [];
+
+      // 自拼母单补齐：当前结果集里有 -N 分票但母单（去掉 -N）不在结果里时，
+      // 按 order_no 二次拉取母单合并进来，保证列表能正确展示主拼父子层级。
+      // （一票挂在某 booking 下时，limit/role 可能把母单截掉，导致分票被错误
+      // 当成顶级行展示。）
+      const loadedNos = new Set(result.map(s => s.order_no).filter(Boolean));
+      const missingMasters = new Set();
+      for (const s of result) {
+        if (s.order_no && /-\d+$/.test(s.order_no)) {
+          const master = s.order_no.replace(/-\d+$/, "");
+          if (!loadedNos.has(master)) missingMasters.add(master);
+        }
+      }
+      if (missingMasters.size > 0) {
+        const { data: masters } = await supabase.from("shipments")
+          .select(COLUMNS)
+          .in("order_no", [...missingMasters]);
+        if (masters && masters.length > 0) {
+          const have = new Set(result.map(s => s.id));
+          result = [...result, ...masters.filter(m => !have.has(m.id))];
+        }
+      }
+
+      setShipments(result);
     } finally {
       setLoading(false);
     }

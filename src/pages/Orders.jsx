@@ -910,10 +910,43 @@ async function syncContainerFromMaster(master) {
   return created?.id || null;
 }
 
-// 把单个分票同步成 container_items 行（idempotent，按 shipment_id 唯一）
+// 把单个分票同步成 portal container_items 行（idempotent，按 shipment_id 唯一）
+//
+// 策略：
+//  - 若该分票有 cargo_items 明细 → 删旧 container_items + 按每条 cargo_items 插入一行
+//    （portal 那边能看到品名级明细 + 按 supplier 聚合）
+//  - 若分票无 cargo_items → fallback：按分票合计写一条 container_item（老逻辑）
 async function syncContainerItemFromSub(containerId, sub) {
   if (!containerId || !sub?.id) return;
   const tail = parseInt((sub.order_no || "").match(/-(\d+)$/)?.[1] || "0");
+
+  // 看分票有没有 cargo_items 明细
+  const { data: lines } = await supabase.from("cargo_items")
+    .select("*").eq("shipment_id", sub.id).order("sort_order", { ascending: true });
+
+  if (lines && lines.length > 0) {
+    // 明细级同步：先清掉该分票现有 container_items，再批量 insert
+    await supabase.from("container_items").delete().eq("shipment_id", sub.id);
+    const rows = lines.map((l, i) => ({
+      container_id: containerId,
+      shipment_id: sub.id,
+      supplier: sub.supplier || null,
+      po: sub.po || null,
+      customer_po: sub.customer_po || null,
+      tuc: l.product_name_en || null,
+      sku: l.hs_code || null,
+      qty: l.qty != null ? parseInt(l.qty) : null,
+      weight: l.gross_weight != null ? Number(l.gross_weight) : null,
+      volume: l.volume != null ? Number(l.volume) : null,
+      hbl: l.hbl_no || sub.hbl_no || null,
+      notes: l.marks || null,
+      sort_order: (tail * 100) + (l.sort_order || i),
+    }));
+    if (rows.length) await supabase.from("container_items").insert(rows);
+    return;
+  }
+
+  // 兜底：分票合计模式
   const payload = {
     container_id: containerId,
     shipment_id: sub.id,
@@ -938,6 +971,79 @@ async function syncContainerItemFromSub(containerId, sub) {
 async function deleteContainerItemForSub(subId) {
   if (!subId) return;
   await supabase.from("container_items").delete().eq("shipment_id", subId);
+}
+
+// ───────────────────────────────────────────────────────────────
+// cargo_items（货物明细，品名级）helpers
+// ───────────────────────────────────────────────────────────────
+// cargo_items 是单一事实源：分票件毛体 = cargo_items 合计；母单件毛体 = 分票合计。
+// 若分票还没有 cargo_items 行，分票件毛体作为兜底（用户手填），portal 也用兜底。
+
+async function loadCargoLines(shipmentId) {
+  if (!shipmentId) return [];
+  const { data } = await supabase.from("cargo_items")
+    .select("*").eq("shipment_id", shipmentId).order("sort_order", { ascending: true });
+  return data || [];
+}
+
+// diff 保存：把 next 跟 prev 对比，分别 insert / update / delete
+async function saveCargoLines(shipmentId, prev, next) {
+  if (!shipmentId) return;
+  const prevById = new Map(prev.filter(r => r.id).map(r => [r.id, r]));
+  const nextIds = new Set(next.filter(r => r.id).map(r => r.id));
+
+  // 删除：prev 里有但 next 没了的
+  const toDelete = [...prevById.keys()].filter(id => !nextIds.has(id));
+  if (toDelete.length) {
+    await supabase.from("cargo_items").delete().in("id", toDelete);
+  }
+
+  // insert / update
+  for (const row of next) {
+    const payload = {
+      shipment_id: shipmentId,
+      hbl_no: row.hbl_no || null,
+      container_no: row.container_no || null,
+      seal_no: row.seal_no || null,
+      container_type: row.container_type || null,
+      product_name_en: row.product_name_en || null,
+      hs_code: row.hs_code || null,
+      qty: row.qty !== "" && row.qty != null ? parseInt(row.qty) : null,
+      package_unit: row.package_unit || "CARTONS",
+      gross_weight: row.gross_weight !== "" && row.gross_weight != null ? parseFloat(row.gross_weight) : null,
+      volume: row.volume !== "" && row.volume != null ? parseFloat(row.volume) : null,
+      marks: row.marks || null,
+      un: row.un || null,
+      cl: row.cl || null,
+      sort_order: row.sort_order || 0,
+    };
+    if (row.id && prevById.has(row.id)) {
+      // 简单粗暴：每行都 update（之后可优化只更新有变化的）
+      await supabase.from("cargo_items").update(payload).eq("id", row.id);
+    } else {
+      await supabase.from("cargo_items").insert(payload);
+    }
+  }
+}
+
+// 按 cargo_items 重算分票件毛体（cargo_items 是单一事实源）
+// 注意：分票若无 cargo_items 行，保持现状不动（让用户手填的值有效）
+async function recomputeShipmentTotalsFromCargo(shipmentId) {
+  if (!shipmentId) return;
+  const { data: lines } = await supabase.from("cargo_items")
+    .select("qty, gross_weight, volume").eq("shipment_id", shipmentId);
+  if (!lines || lines.length === 0) return;  // 无明细 → 不覆盖手填
+  let pkg = 0, wt = 0, vol = 0;
+  lines.forEach(l => {
+    pkg += parseInt(l.qty) || 0;
+    wt += parseFloat(l.gross_weight) || 0;
+    vol += parseFloat(l.volume) || 0;
+  });
+  await supabase.from("shipments").update({
+    qty_packages: pkg || null,
+    weight: wt ? Number(wt.toFixed(3)) : null,
+    volume: vol ? Number(vol.toFixed(3)) : null,
+  }).eq("id", shipmentId);
 }
 
 // 重算母单 qty_packages/weight/volume（= 所有分票之和），写回 DB
@@ -1041,7 +1147,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [tab, setTab] = useState("作业");
   const [subtab, setSubtab] = useState("托单信息");
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [], staff: [] });
-  const [cargoItems, setCargoItems] = useState([]);
+  const [cargoItems, setCargoItems] = useState([]);  // 旧"货物"tab 用（已弃用，留着兼容）
+  // 新货物明细（cargo_items 表）：分票视图，集装箱 tab 编辑
+  const [cargoLines, setCargoLines] = useState([]);          // 当前已加载的明细
+  const [cargoLinesDraft, setCargoLinesDraft] = useState([]); // editing 时的草稿（保存时 diff）
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -1153,6 +1262,14 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       q.then(({ data }) => setCargoItems(data || []));
     }
 
+    // 加载货物明细 cargo_items（新表）
+    if (order.id) {
+      loadCargoLines(order.id).then(rows => {
+        setCargoLines(rows);
+        setCargoLinesDraft(rows);
+      });
+    }
+
     // 主拼：加载所有分票
     const isMasterCheck = order.shipment_type === "Console"
       && order.order_no
@@ -1173,8 +1290,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     }
   }, [order.id]);
 
-  const startEdit = () => { setEd({ ...order }); setEditing(true); };
-  const cancel = () => setEditing(false);
+  const startEdit = () => { setEd({ ...order }); setCargoLinesDraft(cargoLines); setEditing(true); };
+  const cancel = () => { setCargoLinesDraft(cargoLines); setEditing(false); };
   const save = async () => {
     // ── 创建模式：INSERT 新订单 ──
     if (isCreating) {
@@ -1277,6 +1394,36 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         }
       }
     }
+
+    // 货物明细 cargo_items 差异保存 + 级联重算
+    const cargoChanged = JSON.stringify(cargoLines) !== JSON.stringify(cargoLinesDraft);
+    if (cargoChanged && order.id) {
+      try {
+        await saveCargoLines(order.id, cargoLines, cargoLinesDraft);
+        // 重新拉一次最新的（拿到 DB 生成的 id），同步两个 state
+        const fresh = await loadCargoLines(order.id);
+        setCargoLines(fresh);
+        setCargoLinesDraft(fresh);
+        // cargo_items 变了 → 重算分票件毛体（覆盖手填）→ 现有同步链跟着触发
+        await recomputeShipmentTotalsFromCargo(order.id);
+        // 若是分票，重算母单合计
+        if (isSubTicket && masterOrderNo) {
+          recomputeMasterTotals(masterOrderNo).catch(e => console.error("recompute master totals error:", e));
+        }
+        // 重推 portal sync（升级版会按 cargo_items 优先）
+        if (isSubTicket) {
+          findOrCreateContainerIdForSub(order)
+            .then(cid => cid && syncContainerItemFromSub(cid, order))
+            .catch(e => console.error("sync container_items error:", e));
+        } else if (isMaster) {
+          syncContainerFull(order).catch(e => console.error("sync containers error:", e));
+        }
+      } catch (e) {
+        console.error("save cargo_items error:", e);
+        alert("货物明细保存失败：" + (e?.message || e));
+      }
+    }
+
     setEditing(false);
   };
 
@@ -1815,9 +1962,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
               </span>
             </div>
 
-            {/* ─── 子 tab：托单信息 / 船东舱单 / 货物 / 集装箱 / MB/L / HB/L / 其它信息 / 目的港信息 ─── */}
+            {/* ─── 子 tab：托单信息 / 船东舱单 / 集装箱 / MB/L / HB/L / 其它信息 / 目的港信息 ─── */}
+            {/* "货物"tab 已并入"集装箱" */}
             <div className="tms-subtabs">
-              {["托单信息", "船东舱单", "货物", "集装箱", "MB/L", "HB/L", "其它信息", "目的港信息"].filter(t => t !== "HB/L" || order.has_hbl).map(t => (
+              {["托单信息", "船东舱单", "集装箱", "MB/L", "HB/L", "其它信息", "目的港信息"].filter(t => t !== "HB/L" || order.has_hbl).map(t => (
                 <div key={t} className={"st " + (subtab === t ? "act" : "")} onClick={() => setSubtab(t)}>{t}</div>
               ))}
             </div>
@@ -2203,56 +2351,37 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 </div>
               )}
 
-              {subtab === "货物" && (
-                <div style={{ overflow: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
-                        <th style={cellHead}>行号</th><th style={cellHead}>流水号</th><th style={cellHead}>MB/L No.</th>
-                        <th style={cellHead}>船东参考编号</th><th style={cellHead}>品名</th><th style={cellHead}>HSCode</th>
-                        <th style={cellHead}>件数</th><th style={cellHead}>包装</th><th style={cellHead}>毛重</th><th style={cellHead}>体积</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cargoFromContainerItems.length === 0 ? (
-                        <tr><td colSpan={10} style={{ padding: 30, textAlign: "center", color: "#888" }}>暂无货物明细</td></tr>
-                      ) : cargoFromContainerItems.map((it, i) => (
-                        <tr key={it.id || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
-                          <td style={cellBody}>{(i + 1) * 10}</td>
-                          <td style={cellBody}>{it.serial_no || it.id}</td>
-                          <td style={cellBody}>{order.booking_no || ""}</td>
-                          <td style={cellBody}>{it.carrier_ref || ""}</td>
-                          <td style={cellBody}>{it.product_name || ""}</td>
-                          <td style={cellBody}>{it.hs_code || ""}</td>
-                          <td style={cellBody}>{it.cartons || ""}</td>
-                          <td style={cellBody}>{it.package || "CARTONS"}</td>
-                          <td style={cellBody}>{it.gross_weight || ""}</td>
-                          <td style={cellBody}>{it.volume || ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
               {subtab === "集装箱" && (
                 <div style={{ overflow: "auto" }}>
-                  <ContainerEditor
+                  {/* 段 1：集装箱明细（shipment_containers，箱型/数量/箱号/封号） */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6 }}>集装箱</div>
+                    <ContainerEditor
+                      shipmentId={order?.id}
+                      readOnly={!editing && !isCreating}
+                      onChange={(rows) => {
+                        // 聚合 rows 为 "1x40HQ,2x20GP" 字符串，给托单信息 tab 单行汇总用
+                        const map = {};
+                        for (const r of rows) {
+                          const key = `${r.container_size}${r.container_type}`;
+                          map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
+                        }
+                        const text = Object.entries(map)
+                          .sort(([a], [b]) => a.localeCompare(b))
+                          .map(([k, q]) => `${q}x${k}`)
+                          .join(",");
+                        setContainerSummary(text);
+                      }}
+                    />
+                  </div>
+
+                  {/* 段 2：货物明细（cargo_items，品名级） */}
+                  <CargoLinesEditor
                     shipmentId={order?.id}
-                    readOnly={!editing && !isCreating}
-                    onChange={(rows) => {
-                      // 聚合 rows 为 "1x40HQ,2x20GP" 字符串，给托单信息 tab 单行汇总用
-                      const map = {};
-                      for (const r of rows) {
-                        const key = `${r.container_size}${r.container_type}`;
-                        map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
-                      }
-                      const text = Object.entries(map)
-                        .sort(([a], [b]) => a.localeCompare(b))
-                        .map(([k, q]) => `${q}x${k}`)
-                        .join(",");
-                      setContainerSummary(text);
-                    }}
+                    defaultHbl={order.hbl_no}
+                    editing={editing && !isCreating}
+                    lines={cargoLinesDraft}
+                    onChange={setCargoLinesDraft}
                   />
                 </div>
               )}
@@ -2432,6 +2561,179 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
 const cellHead = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, fontWeight: "bold", color: "#444", textAlign: "left", whiteSpace: "nowrap" };
 const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, whiteSpace: "nowrap" };
+
+// ═══════════════════════════════════════════════════════════════
+// CargoLinesEditor — 货物明细（cargo_items）编辑器
+// 行级 editable + 按箱合计 + 按 HBL 合计
+// 保存逻辑由父组件的 save() 调 saveCargoLines(shipmentId, prev, next)
+// ═══════════════════════════════════════════════════════════════
+function CargoLinesEditor({ shipmentId, defaultHbl, editing, lines, onChange }) {
+  const cellInput = { width: "100%", padding: "2px 4px", fontSize: 12, border: "1px solid #ccc", boxSizing: "border-box", background: editing ? "#fff" : "#f5f5f5" };
+  const cellInputNum = { ...cellInput, textAlign: "right", fontFamily: "Consolas,monospace" };
+
+  const updateRow = (idx, field, value) => {
+    const next = lines.map((r, i) => i === idx ? { ...r, [field]: value } : r);
+    onChange(next);
+  };
+  const addRow = () => {
+    onChange([...lines, {
+      _tmp: Date.now() + Math.random(),  // 临时 key（无 id）
+      hbl_no: defaultHbl || "",
+      container_no: "", seal_no: "", container_type: "",
+      product_name_en: "", hs_code: "",
+      qty: "", package_unit: "CARTONS",
+      gross_weight: "", volume: "",
+      marks: "", un: "", cl: "",
+      sort_order: lines.length + 1,
+    }]);
+  };
+  const delRow = (idx) => {
+    onChange(lines.filter((_, i) => i !== idx));
+  };
+
+  // 按箱合计（group by container_no）
+  const byContainer = {};
+  lines.forEach(l => {
+    const k = l.container_no || "(未指定)";
+    if (!byContainer[k]) byContainer[k] = { container_no: l.container_no, seal_no: l.seal_no, container_type: l.container_type, names: [], qty: 0, wt: 0, vol: 0 };
+    if (l.product_name_en && !byContainer[k].names.includes(l.product_name_en)) byContainer[k].names.push(l.product_name_en);
+    byContainer[k].qty += parseInt(l.qty) || 0;
+    byContainer[k].wt  += parseFloat(l.gross_weight) || 0;
+    byContainer[k].vol += parseFloat(l.volume) || 0;
+  });
+
+  // 按 HBL 合计（group by hbl_no）
+  const byHbl = {};
+  lines.forEach(l => {
+    const k = l.hbl_no || "(未指定)";
+    if (!byHbl[k]) byHbl[k] = { hbl_no: l.hbl_no, names: [], qty: 0, wt: 0, vol: 0, pkg_unit: l.package_unit };
+    if (l.product_name_en && !byHbl[k].names.includes(l.product_name_en)) byHbl[k].names.push(l.product_name_en);
+    byHbl[k].qty += parseInt(l.qty) || 0;
+    byHbl[k].wt  += parseFloat(l.gross_weight) || 0;
+    byHbl[k].vol += parseFloat(l.volume) || 0;
+  });
+
+  if (!shipmentId) {
+    return <div style={{ padding: 12, color: "#999", fontSize: 12 }}>请先保存订单，再录货物明细</div>;
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6, marginTop: 12 }}>
+        货物明细（品名级）
+      </div>
+      <div style={{ overflow: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
+              <th style={cellHead}>#</th>
+              <th style={cellHead}>HBL</th>
+              <th style={cellHead}>箱号</th>
+              <th style={cellHead}>封号</th>
+              <th style={cellHead}>箱型</th>
+              <th style={{ ...cellHead, minWidth: 180 }}>英文品名</th>
+              <th style={cellHead}>HSCode</th>
+              <th style={cellHead}>件数</th>
+              <th style={cellHead}>包装</th>
+              <th style={cellHead}>毛重 (KGS)</th>
+              <th style={cellHead}>体积 (CBM)</th>
+              <th style={cellHead}>唛头</th>
+              <th style={cellHead}>UN</th>
+              <th style={cellHead}>CL</th>
+              {editing && <th style={cellHead}></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {lines.length === 0 ? (
+              <tr><td colSpan={editing ? 15 : 14} style={{ padding: 16, textAlign: "center", color: "#999" }}>
+                {editing ? "暂无货物明细，点下面 + 添加" : "暂无货物明细"}
+              </td></tr>
+            ) : lines.map((r, i) => (
+              <tr key={r.id || r._tmp || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                <td style={cellBody}>{(i + 1) * 10}</td>
+                <td style={cellBody}><input style={cellInput} value={r.hbl_no || ""} onChange={e => updateRow(i, "hbl_no", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.container_no || ""} onChange={e => updateRow(i, "container_no", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.seal_no || ""} onChange={e => updateRow(i, "seal_no", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.container_type || ""} onChange={e => updateRow(i, "container_type", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.product_name_en || ""} onChange={e => updateRow(i, "product_name_en", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.hs_code || ""} onChange={e => updateRow(i, "hs_code", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInputNum} value={r.qty ?? ""} onChange={e => updateRow(i, "qty", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.package_unit || "CARTONS"} onChange={e => updateRow(i, "package_unit", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInputNum} value={r.gross_weight ?? ""} onChange={e => updateRow(i, "gross_weight", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInputNum} value={r.volume ?? ""} onChange={e => updateRow(i, "volume", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.marks || ""} onChange={e => updateRow(i, "marks", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.un || ""} onChange={e => updateRow(i, "un", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.cl || ""} onChange={e => updateRow(i, "cl", e.target.value)} disabled={!editing} /></td>
+                {editing && <td style={cellBody}><button onClick={() => delRow(i)} style={{ padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>删</button></td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing && (
+        <div style={{ marginTop: 6 }}>
+          <button onClick={addRow} style={{ padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>+ 添加一行</button>
+        </div>
+      )}
+
+      {/* 按箱合计 */}
+      {Object.keys(byContainer).length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", margin: "16px 0 6px" }}>按箱合计（自动）</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
+                <th style={cellHead}>箱号</th><th style={cellHead}>封号</th><th style={cellHead}>箱型</th>
+                <th style={cellHead}>品名（合并）</th>
+                <th style={cellHead}>件数合计</th><th style={cellHead}>毛重合计</th><th style={cellHead}>体积合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.values(byContainer).map((g, i) => (
+                <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                  <td style={cellBody}>{g.container_no || "—"}</td>
+                  <td style={cellBody}>{g.seal_no || "—"}</td>
+                  <td style={cellBody}>{g.container_type || "—"}</td>
+                  <td style={cellBody}>{g.names.join(" / ")}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.qty || "—"}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.wt ? g.wt.toFixed(3) : "—"}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.vol ? g.vol.toFixed(3) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {/* 按 HBL 合计 */}
+      {Object.keys(byHbl).length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", margin: "16px 0 6px" }}>按提单(HBL)合计（自动）</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
+                <th style={cellHead}>HBL</th><th style={cellHead}>品名（合并）</th>
+                <th style={cellHead}>件数合计</th><th style={cellHead}>包装</th><th style={cellHead}>毛重合计</th><th style={cellHead}>体积合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.values(byHbl).map((g, i) => (
+                <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                  <td style={cellBody}>{g.hbl_no || "—"}</td>
+                  <td style={cellBody}>{g.names.join(" / ")}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.qty || "—"}</td>
+                  <td style={cellBody}>{g.pkg_unit || "CARTONS"}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.wt ? g.wt.toFixed(3) : "—"}</td>
+                  <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.vol ? g.vol.toFixed(3) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
 
 
 // ═══════════════════════════════════════════════════════════════

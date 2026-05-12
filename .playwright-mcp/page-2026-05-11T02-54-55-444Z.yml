@@ -1,0 +1,8 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - img [ref=e6]
+    - text: Bansar OPS
+  - generic [ref=e10]: 班萨（宁波）国际货运代理有限公司
+  - textbox "邮箱 / Email" [ref=e11]
+  - textbox "密码 / Password" [ref=e12]
+  - button "登 录" [ref=e13] [cursor=pointer]

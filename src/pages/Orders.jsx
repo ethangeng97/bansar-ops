@@ -1700,6 +1700,39 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   };
 
   // 主拼汇总数据（仅自拼主拼有意义）
+  // 本票 cargo_items 实时合计（托单信息那段件/毛/体/件数从这里取）
+  // 母单视图用 masterAggCargoLines（聚合自分票），分票/单票视图用 cargoLines（自己的）
+  const cargoTotals = useMemo(() => {
+    const src = (isMaster && order.shipment_type === "Console") ? masterAggCargoLines : cargoLines;
+    if (!src || src.length === 0) return null;
+    let qty = 0, wt = 0, vol = 0;
+    let pkgUnit = null;
+    src.forEach(l => {
+      qty += parseInt(l.qty) || 0;
+      wt  += parseFloat(l.gross_weight) || 0;
+      vol += parseFloat(l.volume) || 0;
+      if (!pkgUnit && l.package_unit) pkgUnit = l.package_unit;
+    });
+    return {
+      qty: qty || null,
+      weight: wt ? Number(wt.toFixed(3)) : null,
+      volume: vol ? Number(vol.toFixed(4)) : null,
+      package_unit: pkgUnit || "CARTONS",
+    };
+  }, [cargoLines, masterAggCargoLines, isMaster, order.shipment_type]);
+
+  // 集装箱字段实时合计（托单信息顶上那行 "1x40HQ + N件" 从这里取）
+  // 母单视图用 masterAggContainers，单票视图用空（containerSummary 已经够用）
+  const containerLineSummary = useMemo(() => {
+    // 件数：cargoTotals.qty
+    const text = containerSummary || order.qty_container || "";
+    if (!text) return "";
+    if (cargoTotals?.qty) {
+      return `${text}  共 ${cargoTotals.qty} ${cargoTotals.package_unit || "件"}`;
+    }
+    return text;
+  }, [containerSummary, order.qty_container, cargoTotals]);
+
   const masterSummary = useMemo(() => {
     if (!isMaster || subTickets.length === 0) return null;
     let totalPkg = 0, totalWt = 0, totalVol = 0;
@@ -2015,56 +2048,58 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
               {subtab === "托单信息" && (
                 <div style={tmStyles.wrap}>
 
-                  {/* ━━━━━━━━━━━ 段 1：集装箱提示 ━━━━━━━━━━━ */}
+                  {/* ━━━━━━━━━━━ 段 1：集装箱提示（按箱合计；附 cargo_items 总件数）━━━━━━━━━━━ */}
                   <div style={tmStyles.section}>
                     <div style={tmStyles.row}>
                       <label style={{ ...tmStyles.label, ...tmStyles.labelReadonly, ...tmStyles.labelNotnull }}>集装箱</label>
                       <input
-                        value={(() => {
-                          // 优先用 ContainerEditor 实时汇总（如果用户刚操作过），fallback 到 DB 上的 qty_container 字段
-                          return containerSummary || v("qty_container") || "";
-                        })()}
+                        value={containerLineSummary}
                         readOnly
                         placeholder="点右侧 + 跳到集装箱子 tab 编辑"
-                        style={{ ...tmStyles.input, width: 200, fontFamily: "Consolas,monospace", color: "#666" }}
+                        style={{ ...tmStyles.input, width: 320, fontFamily: "Consolas,monospace", color: "#666" }}
                       />
                       <button onClick={() => setSubtab("集装箱")} style={tmStyles.btnPlus} disabled={!order?.id}>+</button>
                     </div>
                   </div>
 
-                  {/* ━━━━━━━━━━━ 段 2：件数 / 单位 / 毛重 / 体积 ━━━━━━━━━━━ */}
+                  {/* ━━━━━━━━━━━ 段 2：件数 / 单位 / 毛重 / 体积
+                      有 cargo_items 明细时取按提单合计（只读、灰底），无明细时手填 ━━━━━━━━━━━ */}
                   <div style={tmStyles.section}>
                     <div style={tmStyles.row}>
                       <label style={tmStyles.label}>货物件数</label>
                       <input type="number"
-                             value={v("qty_packages") || ""}
+                             value={cargoTotals?.qty ?? v("qty_packages") ?? ""}
                              onChange={e => ch("qty_packages", e.target.value === "" ? null : Number(e.target.value))}
-                             disabled={!editing}
-                             style={{ ...tmStyles.input, width: 114 }} />
+                             disabled={!editing || !!cargoTotals}
+                             title={cargoTotals ? "由货物明细自动汇总（cargo_items）" : ""}
+                             style={{ ...tmStyles.input, width: 114, background: cargoTotals ? "#f5f5f5" : undefined }} />
 
                       <label style={{ ...tmStyles.label, marginLeft: 16 }}>包装</label>
                       <span style={{ display: "inline-block", width: 114 }}>
                         <ComboBox
-                          value={v("pkg_unit") || ""}
+                          value={cargoTotals?.package_unit ?? v("pkg_unit") ?? ""}
                           onChange={val => ch("pkg_unit", val ? liveUpper(val) : null)}
                           options={(pkgUnits || []).map(u => u.code)}
                           placeholder="CARTONS"
+                          disabled={!editing || !!cargoTotals}
                         />
                       </span>
 
                       <label style={{ ...tmStyles.label, marginLeft: 16 }}>毛重</label>
                       <input type="number" step="0.001"
-                             value={v("weight") || ""}
+                             value={cargoTotals?.weight ?? v("weight") ?? ""}
                              onChange={e => ch("weight", e.target.value === "" ? null : Number(e.target.value))}
-                             disabled={!editing}
-                             style={{ ...tmStyles.input, width: 114, fontFamily: "Consolas,monospace", textAlign: "right" }} />
+                             disabled={!editing || !!cargoTotals}
+                             title={cargoTotals ? "由货物明细自动汇总（cargo_items）" : ""}
+                             style={{ ...tmStyles.input, width: 114, fontFamily: "Consolas,monospace", textAlign: "right", background: cargoTotals ? "#f5f5f5" : undefined }} />
 
                       <label style={{ ...tmStyles.label, marginLeft: 16 }}>体积</label>
-                      <input type="number" step="0.001"
-                             value={v("volume") || ""}
+                      <input type="number" step="0.0001"
+                             value={cargoTotals?.volume ?? v("volume") ?? ""}
                              onChange={e => ch("volume", e.target.value === "" ? null : Number(e.target.value))}
-                             disabled={!editing}
-                             style={{ ...tmStyles.input, width: 114, fontFamily: "Consolas,monospace", textAlign: "right" }} />
+                             disabled={!editing || !!cargoTotals}
+                             title={cargoTotals ? "由货物明细自动汇总（cargo_items）" : ""}
+                             style={{ ...tmStyles.input, width: 114, fontFamily: "Consolas,monospace", textAlign: "right", background: cargoTotals ? "#f5f5f5" : undefined }} />
                     </div>
                   </div>
 

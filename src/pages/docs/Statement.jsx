@@ -17,6 +17,7 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
   const [statement, setStatement] = useState(null);  // batch 模式才有
   const [shipments, setShipments] = useState([]);    // 关联的票（单票=1，多票=N）
   const [chargesByShip, setChargesByShip] = useState({}); // ship_id => charges[]
+  const [containersByShip, setContainersByShip] = useState({}); // ship_id => shipment_containers[]
   const [chargeItemMap, setChargeItemMap] = useState({}); // charge_item_id => name
   const [partnerMap, setPartnerMap] = useState({});  // partner_id => name
   const [company, setCompany] = useState(null);
@@ -70,7 +71,18 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           .from("shipments").select("*").in("id", shipIds);
         setShipments(ships || []);
 
-        // 4. 取 charges。单票模式只取应收（对账单是给客户的），多票模式按 bills 已经过滤好的
+        // 4a. 取 shipment_containers（箱号字段从这里取，不依赖 shipments.container_no 字符串）
+        const { data: ctnRows } = await supabase.from("shipment_containers")
+          .select("shipment_id, container_no, seal_no, container_size, container_type, qty")
+          .in("shipment_id", shipIds);
+        const ctnMap = {};
+        (ctnRows || []).forEach(c => {
+          if (!ctnMap[c.shipment_id]) ctnMap[c.shipment_id] = [];
+          ctnMap[c.shipment_id].push(c);
+        });
+        setContainersByShip(ctnMap);
+
+        // 4b. 取 charges。单票模式只取应收（对账单是给客户的），多票模式按 bills 已经过滤好的
         let chargeQuery = supabase
           .from("charges").select("*").in("shipment_id", shipIds);
         if (isSingle) chargeQuery = chargeQuery.eq("direction", "应收");
@@ -216,7 +228,7 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           return (
             <div key={ship.id} style={{ marginBottom: shipIdx === shipments.length - 1 ? 0 : 24 }}>
               {/* 票级信息 */}
-              <ShipHeader ship={ship} />
+              <ShipHeader ship={ship} containers={containersByShip[ship.id] || []} />
 
               {/* 费用明细表 */}
               <ChargeTable charges={shipCharges} chargeItemMap={chargeItemMap} />
@@ -327,15 +339,26 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
 // ============================================================================
 // 单票字段表
 // ============================================================================
-function ShipHeader({ ship }) {
+function ShipHeader({ ship, containers = [] }) {
+  // 箱号：从 shipment_containers 拼接（fallback 到 shipments.container_no 字符串字段）
+  const containerNos = containers
+    .map(c => c.container_no)
+    .filter(Boolean)
+    .join(", ");
+  const sealNos = containers
+    .map(c => c.seal_no)
+    .filter(Boolean)
+    .join(", ");
+
   const cells = [
-    [["客户业务编号", ship.customer_po || ship.po || ""], ["订单编号", ship.order_no || ""]],
+    [["客户编号", ship.customer_po || ship.po || ""], ["订单编号", ship.order_no || ""]],
     [["主单号", ship.mbl_no || ship.booking_no || ""], ["分单号", ship.hbl_no || ""]],
     [["SO号", ship.booking_no || ""], ["起运港", ship.pol || ""]],
     [["件数", ship.qty_packages || "0"], ["目的港", ship.pod || ""]],
     [["毛重", `${ship.weight || "0"} KGS`], ["船名航次", `${ship.vessel || ""}${ship.voyage ? "/" + ship.voyage : ""}`]],
     [["体积", `${ship.volume || "0"} CBM`], ["ETD", ship.etd ? formatDate(ship.etd) : ""]],
-    [["箱型箱量", ship.qty_container || ""], ["箱号", ship.container_no || ""]],
+    [["箱型箱量", ship.qty_container || ""], ["箱号", containerNos || ship.container_no || ""]],
+    [["封号", sealNos || ""], ["客户名", ship.customer || ""]],
   ];
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 8, fontSize: 10.5 }}>

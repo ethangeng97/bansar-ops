@@ -156,6 +156,7 @@ export default function ContainerEditor({ shipmentId, readOnly, onChange }) {
             <th style={{ ...th, textAlign: "right" }}>箱量</th>
             <th style={th}>箱号</th>
             <th style={th}>铅封号</th>
+            <th style={{ ...th, textAlign: "right" }}>件数</th>
             <th style={{ ...th, textAlign: "right" }}>货重(KG)</th>
             <th style={{ ...th, textAlign: "right" }}>体积(CBM)</th>
             <th style={th}>备注</th>
@@ -165,7 +166,7 @@ export default function ContainerEditor({ shipmentId, readOnly, onChange }) {
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={readOnly ? 8 : 9}
+              <td colSpan={readOnly ? 9 : 10}
                   style={{ padding: 30, textAlign: "center", color: "#999" }}>
                 暂无集装箱{!readOnly && "，点击右上角"}<b>{!readOnly && " + 加箱 "}</b>{!readOnly && "添加"}
               </td>
@@ -212,6 +213,13 @@ export default function ContainerEditor({ shipmentId, readOnly, onChange }) {
                            onChange={e => setRows(prev => prev.map(x => x.id === r.id ? { ...x, seal_no: liveUpper(e.target.value) } : x))}
                            onBlur={e => updateRow(r.id, { seal_no: liveUpper(e.target.value) || null })}
                            style={{ ...inpStyle, fontFamily: "Consolas,monospace", width: "100%" }} />}
+                </td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  {readOnly ? (r.cargo_qty || "—") :
+                    <input type="number" min="0" value={r.cargo_qty || ""}
+                           onChange={e => setRows(prev => prev.map(x => x.id === r.id ? { ...x, cargo_qty: e.target.value } : x))}
+                           onBlur={e => updateRow(r.id, { cargo_qty: e.target.value === "" ? null : parseInt(e.target.value) })}
+                           style={{ ...inpStyle, textAlign: "right", width: 70, fontFamily: "Consolas,monospace" }} />}
                 </td>
                 <td style={{ ...td, textAlign: "right" }}>
                   {readOnly ? (r.cargo_weight || "—") :

@@ -2378,7 +2378,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                   {/* 段 2：货物明细（cargo_items，品名级） */}
                   <CargoLinesEditor
                     shipmentId={order?.id}
-                    defaultHbl={order.hbl_no}
+                    defaultHbl={order.has_hbl ? order.hbl_no : order.booking_no}
+                    blLabel={order.has_hbl ? "HBL" : "MBL"}
                     editing={editing && !isCreating}
                     lines={cargoLinesDraft}
                     onChange={setCargoLinesDraft}
@@ -2567,7 +2568,7 @@ const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, w
 // 行级 editable + 按箱合计 + 按 HBL 合计
 // 保存逻辑由父组件的 save() 调 saveCargoLines(shipmentId, prev, next)
 // ═══════════════════════════════════════════════════════════════
-function CargoLinesEditor({ shipmentId, defaultHbl, editing, lines, onChange }) {
+function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, lines, onChange }) {
   const cellInput = { width: "100%", padding: "2px 4px", fontSize: 12, border: "1px solid #ccc", boxSizing: "border-box", background: editing ? "#fff" : "#f5f5f5" };
   const cellInputNum = { ...cellInput, textAlign: "right", fontFamily: "Consolas,monospace" };
 
@@ -2627,7 +2628,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, editing, lines, onChange }) 
           <thead>
             <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
               <th style={cellHead}>#</th>
-              <th style={cellHead}>HBL</th>
+              <th style={cellHead}>{blLabel}</th>
               <th style={cellHead}>箱号</th>
               <th style={cellHead}>封号</th>
               <th style={cellHead}>箱型</th>
@@ -2705,14 +2706,14 @@ function CargoLinesEditor({ shipmentId, defaultHbl, editing, lines, onChange }) 
         </>
       )}
 
-      {/* 按 HBL 合计 */}
+      {/* 按提单(HBL/MBL)合计 */}
       {Object.keys(byHbl).length > 0 && (
         <>
-          <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", margin: "16px 0 6px" }}>按提单(HBL)合计（自动）</div>
+          <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", margin: "16px 0 6px" }}>按提单({blLabel})合计（自动）</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
-                <th style={cellHead}>HBL</th><th style={cellHead}>品名（合并）</th>
+                <th style={cellHead}>{blLabel}</th><th style={cellHead}>品名（合并）</th>
                 <th style={cellHead}>件数合计</th><th style={cellHead}>包装</th><th style={cellHead}>毛重合计</th><th style={cellHead}>体积合计</th>
               </tr>
             </thead>

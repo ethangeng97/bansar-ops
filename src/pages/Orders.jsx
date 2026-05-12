@@ -2598,9 +2598,64 @@ const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, w
 // 常用箱型供 datalist 提示，仍允许手输自定义
 const CONTAINER_TYPE_OPTIONS = ["20GP", "40GP", "40HQ", "40HC", "45HQ", "20RF", "40RF", "20OT", "40OT", "20FR", "40FR", "20TK", "40TK"];
 
+// 通用列宽 hook：宽度存 localStorage，鼠标拖动改、双击 reset
+function useColResize(storageKey, defaults) {
+  const [widths, setWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      return { ...defaults, ...saved };
+    } catch { return defaults; }
+  });
+  const startResize = (key) => (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX;
+    const startW = widths[key] ?? defaults[key] ?? 100;
+    const onMove = (ev) => {
+      const newW = Math.max(40, startW + (ev.clientX - startX));
+      setWidths(p => ({ ...p, [key]: newW }));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setWidths(latest => {
+        try { localStorage.setItem(storageKey, JSON.stringify(latest)); } catch { /* ignore */ }
+        return latest;
+      });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+  const resetCol = (key) => () => {
+    setWidths(p => {
+      const next = { ...p, [key]: defaults[key] };
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  return { widths, startResize, resetCol };
+}
+
+// 可拖拽 th
+function ResizableTh({ widths, startResize, resetCol, k, children, extraStyle }) {
+  return (
+    <th style={{ ...cellHead, width: widths[k], position: "relative", ...(extraStyle || {}) }}>
+      {children}
+      <span className="col-resize" onMouseDown={startResize(k)} onDoubleClick={resetCol(k)} aria-hidden="true" />
+    </th>
+  );
+}
+
+const CARGO_DETAIL_DEFAULTS = { seq: 40, bl: 140, cont_no: 110, seal: 100, type: 80, name: 220, hs: 110, qty: 80, pkg: 90, wt: 110, vol: 100, marks: 100, un: 60, cl: 60, del: 48 };
+const CARGO_BYBOX_DEFAULTS = { cont_no: 130, seal: 110, type: 80, names: 320, qty: 100, wt: 120, vol: 110 };
+const CARGO_BYHBL_DEFAULTS = { hbl: 160, names: 360, qty: 100, pkg: 90, wt: 120, vol: 110 };
+
 function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, lines, onChange }) {
   const cellInput = { width: "100%", padding: "2px 4px", fontSize: 12, border: "1px solid #ccc", boxSizing: "border-box", background: editing ? "#fff" : "#f5f5f5" };
   const cellInputNum = { ...cellInput, textAlign: "right", fontFamily: "Consolas,monospace" };
+
+  const detail = useColResize("cargoLines.cols.detail.v1", CARGO_DETAIL_DEFAULTS);
+  const byBox  = useColResize("cargoLines.cols.byBox.v1",  CARGO_BYBOX_DEFAULTS);
+  const byHblC = useColResize("cargoLines.cols.byHbl.v1",  CARGO_BYHBL_DEFAULTS);
 
   const updateRow = (idx, field, value) => {
     const next = lines.map((r, i) => i === idx ? { ...r, [field]: value } : r);
@@ -2658,24 +2713,24 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
         货物明细（品名级）
       </div>
       <div style={{ overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
           <thead>
             <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
-              <th style={cellHead}>#</th>
-              <th style={cellHead}>{blLabel}</th>
-              <th style={cellHead}>箱号</th>
-              <th style={cellHead}>封号</th>
-              <th style={cellHead}>箱型</th>
-              <th style={{ ...cellHead, minWidth: 180 }}>英文品名</th>
-              <th style={cellHead}>HSCode</th>
-              <th style={cellHead}>件数</th>
-              <th style={cellHead}>包装</th>
-              <th style={cellHead}>毛重 (KGS)</th>
-              <th style={cellHead}>体积 (CBM)</th>
-              <th style={cellHead}>唛头</th>
-              <th style={cellHead}>UN</th>
-              <th style={cellHead}>CL</th>
-              {editing && <th style={cellHead}></th>}
+              <ResizableTh {...detail} k="seq">#</ResizableTh>
+              <ResizableTh {...detail} k="bl">{blLabel}</ResizableTh>
+              <ResizableTh {...detail} k="cont_no">箱号</ResizableTh>
+              <ResizableTh {...detail} k="seal">封号</ResizableTh>
+              <ResizableTh {...detail} k="type">箱型</ResizableTh>
+              <ResizableTh {...detail} k="name">英文品名</ResizableTh>
+              <ResizableTh {...detail} k="hs">HSCode</ResizableTh>
+              <ResizableTh {...detail} k="qty">件数</ResizableTh>
+              <ResizableTh {...detail} k="pkg">包装</ResizableTh>
+              <ResizableTh {...detail} k="wt">毛重 (KGS)</ResizableTh>
+              <ResizableTh {...detail} k="vol">体积 (CBM)</ResizableTh>
+              <ResizableTh {...detail} k="marks">唛头</ResizableTh>
+              <ResizableTh {...detail} k="un">UN</ResizableTh>
+              <ResizableTh {...detail} k="cl">CL</ResizableTh>
+              {editing && <ResizableTh {...detail} k="del"></ResizableTh>}
             </tr>
           </thead>
           <tbody>
@@ -2715,12 +2770,16 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
       {Object.keys(byContainer).length > 0 && (
         <>
           <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", margin: "16px 0 6px" }}>按箱合计（自动）</div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
             <thead>
               <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
-                <th style={cellHead}>箱号</th><th style={cellHead}>封号</th><th style={cellHead}>箱型</th>
-                <th style={cellHead}>品名（合并）</th>
-                <th style={cellHead}>件数合计</th><th style={cellHead}>毛重合计</th><th style={cellHead}>体积合计</th>
+                <ResizableTh {...byBox} k="cont_no">箱号</ResizableTh>
+                <ResizableTh {...byBox} k="seal">封号</ResizableTh>
+                <ResizableTh {...byBox} k="type">箱型</ResizableTh>
+                <ResizableTh {...byBox} k="names">品名（合并）</ResizableTh>
+                <ResizableTh {...byBox} k="qty">件数合计</ResizableTh>
+                <ResizableTh {...byBox} k="wt">毛重合计</ResizableTh>
+                <ResizableTh {...byBox} k="vol">体积合计</ResizableTh>
               </tr>
             </thead>
             <tbody>
@@ -2744,11 +2803,15 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
       {Object.keys(byHbl).length > 0 && (
         <>
           <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", margin: "16px 0 6px" }}>按提单({blLabel})合计（自动）</div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
             <thead>
               <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
-                <th style={cellHead}>{blLabel}</th><th style={cellHead}>品名（合并）</th>
-                <th style={cellHead}>件数合计</th><th style={cellHead}>包装</th><th style={cellHead}>毛重合计</th><th style={cellHead}>体积合计</th>
+                <ResizableTh {...byHblC} k="hbl">{blLabel}</ResizableTh>
+                <ResizableTh {...byHblC} k="names">品名（合并）</ResizableTh>
+                <ResizableTh {...byHblC} k="qty">件数合计</ResizableTh>
+                <ResizableTh {...byHblC} k="pkg">包装</ResizableTh>
+                <ResizableTh {...byHblC} k="wt">毛重合计</ResizableTh>
+                <ResizableTh {...byHblC} k="vol">体积合计</ResizableTh>
               </tr>
             </thead>
             <tbody>

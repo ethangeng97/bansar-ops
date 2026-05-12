@@ -940,6 +940,26 @@ async function deleteContainerItemForSub(subId) {
   await supabase.from("container_items").delete().eq("shipment_id", subId);
 }
 
+// 重算母单 qty_packages/weight/volume（= 所有分票之和），写回 DB
+// 让列表/单证/portal 报表都能直接读母单字段拿到合计，无需各自聚合
+async function recomputeMasterTotals(masterOrderNo) {
+  if (!masterOrderNo) return;
+  const { data: subs } = await supabase.from("shipments")
+    .select("qty_packages, weight, volume")
+    .like("order_no", masterOrderNo + "-%");
+  let pkg = 0, wt = 0, vol = 0;
+  (subs || []).forEach(s => {
+    pkg += parseInt(s.qty_packages) || 0;
+    wt += parseFloat(s.weight) || 0;
+    vol += parseFloat(s.volume) || 0;
+  });
+  await supabase.from("shipments").update({
+    qty_packages: pkg || null,
+    weight: wt ? Number(wt.toFixed(3)) : null,
+    volume: vol ? Number(vol.toFixed(3)) : null,
+  }).eq("order_no", masterOrderNo);
+}
+
 // 全量同步：母单 + 它当前的所有分票（用于 createMaster / 编辑母单后）
 async function syncContainerFull(master) {
   const containerId = await syncContainerFromMaster(master);
@@ -1250,6 +1270,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           findOrCreateContainerIdForSub(data)
             .then(cid => cid && syncContainerItemFromSub(cid, data))
             .catch(e => console.error("sync container_items error:", e));
+          // 件数/重量/体积有变 → 重算母单合计
+          if ("qty_packages" in changes || "weight" in changes || "volume" in changes) {
+            recomputeMasterTotals(masterOrderNo).catch(e => console.error("recompute totals error:", e));
+          }
         }
       }
     }
@@ -1398,6 +1422,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     // 母单 + 当前所有分票 全量同步到 portal containers/container_items
     if (data) {
       syncContainerFull(data).catch(e => console.error("sync containers error:", e));
+      // 重算合计写回母单（已有分票时立刻汇总）
+      recomputeMasterTotals(masterOrderNo).catch(e => console.error("recompute totals error:", e));
     }
     if (data?.id) {
       // 新标签打开补建好的母单详情
@@ -1454,6 +1480,9 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       syncContainerFromMaster(order)
         .then(cid => cid && syncContainerItemFromSub(cid, created))
         .catch(e => console.error("sync container_items error:", e));
+      // 新分票件毛体一般是 0/null，但保险起见重算母单合计（不是 no-op：
+      // 用户后续在分票里填件数后会再触发一次）
+      recomputeMasterTotals(order.order_no).catch(e => console.error("recompute totals error:", e));
     }
     // 重新加载分票列表
     const { data: refreshed } = await supabase.from("shipments")
@@ -1477,6 +1506,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     if (error) { alert("删除失败：" + error.message); return; }
     // 同步：删 portal 对应 container_item（FK on delete set null 也能兜底，但显式删更干净）
     deleteContainerItemForSub(subTicket.id).catch(e => console.error("delete container_item error:", e));
+    // 重算母单合计（少了一条分票）
+    recomputeMasterTotals(order.order_no).catch(e => console.error("recompute totals error:", e));
     setSubTickets(prev => prev.filter(s => s.id !== subTicket.id));
   };
 

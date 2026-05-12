@@ -862,6 +862,114 @@ export function OrdersPage({ user, onBack }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Portal containers / container_items 同步
+// ───────────────────────────────────────────────────────────────
+// 设计：ops 把"自拼母单 + 分票"作为单一事实源，写入后顺手同步到
+// portal 用的 containers / container_items 两张表。idempotent：
+// containers 用 (booking_no + container_no) 当唯一键；container_items
+// 用 shipment_id 当唯一键。
+//
+// 字段映射讨论留在 commit message 里，这里只放代码。
+// ═══════════════════════════════════════════════════════════════
+let _consoleTypeIdCache = undefined;
+async function getConsoleTypeId() {
+  if (_consoleTypeIdCache !== undefined) return _consoleTypeIdCache;
+  const { data } = await supabase.from("container_types").select("id").eq("name", "Console Box").limit(1);
+  _consoleTypeIdCache = data?.[0]?.id || null;
+  return _consoleTypeIdCache;
+}
+
+// 把母单同步成 portal containers 行（idempotent）。返回 container_id 或 null
+async function syncContainerFromMaster(master) {
+  if (!master?.booking_no || !master?.container_no) return null;
+  const typeId = await getConsoleTypeId();
+  const payload = {
+    container_no: master.container_no,
+    booking_no: master.booking_no,
+    e_booking_no: master.e_booking_no || null,
+    vessel: master.vessel || null,
+    carrier: master.carrier || null,
+    carrier_agent: master.overseas_agent || null,
+    pol: master.pol || null,
+    pod: master.pod || null,
+    etd: master.etd || null,
+    qty_container: master.qty_container || null,
+    type_id: typeId,
+    customer: master.overseas_agent || master.end_customer || null,
+  };
+  const { data: existing } = await supabase.from("containers")
+    .select("id")
+    .eq("booking_no", master.booking_no)
+    .eq("container_no", master.container_no)
+    .limit(1);
+  if (existing?.[0]) {
+    await supabase.from("containers").update(payload).eq("id", existing[0].id);
+    return existing[0].id;
+  }
+  const { data: created } = await supabase.from("containers").insert(payload).select().single();
+  return created?.id || null;
+}
+
+// 把单个分票同步成 container_items 行（idempotent，按 shipment_id 唯一）
+async function syncContainerItemFromSub(containerId, sub) {
+  if (!containerId || !sub?.id) return;
+  const tail = parseInt((sub.order_no || "").match(/-(\d+)$/)?.[1] || "0");
+  const payload = {
+    container_id: containerId,
+    shipment_id: sub.id,
+    supplier: sub.supplier || null,
+    po: sub.po || null,
+    customer_po: sub.customer_po || null,
+    qty: sub.qty_packages != null && sub.qty_packages !== "" ? parseInt(sub.qty_packages) : null,
+    weight: sub.weight != null && sub.weight !== "" ? parseFloat(sub.weight) : null,
+    volume: sub.volume != null && sub.volume !== "" ? parseFloat(sub.volume) : null,
+    hbl: sub.hbl_no || null,
+    sort_order: tail || 0,
+  };
+  const { data: existing } = await supabase.from("container_items")
+    .select("id").eq("shipment_id", sub.id).limit(1);
+  if (existing?.[0]) {
+    await supabase.from("container_items").update(payload).eq("id", existing[0].id);
+  } else {
+    await supabase.from("container_items").insert(payload);
+  }
+}
+
+async function deleteContainerItemForSub(subId) {
+  if (!subId) return;
+  await supabase.from("container_items").delete().eq("shipment_id", subId);
+}
+
+// 全量同步：母单 + 它当前的所有分票（用于 createMaster / 编辑母单后）
+async function syncContainerFull(master) {
+  const containerId = await syncContainerFromMaster(master);
+  if (!containerId) return null;
+  const { data: subs } = await supabase.from("shipments")
+    .select("id, order_no, supplier, po, customer_po, qty_packages, weight, volume, hbl_no")
+    .eq("booking_no", master.booking_no)
+    .like("order_no", master.order_no + "-%");
+  for (const s of (subs || [])) await syncContainerItemFromSub(containerId, s);
+  return containerId;
+}
+
+// 给一个分票找 container_id（用于编辑分票后的同步）：
+// 优先看已有 container_items；没有就按 master order_no 反查 master 然后 sync 整套
+async function findOrCreateContainerIdForSub(sub) {
+  if (!sub?.id) return null;
+  const { data: item } = await supabase.from("container_items")
+    .select("container_id").eq("shipment_id", sub.id).limit(1);
+  if (item?.[0]?.container_id) return item[0].container_id;
+  // 反查 master
+  if (!sub.order_no || !/-\d+$/.test(sub.order_no)) return null;
+  const masterNo = sub.order_no.replace(/-\d+$/, "");
+  const { data: masters } = await supabase.from("shipments")
+    .select("*").eq("order_no", masterNo).limit(1);
+  const master = masters?.[0];
+  if (!master) return null;
+  return await syncContainerFromMaster(master);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // OrderNoField - 作业号字段
 // 主拼号主体（如 BSOEC260100001）永远 readonly
 // 仅自拼分票场景下，"-N" 后缀可编辑
@@ -1081,6 +1189,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
       const { data, error } = await supabase.from("shipments").insert(cleanPayload).select().single();
       if (error) { alert("创建失败：" + error.message); return; }
+      // 自拼母单：同步到 portal containers（此时还没有分票，只建 containers 行）
+      if (isConsole && data) {
+        syncContainerFromMaster(data).catch(e => console.error("sync containers error:", e));
+      }
       if (data?.id && onCreated) {
         onCreated(data.id, data);
       }
@@ -1128,6 +1240,18 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       const { data, error } = await supabase.from("shipments").update(cleanChanges).eq("id", order.id).select().single();
       if (error) { alert(error.message); return; }
       if (data && onUpdated) onUpdated(data);
+      // 同步到 portal containers / container_items
+      if (data) {
+        if (isMaster) {
+          // 母单：booking 级字段可能变了 → 全量同步（containers + 所有 container_items）
+          syncContainerFull(data).catch(e => console.error("sync containers error:", e));
+        } else if (isSubTicket) {
+          // 分票：单条 container_items 同步
+          findOrCreateContainerIdForSub(data)
+            .then(cid => cid && syncContainerItemFromSub(cid, data))
+            .catch(e => console.error("sync container_items error:", e));
+        }
+      }
     }
     setEditing(false);
   };
@@ -1271,6 +1395,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     const { data, error } = await supabase.from("shipments").insert(cleaned).select().single();
     if (error) { alert("补建失败：" + error.message); return; }
     setMasterExists(true);
+    // 母单 + 当前所有分票 全量同步到 portal containers/container_items
+    if (data) {
+      syncContainerFull(data).catch(e => console.error("sync containers error:", e));
+    }
     if (data?.id) {
       // 新标签打开补建好的母单详情
       window.open(`#/sea_export?id=${data.id}`, "_blank");
@@ -1319,8 +1447,14 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       solicit_type: order.solicit_type,
       lifecycle: '处理中',
     };
-    const { error } = await supabase.from("shipments").insert(filterShipmentPayload(newRow));
+    const { data: created, error } = await supabase.from("shipments").insert(filterShipmentPayload(newRow)).select().single();
     if (error) { alert("新建失败：" + error.message); return; }
+    // 同步到 portal container_items（containers 行已存在，这里只插一条 item）
+    if (created) {
+      syncContainerFromMaster(order)
+        .then(cid => cid && syncContainerItemFromSub(cid, created))
+        .catch(e => console.error("sync container_items error:", e));
+    }
     // 重新加载分票列表
     const { data: refreshed } = await supabase.from("shipments")
       .select("*")
@@ -1341,6 +1475,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     if (!confirm(`确定删除分票 ${subTicket.order_no} ？此操作不可恢复。`)) return;
     const { error } = await supabase.from("shipments").delete().eq("id", subTicket.id);
     if (error) { alert("删除失败：" + error.message); return; }
+    // 同步：删 portal 对应 container_item（FK on delete set null 也能兜底，但显式删更干净）
+    deleteContainerItemForSub(subTicket.id).catch(e => console.error("delete container_item error:", e));
     setSubTickets(prev => prev.filter(s => s.id !== subTicket.id));
   };
 

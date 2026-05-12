@@ -355,7 +355,18 @@ export function OrdersPage({ user, onBack }) {
       .forEach(([mbl, items]) => {
         // 主拼判定：order_no 不含 "-数字" 后缀
         const isMaster = (o) => o.order_no && !/-\d+$/.test(o.order_no);
-        const master = items.find(isMaster) || items[0];
+        const master = items.find(isMaster);
+        // 真主单不在加载范围内（搜索/limit 截断 etc.）：分票各自独立成行，不缩进
+        if (!master) {
+          items
+            .sort((a, b) => {
+              const na = parseInt((a.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+              const nb = parseInt((b.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+              return na - nb;
+            })
+            .forEach(o => rows.push({ t: "s", d: o }));
+          return;
+        }
         const subs = items.filter(o => o !== master)
           .sort((a, b) => {
             // 分票按尾数排序（-1, -2, -3...）

@@ -2377,27 +2377,30 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
               {subtab === "集装箱" && (
                 <div style={{ overflow: "auto" }}>
-                  {/* 段 1：集装箱明细（shipment_containers，箱型/数量/箱号/封号） */}
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6 }}>集装箱</div>
-                    <ContainerEditor
-                      shipmentId={order?.id}
-                      readOnly={!editing && !isCreating}
-                      onChange={(rows) => {
-                        // 聚合 rows 为 "1x40HQ,2x20GP" 字符串，给托单信息 tab 单行汇总用
-                        const map = {};
-                        for (const r of rows) {
-                          const key = `${r.container_size}${r.container_type}`;
-                          map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
-                        }
-                        const text = Object.entries(map)
-                          .sort(([a], [b]) => a.localeCompare(b))
-                          .map(([k, q]) => `${q}x${k}`)
-                          .join(",");
-                        setContainerSummary(text);
-                      }}
-                    />
-                  </div>
+                  {/* 段 1：集装箱明细（shipment_containers，箱型/数量/箱号/封号）
+                      自拼分票（isSubTicket）不显示：分票的箱信息归母单管 */}
+                  {!isSubTicket && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6 }}>集装箱</div>
+                      <ContainerEditor
+                        shipmentId={order?.id}
+                        readOnly={!editing && !isCreating}
+                        onChange={(rows) => {
+                          // 聚合 rows 为 "1x40HQ,2x20GP" 字符串，给托单信息 tab 单行汇总用
+                          const map = {};
+                          for (const r of rows) {
+                            const key = `${r.container_size}${r.container_type}`;
+                            map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
+                          }
+                          const text = Object.entries(map)
+                            .sort(([a], [b]) => a.localeCompare(b))
+                            .map(([k, q]) => `${q}x${k}`)
+                            .join(",");
+                          setContainerSummary(text);
+                        }}
+                      />
+                    </div>
+                  )}
 
                   {/* 段 2：货物明细（cargo_items，品名级） */}
                   <CargoLinesEditor
@@ -2592,6 +2595,9 @@ const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, w
 // 行级 editable + 按箱合计 + 按 HBL 合计
 // 保存逻辑由父组件的 save() 调 saveCargoLines(shipmentId, prev, next)
 // ═══════════════════════════════════════════════════════════════
+// 常用箱型供 datalist 提示，仍允许手输自定义
+const CONTAINER_TYPE_OPTIONS = ["20GP", "40GP", "40HQ", "40HC", "45HQ", "20RF", "40RF", "20OT", "40OT", "20FR", "40FR", "20TK", "40TK"];
+
 function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, lines, onChange }) {
   const cellInput = { width: "100%", padding: "2px 4px", fontSize: 12, border: "1px solid #ccc", boxSizing: "border-box", background: editing ? "#fff" : "#f5f5f5" };
   const cellInputNum = { ...cellInput, textAlign: "right", fontFamily: "Consolas,monospace" };
@@ -2644,6 +2650,10 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
 
   return (
     <div>
+      {/* 箱型下拉提示（input list 引用，仍允许手输自定义） */}
+      <datalist id="cargo-container-types">
+        {CONTAINER_TYPE_OPTIONS.map(t => <option key={t} value={t} />)}
+      </datalist>
       <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6, marginTop: 12 }}>
         货物明细（品名级）
       </div>
@@ -2679,7 +2689,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                 <td style={cellBody}><input style={cellInput} value={r.hbl_no || ""} onChange={e => updateRow(i, "hbl_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.container_no || ""} onChange={e => updateRow(i, "container_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.seal_no || ""} onChange={e => updateRow(i, "seal_no", e.target.value)} disabled={!editing} /></td>
-                <td style={cellBody}><input style={cellInput} value={r.container_type || ""} onChange={e => updateRow(i, "container_type", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input list="cargo-container-types" style={cellInput} value={r.container_type || ""} onChange={e => updateRow(i, "container_type", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.product_name_en || ""} onChange={e => updateRow(i, "product_name_en", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.hs_code || ""} onChange={e => updateRow(i, "hs_code", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInputNum} value={r.qty ?? ""} onChange={e => updateRow(i, "qty", e.target.value)} disabled={!editing} /></td>

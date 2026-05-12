@@ -107,7 +107,7 @@ export function OrdersPage({ user, onBack }) {
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
-  const [maxRows, setMaxRows] = useState(300);
+  const [maxRows, setMaxRows] = useState(2000);
   const [activeTab, setActiveTab] = useState("过滤");
 
   // 从 URL hash 解析 SOP 过滤参数（如 #/sea_export?sop=qc）
@@ -220,7 +220,7 @@ export function OrdersPage({ user, onBack }) {
       let query = supabase.from("shipments")
         .select(COLUMNS)
         .order("created_at", { ascending: false })
-        .limit(500);
+        .limit(maxRows);
 
       // 权限过滤：admin / finance 看全部；operator 看自己操作；sales 看自己销售；agent 看自己代理
       const userId = user?.id;
@@ -244,7 +244,7 @@ export function OrdersPage({ user, onBack }) {
     } finally {
       setLoading(false);
     }
-  }, [role, user?.id, user?.profile?.full_name]);
+  }, [role, user?.id, user?.profile?.full_name, maxRows]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -622,7 +622,7 @@ export function OrdersPage({ user, onBack }) {
           <select style={{ width: 110 }}><option></option></select>
           <label>最大行数</label>
           <select value={maxRows} onChange={e => setMaxRows(+e.target.value)} style={{ width: 60 }}>
-            <option>100</option><option>200</option><option>300</option><option>500</option><option>1000</option>
+            <option>200</option><option>500</option><option>1000</option><option>2000</option><option>5000</option>
           </select>
         </div>
       </div>

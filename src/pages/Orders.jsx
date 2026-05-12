@@ -1011,6 +1011,7 @@ async function saveCargoLines(shipmentId, prev, next) {
   for (const row of next) {
     const payload = {
       shipment_id: shipmentId,
+      warehouse_in_no: row.warehouse_in_no || null,
       hbl_no: row.hbl_no || null,
       container_no: row.container_no || null,
       seal_no: row.seal_no || null,
@@ -2751,7 +2752,7 @@ function ResizableTh({ widths, startResize, resetCol, k, children, extraStyle })
   );
 }
 
-const CARGO_DETAIL_DEFAULTS = { seq: 40, bl: 140, cont_no: 110, seal: 100, type: 80, name: 220, hs: 110, qty: 80, pkg: 90, wt: 110, vol: 100, marks: 100, un: 60, cl: 60, del: 48 };
+const CARGO_DETAIL_DEFAULTS = { seq: 40, wh_in: 120, bl: 140, cont_no: 110, seal: 100, type: 80, name: 220, hs: 110, qty: 80, pkg: 90, wt: 110, vol: 100, marks: 100, un: 60, cl: 60, del: 48 };
 const CARGO_BYBOX_DEFAULTS = { cont_no: 130, seal: 110, type: 80, names: 320, qty: 100, wt: 120, vol: 110 };
 const CARGO_BYHBL_DEFAULTS = { hbl: 160, names: 360, qty: 100, pkg: 90, wt: 120, vol: 110 };
 
@@ -2770,6 +2771,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
   const addRow = () => {
     onChange([...lines, {
       _tmp: Date.now() + Math.random(),  // 临时 key（无 id）
+      warehouse_in_no: "",
       hbl_no: defaultHbl || "",
       container_no: "", seal_no: "", container_type: "",
       product_name_en: "", hs_code: "",
@@ -2823,6 +2825,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
           <thead>
             <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
               <ResizableTh {...detail} k="seq">#</ResizableTh>
+              <ResizableTh {...detail} k="wh_in">进仓号</ResizableTh>
               <ResizableTh {...detail} k="bl">{blLabel}</ResizableTh>
               <ResizableTh {...detail} k="cont_no">箱号</ResizableTh>
               <ResizableTh {...detail} k="seal">封号</ResizableTh>
@@ -2841,12 +2844,13 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
           </thead>
           <tbody>
             {lines.length === 0 ? (
-              <tr><td colSpan={editing ? 15 : 14} style={{ padding: 16, textAlign: "center", color: "#999" }}>
+              <tr><td colSpan={editing ? 16 : 15} style={{ padding: 16, textAlign: "center", color: "#999" }}>
                 {editing ? "暂无货物明细，点下面 + 添加" : "暂无货物明细"}
               </td></tr>
             ) : lines.map((r, i) => (
               <tr key={r.id || r._tmp || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
                 <td style={cellBody}>{(i + 1) * 10}</td>
+                <td style={cellBody}><input style={cellInput} value={r.warehouse_in_no || ""} onChange={e => updateRow(i, "warehouse_in_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.hbl_no || ""} onChange={e => updateRow(i, "hbl_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.container_no || ""} onChange={e => updateRow(i, "container_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.seal_no || ""} onChange={e => updateRow(i, "seal_no", e.target.value)} disabled={!editing} /></td>

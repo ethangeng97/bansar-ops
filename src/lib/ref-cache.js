@@ -30,6 +30,41 @@ const fetchers = {
     supabase.from("customers").select("name, name_short, name_en, code").order("name")
       .then(({ data }) => data || []),
 
+  // 委托人 → 历史 shipper 记忆：扫近 2000 票，按"出现次数 + 最近"排序，每个客户记一个最常用的 shipper
+  customer_shipper_map: () =>
+    supabase.from("shipments")
+      .select("customer, shipper, created_at")
+      .not("customer", "is", null)
+      .not("shipper", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(2000)
+      .then(({ data }) => {
+        const stats = new Map();   // customer → Map(shipper → {count, latest})
+        for (const r of (data || [])) {
+          const cust = r.customer; const ship = r.shipper;
+          if (!cust || !ship) continue;
+          if (!stats.has(cust)) stats.set(cust, new Map());
+          const m = stats.get(cust);
+          if (!m.has(ship)) m.set(ship, { count: 0, latest: r.created_at });
+          const e = m.get(ship);
+          e.count++;
+          if (r.created_at > e.latest) e.latest = r.created_at;
+        }
+        const result = {};
+        for (const [cust, ships] of stats.entries()) {
+          let best = null;
+          for (const [ship, info] of ships.entries()) {
+            if (!best
+                || info.count > best.count
+                || (info.count === best.count && info.latest > best.latest)) {
+              best = { shipper: ship, ...info };
+            }
+          }
+          if (best) result[cust] = best.shipper;
+        }
+        return result;
+      }),
+
   staff: () =>
     supabase.from("user_profiles_view")
       .select("id, email, role, full_name, display_name, active")

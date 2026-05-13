@@ -1405,11 +1405,13 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   useEffect(() => {
     // 业务字典走全局缓存（首次加载后页内复用，详情页重开不再重复请求）
     // customers_full 含 name_short / name_en / code，给 ComboBox 做别名搜索 + 排序用
+    // customer_shipper_map: 每个委托人最常用的 shipper（自动带出）
     Promise.all([
       getCachedRef("suppliers"),
       getCachedRef("customers_full"),
       getCachedRef("staff"),
-    ]).then(([suppliers, customersFull, staff]) => {
+      getCachedRef("customer_shipper_map"),
+    ]).then(([suppliers, customersFull, staff, customerShipperMap]) => {
       // 防御：任何字段为 undefined 时回退到 []
       setRefData({
         suppliers: suppliers || [],
@@ -1419,6 +1421,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         })),
         ports: [],
         staff: staff || [],
+        customerShipperMap: customerShipperMap || {},
       });
     }).catch(err => console.error("loadRefs error:", err));
 
@@ -2374,7 +2377,14 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                   {(isMaster || isCreatingMaster) ? (
                     <input value={isCreatingMaster ? "（自拼主拼，无委托单位）" : (order.customer || "（多客户拼柜，详见小票）")} disabled className="placeholder-italic" />
                   ) : editing
-                    ? <ComboBox value={v("customer")} onChange={val => ch("customer", val)} options={refData.customers} />
+                    ? <ComboBox value={v("customer")} onChange={val => {
+                        ch("customer", val);
+                        // 委托人变更 → 若 shipper 当前为空，自动带出该客户常用 shipper
+                        if (val && !v("shipper")) {
+                          const remembered = refData.customerShipperMap?.[val];
+                          if (remembered) ch("shipper", remembered);
+                        }
+                      }} options={refData.customers} />
                     : <input value={v("customer")} disabled className="notnull" />}
                 </Df>
                 <Df label="订舱代理"><input value={v("booking_agent")} onChange={e => ch("booking_agent", e.target.value)} disabled={!editing} /></Df>

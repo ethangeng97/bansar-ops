@@ -30,37 +30,51 @@ const fetchers = {
     supabase.from("customers").select("name, name_short, name_en, code").order("name")
       .then(({ data }) => data || []),
 
-  // 委托人 → 历史 shipper 记忆：扫近 2000 票，按"出现次数 + 最近"排序，每个客户记一个最常用的 shipper
-  customer_shipper_map: () =>
+  // 委托人 → 历史 shipper / consignee / notify_party 记忆
+  // 扫近 2000 票，每个客户的每个字段记一个最常用值（次数 > 平局取最近）
+  customer_party_map: () =>
     supabase.from("shipments")
-      .select("customer, shipper, created_at")
+      .select("customer, shipper, consignee, notify_party, created_at")
       .not("customer", "is", null)
-      .not("shipper", "is", null)
       .order("created_at", { ascending: false })
       .limit(2000)
       .then(({ data }) => {
-        const stats = new Map();   // customer → Map(shipper → {count, latest})
+        const fields = ["shipper", "consignee", "notify_party"];
+        // customer → field → value → { count, latest }
+        const stats = new Map();
         for (const r of (data || [])) {
-          const cust = r.customer; const ship = r.shipper;
-          if (!cust || !ship) continue;
-          if (!stats.has(cust)) stats.set(cust, new Map());
-          const m = stats.get(cust);
-          if (!m.has(ship)) m.set(ship, { count: 0, latest: r.created_at });
-          const e = m.get(ship);
-          e.count++;
-          if (r.created_at > e.latest) e.latest = r.created_at;
-        }
-        const result = {};
-        for (const [cust, ships] of stats.entries()) {
-          let best = null;
-          for (const [ship, info] of ships.entries()) {
-            if (!best
-                || info.count > best.count
-                || (info.count === best.count && info.latest > best.latest)) {
-              best = { shipper: ship, ...info };
-            }
+          const cust = r.customer;
+          if (!cust) continue;
+          if (!stats.has(cust)) stats.set(cust, {});
+          for (const f of fields) {
+            const val = r[f];
+            if (!val) continue;
+            if (!stats.get(cust)[f]) stats.get(cust)[f] = new Map();
+            const m = stats.get(cust)[f];
+            if (!m.has(val)) m.set(val, { count: 0, latest: r.created_at });
+            const e = m.get(val);
+            e.count++;
+            if (r.created_at > e.latest) e.latest = r.created_at;
           }
-          if (best) result[cust] = best.shipper;
+        }
+        // 投票出每个 (customer, field) 的最常用值
+        const result = {};
+        for (const [cust, byField] of stats.entries()) {
+          const remembered = {};
+          for (const f of fields) {
+            const m = byField[f];
+            if (!m) continue;
+            let best = null;
+            for (const [val, info] of m.entries()) {
+              if (!best
+                  || info.count > best.count
+                  || (info.count === best.count && info.latest > best.latest)) {
+                best = { value: val, ...info };
+              }
+            }
+            if (best) remembered[f] = best.value;
+          }
+          if (Object.keys(remembered).length > 0) result[cust] = remembered;
         }
         return result;
       }),

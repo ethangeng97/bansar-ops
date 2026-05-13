@@ -1405,13 +1405,13 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   useEffect(() => {
     // 业务字典走全局缓存（首次加载后页内复用，详情页重开不再重复请求）
     // customers_full 含 name_short / name_en / code，给 ComboBox 做别名搜索 + 排序用
-    // customer_shipper_map: 每个委托人最常用的 shipper（自动带出）
+    // customer_party_map: 每个委托人最常用的 shipper/consignee/notify_party（自动带出）
     Promise.all([
       getCachedRef("suppliers"),
       getCachedRef("customers_full"),
       getCachedRef("staff"),
-      getCachedRef("customer_shipper_map"),
-    ]).then(([suppliers, customersFull, staff, customerShipperMap]) => {
+      getCachedRef("customer_party_map"),
+    ]).then(([suppliers, customersFull, staff, customerPartyMap]) => {
       // 防御：任何字段为 undefined 时回退到 []
       setRefData({
         suppliers: suppliers || [],
@@ -1421,7 +1421,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         })),
         ports: [],
         staff: staff || [],
-        customerShipperMap: customerShipperMap || {},
+        customerPartyMap: customerPartyMap || {},
       });
     }).catch(err => console.error("loadRefs error:", err));
 
@@ -1822,20 +1822,20 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       const { data, error } = await supabase.from("shipments").update(cleanChanges).eq("id", order.id).select().single();
       if (error) { alert(error.message); return; }
       if (data && onUpdated) onUpdated(data);
-      // 主单：船名/航次/起运港/卸货港/目的港 变了 → 同步到所有分票
-      if (isMaster) {
-        const inheritedChanges = {};
-        for (const k of Object.keys(changes)) {
-          if (SUB_INHERIT_FROM_MASTER.has(k)) inheritedChanges[k] = changes[k];
+      // 主单：船名/航次/起运港/卸货港/目的港 5+ 字段无条件同步到所有分票
+      // 之所以无条件而不只看 changes：早期建的分票当时主单这些字段可能是 NULL，
+      // 后来才填上但 propagate 没触发，导致分票一直缺。每次 save 都 push 一次，开销可忽略。
+      if (isMaster && order.order_no) {
+        const inheritedSnap = {};
+        for (const k of SUB_INHERIT_FROM_MASTER) {
+          inheritedSnap[k] = (data && data[k] !== undefined ? data[k] : order[k]) ?? null;
         }
-        if (Object.keys(inheritedChanges).length > 0 && order.order_no) {
-          try {
-            await supabase.from("shipments")
-              .update(inheritedChanges)
-              .like("order_no", order.order_no + "-%");
-          } catch (e) {
-            console.error("propagate inherited fields to sub-tickets error:", e);
-          }
+        try {
+          await supabase.from("shipments")
+            .update(inheritedSnap)
+            .like("order_no", order.order_no + "-%");
+        } catch (e) {
+          console.error("propagate inherited fields to sub-tickets error:", e);
         }
       }
       // 同步到 portal containers / container_items
@@ -2077,7 +2077,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     }
 
     const newOrderNo = order.order_no + "-" + tail;
-    // 复制主拼的关键字段创建分票
+    // 复制主拼的关键字段创建分票（船名/航次/POL/POD/目的港 + 各自 _code 都要带，否则分票就 NULL）
     const newRow = {
       order_no: newOrderNo,
       shipment_type: "Console",
@@ -2085,8 +2085,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       vessel: order.vessel,
       voyage: order.voyage,
       pol: order.pol,
+      pol_code: order.pol_code,
       pod: order.pod,
+      pod_code: order.pod_code,
       destination: order.destination,
+      destination_code: order.destination_code,
       etd: order.etd,
       carrier: order.carrier,
       overseas_agent: order.overseas_agent,
@@ -2379,10 +2382,13 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                   ) : editing
                     ? <ComboBox value={v("customer")} onChange={val => {
                         ch("customer", val);
-                        // 委托人变更 → 若 shipper 当前为空，自动带出该客户常用 shipper
-                        if (val && !v("shipper")) {
-                          const remembered = refData.customerShipperMap?.[val];
-                          if (remembered) ch("shipper", remembered);
+                        // 委托人变更 → 自动带出该客户常用的 shipper / consignee / notify_party
+                        // 仅在对应字段当前为空时填入，已填的不覆盖
+                        if (val) {
+                          const remembered = refData.customerPartyMap?.[val] || {};
+                          for (const f of ["shipper", "consignee", "notify_party"]) {
+                            if (remembered[f] && !v(f)) ch(f, remembered[f]);
+                          }
                         }
                       }} options={refData.customers} />
                     : <input value={v("customer")} disabled className="notnull" />}

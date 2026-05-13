@@ -1108,6 +1108,19 @@ async function findOrCreateContainerIdForSub(sub) {
   return await syncContainerFromMaster(master);
 }
 
+// 解析 qty_container 字串（如 "1x40HQ" / "2x40HQ,1x20GP"）→ 箱型数组（按数量展开）
+function parseQtyContainerStr(str) {
+  if (!str) return [];
+  return String(str).split(/[,;]/).map(s => s.trim()).filter(Boolean).flatMap(part => {
+    const m = part.match(/^(\d+)\s*x\s*([A-Z0-9]+)$/i);
+    if (!m) return [];
+    return Array.from({ length: parseInt(m[1]) }, () => m[2].toUpperCase());
+  });
+}
+function parseFirstContainerType(str) {
+  return parseQtyContainerStr(str)[0] || "";
+}
+
 // 自拼分票：这些字段统一在主单维护，分票自动继承（编辑器只读 + 主单保存时同步到所有分票）
 const SUB_INHERIT_FROM_MASTER = new Set([
   "vessel", "voyage",
@@ -1448,29 +1461,47 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   };
 
   // 导出当前作业为 Sino56 舱单 .xls
+  // 数据聚合策略：
+  //   - 自拼母单 → 把所有分票的 cargo_items 全拢起来；container 信息走 portal containers 兜底
+  //   - 普通整柜/拼箱 → 用本票的 shipment_containers + cargo_items；空则用主表字段拼一行
+  //   - shipper/consignee/notify_party → 先看主单，再轮分票取第一个非空
   const exportSino56Manifest = async () => {
     if (!order?.id) { alert("请先保存作业再导出"); return; }
     try {
-      const [{ data: containers }, { data: lines }] = await Promise.all([
-        supabase.from("shipment_containers").select("*").eq("shipment_id", order.id).order("sort_order"),
-        supabase.from("cargo_items").select("*").eq("shipment_id", order.id).order("sort_order"),
+      // 收集所有相关 shipment id（母单 + 所有分票）
+      const shipmentIds = [order.id];
+      let subShipments = [];
+      if (isMaster && order.order_no) {
+        const { data: subs } = await supabase.from("shipments")
+          .select("*")
+          .like("order_no", order.order_no + "-%");
+        subShipments = subs || [];
+        shipmentIds.push(...subShipments.map(s => s.id));
+      }
+
+      // 自拼场景下，集装箱常常只在 portal 端
+      const portalContainersP = (isMaster && order.booking_no)
+        ? supabase.from("containers").select("*").eq("booking_no", order.booking_no)
+        : Promise.resolve({ data: [] });
+
+      const [scRes, ciRes, pcRes] = await Promise.all([
+        supabase.from("shipment_containers").select("*").in("shipment_id", shipmentIds).order("sort_order"),
+        supabase.from("cargo_items").select("*").in("shipment_id", shipmentIds).order("sort_order"),
+        portalContainersP,
       ]);
-      const data = {
-        vessel: order.vessel || "",
-        voyage: order.voyage || "",
-        pod: order.pod || "",
-        mbl_no: order.mbl_no || order.booking_no || "",
-        booking_no: order.booking_no || "",
-        containers: (containers || []).map(c => ({
-          container_no: c.container_no || "",
-          seal_no: c.seal_no || "",
-          container_type: [c.container_size, c.container_type].filter(Boolean).join(""),
-          qty: c.cargo_qty,
-          weight: c.cargo_weight,
-          volume: c.cargo_volume,
-        })),
-        cargoLines: (lines || []).map(l => ({
-          hbl_no: l.hbl_no || order.hbl_no || order.mbl_no || "",
+
+      const sc = scRes.data || [];
+      const ci = ciRes.data || [];
+      const pc = pcRes.data || [];
+
+      // 子票 hbl 映射，用来兜底 cargo_items.hbl_no
+      const subById = new Map(subShipments.map(s => [s.id, s]));
+
+      // 1) cargoLines：优先 cargo_items
+      let cargoLines = ci.map(l => {
+        const sub = subById.get(l.shipment_id);
+        return {
+          hbl_no: l.hbl_no || sub?.hbl_no || order.hbl_no || order.mbl_no || order.booking_no || "",
           container_no: l.container_no || "",
           seal_no: l.seal_no || "",
           container_type: l.container_type || "",
@@ -1483,11 +1514,102 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           marks: l.marks || "",
           un: l.un || "",
           cl: l.cl || "",
-        })),
-        // shipper/consignee/notifier 文本回拆成 name/address 这里偷懒：放 name 字段
-        shipper: order.shipper ? { name: order.shipper } : null,
-        consignee: order.consignee ? { name: order.consignee } : null,
-        notifier: order.notify_party ? { name: order.notify_party } : null,
+        };
+      });
+
+      // 兜底：完全没 cargo_items 时，用主表/子票主表字段各拼一行
+      if (cargoLines.length === 0) {
+        const sourceTickets = subShipments.length > 0 ? subShipments : [order];
+        for (const t of sourceTickets) {
+          if (t.qty_packages || t.weight || t.volume || t.description) {
+            cargoLines.push({
+              hbl_no: t.hbl_no || order.mbl_no || order.booking_no || "",
+              container_no: t.container_no || order.container_no || "",
+              seal_no: t.seal_no || order.seal_no || "",
+              container_type: parseFirstContainerType(t.qty_container || order.qty_container),
+              product_name_en: t.description || t.desc_en || "",
+              hs_code: t.hs_code || "",
+              qty: t.qty_packages,
+              package_unit: t.pkg_unit || "CARTONS",
+              gross_weight: t.weight,
+              volume: t.volume,
+              marks: t.marks || "N/M",
+            });
+          }
+        }
+      }
+
+      // 2) containers：先 shipment_containers，再按 cargo_items 里的 container_no 聚合，再 portal containers，最后 qty_container 解析
+      let containers = sc.map(c => ({
+        container_no: c.container_no || "",
+        seal_no: c.seal_no || "",
+        container_type: [c.container_size, c.container_type].filter(Boolean).join(""),
+        qty: c.cargo_qty,
+        weight: c.cargo_weight,
+        volume: c.cargo_volume,
+      }));
+
+      if (containers.length === 0 && cargoLines.length > 0) {
+        // 按 container_no 聚合 cargo_items 自动出箱列表
+        const byBox = new Map();
+        for (const l of cargoLines) {
+          if (!l.container_no) continue;
+          const k = l.container_no;
+          if (!byBox.has(k)) byBox.set(k, {
+            container_no: l.container_no, seal_no: l.seal_no, container_type: l.container_type,
+            qty: 0, weight: 0, volume: 0,
+          });
+          const g = byBox.get(k);
+          g.qty    += Number(l.qty || 0);
+          g.weight += Number(l.gross_weight || 0);
+          g.volume += Number(l.volume || 0);
+        }
+        containers = Array.from(byBox.values());
+      }
+
+      if (containers.length === 0 && pc.length > 0) {
+        // portal containers 兜底（拆 qty_container）
+        for (const p of pc) {
+          const parsed = parseQtyContainerStr(p.qty_container);
+          if (parsed.length === 0) {
+            containers.push({ container_no: p.container_no || "", seal_no: p.seal_no || "", container_type: "" });
+          } else {
+            for (const t of parsed) {
+              containers.push({ container_no: p.container_no || "", seal_no: p.seal_no || "", container_type: t });
+            }
+          }
+        }
+      }
+
+      if (containers.length === 0 && order.qty_container) {
+        // 最后一招：主单 qty_container（如 "1x40HQ"）
+        const parsed = parseQtyContainerStr(order.qty_container);
+        for (const t of parsed) {
+          containers.push({ container_no: order.container_no || "", seal_no: order.seal_no || "", container_type: t });
+        }
+      }
+
+      // 3) shipper / consignee / notify_party：先看母单，再轮分票
+      const pickFirst = (field) => {
+        if (order[field]) return order[field];
+        for (const s of subShipments) if (s[field]) return s[field];
+        return null;
+      };
+      const shipper = pickFirst("shipper");
+      const consignee = pickFirst("consignee");
+      const notifyParty = pickFirst("notify_party");
+
+      const data = {
+        vessel: order.vessel || "",
+        voyage: order.voyage || "",
+        pod: order.pod || order.destination || "",
+        mbl_no: order.mbl_no || order.booking_no || "",
+        booking_no: order.booking_no || "",
+        containers,
+        cargoLines,
+        shipper: shipper ? { name: shipper } : null,
+        consignee: consignee ? { name: consignee } : null,
+        notifier: notifyParty ? { name: notifyParty } : null,
       };
       const buf = await buildSino56Manifest(data);
       const fname = `Sino56-${order.mbl_no || order.booking_no || order.order_no || "manifest"}.xls`;

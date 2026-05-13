@@ -874,13 +874,14 @@ export function OrdersPage({ user, onBack }) {
 //
 // 字段映射讨论留在 commit message 里，这里只放代码。
 // ═══════════════════════════════════════════════════════════════
-let _consoleTypeIdCache = undefined;
-async function getConsoleTypeId() {
-  if (_consoleTypeIdCache !== undefined) return _consoleTypeIdCache;
-  const { data } = await supabase.from("container_types").select("id").eq("name", "Console Box").limit(1);
-  _consoleTypeIdCache = data?.[0]?.id || null;
-  return _consoleTypeIdCache;
+const _typeIdCache = {};
+async function getContainerTypeId(name) {
+  if (name in _typeIdCache) return _typeIdCache[name];
+  const { data } = await supabase.from("container_types").select("id").eq("name", name).limit(1);
+  _typeIdCache[name] = data?.[0]?.id || null;
+  return _typeIdCache[name];
 }
+const getConsoleTypeId = () => getContainerTypeId("Console Box");
 
 // 把母单同步成 portal containers 行（idempotent）。返回 container_id 或 null
 // 容忍 master.container_no 为 NULL（母单一开始往往还不知道箱号）：
@@ -1117,6 +1118,85 @@ async function syncContainerFull(master) {
     .eq("booking_no", master.booking_no)
     .like("order_no", master.order_no + "-%");
   for (const s of (subs || [])) await syncContainerItemFromSub(containerId, s);
+  return containerId;
+}
+
+// FCL/LCL 单票同步：每票自己就是一个 container（不分母子单）
+// 流程：建/更新 portal containers 行（按 booking_no+container_no） + 按 cargo_items 重建 container_items
+async function syncContainerFromShipment(shipment) {
+  if (!shipment?.booking_no || !shipment?.id) return null;
+  const isFCL = shipment.shipment_type === "FCL";
+  const isLCL = shipment.shipment_type === "LCL";
+  if (!isFCL && !isLCL) return null;
+
+  const typeId = await getContainerTypeId(isFCL ? "FCL" : "LCL");
+  const payload = {
+    container_no: shipment.container_no || null,
+    seal_no: shipment.seal_no || null,
+    booking_no: shipment.booking_no,
+    e_booking_no: shipment.e_booking_no || null,
+    vessel: shipment.vessel || null,
+    carrier: shipment.carrier || null,
+    carrier_agent: shipment.overseas_agent || null,
+    pol: shipment.pol || null,
+    pod: shipment.pod || null,
+    etd: shipment.etd || null,
+    qty_container: shipment.qty_container || null,
+    type_id: typeId,
+    customer: shipment.customer || null,
+  };
+
+  // 找已有 container 行（按 booking_no + container_no；兼容历史 container_no=NULL 行）
+  let q = supabase.from("containers").select("id, container_no").eq("booking_no", shipment.booking_no);
+  if (shipment.container_no) q = q.or(`container_no.eq.${shipment.container_no},container_no.is.null`);
+  const { data: existing } = await q;
+  let containerId;
+  if (existing?.[0]) {
+    await supabase.from("containers").update(payload).eq("id", existing[0].id);
+    containerId = existing[0].id;
+  } else {
+    const { data: created } = await supabase.from("containers").insert(payload).select().single();
+    containerId = created?.id || null;
+  }
+  if (!containerId) return null;
+
+  // 同步 container_items：先清掉本票自己的，再按 cargo_items 重插
+  await supabase.from("container_items").delete().eq("shipment_id", shipment.id);
+  const { data: lines } = await supabase.from("cargo_items")
+    .select("*").eq("shipment_id", shipment.id).order("sort_order", { ascending: true });
+
+  if (lines && lines.length > 0) {
+    const rows = lines.map((l, i) => ({
+      container_id: containerId,
+      shipment_id: shipment.id,
+      supplier: shipment.supplier || null,
+      po: shipment.po || null,
+      customer_po: shipment.customer_po || null,
+      tuc: l.product_name_en || null,
+      sku: l.hs_code || null,
+      qty: l.qty != null ? parseInt(l.qty) : null,
+      weight: l.gross_weight != null ? Number(l.gross_weight) : null,
+      volume: l.volume != null ? Number(l.volume) : null,
+      hbl: l.hbl_no || shipment.hbl_no || null,
+      notes: l.marks || null,
+      sort_order: l.sort_order || i,
+    }));
+    await supabase.from("container_items").insert(rows);
+  } else if (shipment.qty_packages || shipment.weight || shipment.volume) {
+    // 兜底：没 cargo_items 时用主表合计写一条
+    await supabase.from("container_items").insert({
+      container_id: containerId,
+      shipment_id: shipment.id,
+      supplier: shipment.supplier || null,
+      po: shipment.po || null,
+      customer_po: shipment.customer_po || null,
+      qty: shipment.qty_packages != null && shipment.qty_packages !== "" ? parseInt(shipment.qty_packages) : null,
+      weight: shipment.weight != null && shipment.weight !== "" ? parseFloat(shipment.weight) : null,
+      volume: shipment.volume != null && shipment.volume !== "" ? parseFloat(shipment.volume) : null,
+      hbl: shipment.hbl_no || null,
+      sort_order: 0,
+    });
+  }
   return containerId;
 }
 
@@ -1682,9 +1762,15 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
       const { data, error } = await supabase.from("shipments").insert(cleanPayload).select().single();
       if (error) { alert("创建失败：" + error.message); return; }
-      // 自拼母单：同步到 portal containers（此时还没有分票，只建 containers 行）
-      if (isConsole && data) {
-        syncContainerFromMaster(data).catch(e => console.error("sync containers error:", e));
+      // 同步到 portal containers
+      if (data) {
+        if (isConsole) {
+          // 自拼母单：此时还没有分票，只建 containers 行
+          syncContainerFromMaster(data).catch(e => console.error("sync containers error:", e));
+        } else if (data.shipment_type === "FCL" || data.shipment_type === "LCL") {
+          // FCL/LCL 单票：自己就是一个 portal container（新建时 cargo_items 通常还没填）
+          syncContainerFromShipment(data).catch(e => console.error("sync FCL/LCL containers error:", e));
+        }
       }
       if (data?.id && onCreated) {
         onCreated(data.id, data);
@@ -1763,6 +1849,9 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           if ("qty_packages" in changes || "weight" in changes || "volume" in changes) {
             recomputeMasterTotals(masterOrderNo).catch(e => console.error("recompute totals error:", e));
           }
+        } else if (data.shipment_type === "FCL" || data.shipment_type === "LCL") {
+          // FCL / LCL 单票：本票自己就是一个 portal container
+          syncContainerFromShipment(data).catch(e => console.error("sync FCL/LCL containers error:", e));
         }
       }
     }
@@ -1789,6 +1878,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             .catch(e => console.error("sync container_items error:", e));
         } else if (isMaster) {
           syncContainerFull(order).catch(e => console.error("sync containers error:", e));
+        } else if (order.shipment_type === "FCL" || order.shipment_type === "LCL") {
+          syncContainerFromShipment(order).catch(e => console.error("sync FCL/LCL containers error:", e));
         }
       } catch (e) {
         console.error("save cargo_items error:", e);

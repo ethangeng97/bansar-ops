@@ -52,6 +52,7 @@ const NODES_SEA = {
     { name: "费用录入",     icon: "dollar",   href: "#/charges" },
     { name: "账单管理",     icon: "fileline", href: "#/bills" },
     { name: "对账单管理",   icon: "filelist", href: "#/statements" },
+    { name: "导入对账单",   icon: "filelist", href: "#/import-statement" },
     { name: "开票/收票",    icon: "ticket",   href: "#/invoices" },
     // 与财务模块菜单和页面标题保持一致（页面标题是"收付款记录"）
     { name: "收付款记录",   icon: "rotate",   href: "#/payments" },
@@ -75,6 +76,7 @@ const NODES_FINANCE = {
     { name: "费用记录",     icon: "dollar",   href: "#/charges" },
     { name: "账单管理",     icon: "fileline", href: "#/bills" },
     { name: "对账单管理",   icon: "filelist", href: "#/statements" },
+    { name: "导入对账单",   icon: "filelist", href: "#/import-statement" },
   ],
   2: [
     { name: "开票记录",     icon: "ticket",   href: "#/invoices" },

@@ -2355,7 +2355,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           <label style={{ ...tmStyles.label, ...tmStyles.labelVertical }}>英文品名</label>
                           <textarea
                             value={v("desc_en")}
-                            onChange={e => ch("desc_en", e.target.value)}
+                            onChange={e => ch("desc_en", e.target.value.toUpperCase())}
                             onBlur={e => {
                               const err = validateAsciiOnly(e.target.value);
                               if (err) alert("英文品名：" + err);
@@ -2934,7 +2934,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                 <td style={cellBody}><input style={cellInput} value={r.container_no || ""} onChange={e => updateRow(i, "container_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.seal_no || ""} onChange={e => updateRow(i, "seal_no", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input list="cargo-container-types" style={cellInput} value={r.container_type || ""} onChange={e => updateRow(i, "container_type", e.target.value)} disabled={!editing} /></td>
-                <td style={cellBody}><input style={cellInput} value={r.product_name_en || ""} onChange={e => updateRow(i, "product_name_en", e.target.value)} disabled={!editing} /></td>
+                <td style={cellBody}><input style={cellInput} value={r.product_name_en || ""} onChange={e => updateRow(i, "product_name_en", e.target.value.toUpperCase())} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.hs_code || ""} onChange={e => updateRow(i, "hs_code", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInputNum} value={r.qty ?? ""} onChange={e => updateRow(i, "qty", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.package_unit || "CARTONS"} onChange={e => updateRow(i, "package_unit", e.target.value)} disabled={!editing} /></td>

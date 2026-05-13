@@ -20,6 +20,7 @@ import Statement from "./pages/docs/Statement.jsx";
 import StatementsList from "./pages/StatementsList.jsx";
 import StatementNew from "./pages/StatementNew.jsx";
 import StatementDetail from "./pages/StatementDetail.jsx";
+import StatementImport from "./pages/StatementImport.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
 import PaymentsList from "./pages/PaymentsList.jsx";
 import ChargesList from "./pages/ChargesList.jsx";
@@ -181,6 +182,11 @@ export default function App() {
   // 静态路由：账单管理列表 #/bills
   if (route === "bills") {
     return <BillsList onBack={() => { window.location.hash = ""; }} />;
+  }
+
+  // 导入对账单 #/import-statement
+  if (route === "import-statement") {
+    return <StatementImport user={user} onBack={() => { window.location.hash = ""; }} />;
   }
 
   // ── V5 财务模块路由 ──

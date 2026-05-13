@@ -41,11 +41,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       setShipment(s);
       setCompany(c || {});
       setContainers(ctn || []);
-      if (s?.po) {
-        const { data: ci } = await supabase
-          .from("container_items").select("*").eq("po", s.po);
-        setCargo(ci || []);
-      }
+      const { data: ci } = await supabase
+        .from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order");
+      setCargo(ci || []);
       setLoading(false);
     })();
   }, [shipmentId]);
@@ -135,9 +133,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     ? cargoItems.map((it, i) => ({
         cnInfo: buildContainerBlock(),
         marks: it.marks || s.marks || "N/M",
-        pkgs: it.qty_packages || 0,
-        unit: it.pkg_unit || "CARTONS",
-        desc: [it.description || it.cargo_name || s.cargo_type || "GENERAL CARGO",
+        pkgs: it.qty || 0,
+        unit: it.package_unit || "CARTONS",
+        desc: [it.product_name_en || s.desc_en || s.cargo_type || "GENERAL CARGO",
                it.hs_code ? `HS: ${it.hs_code}` : null,
                s.po ? `PO-${s.po}` : null,
               ].filter(Boolean).join("\n"),

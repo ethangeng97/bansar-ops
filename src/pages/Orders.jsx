@@ -883,11 +883,36 @@ async function getConsoleTypeId() {
 }
 
 // 把母单同步成 portal containers 行（idempotent）。返回 container_id 或 null
+// 容忍 master.container_no 为 NULL（母单一开始往往还不知道箱号）：
+//   - 先从分票的 cargo_items.container_no 反查真实箱号
+//   - 找/建 portal containers 行用 booking_no（+ container_no 当二维 key）
 async function syncContainerFromMaster(master) {
-  if (!master?.booking_no || !master?.container_no) return null;
+  if (!master?.booking_no) return null;
+
+  // 反查实际箱号 / 封号：先看 master.container_no，再看分票 cargo_items 的第一个非空
+  let containerNo = master.container_no || null;
+  let sealNo = master.seal_no || null;
+  if (!containerNo && master.order_no) {
+    const { data: subs } = await supabase.from("shipments")
+      .select("id").like("order_no", master.order_no + "-%");
+    const subIds = (subs || []).map(s => s.id);
+    if (subIds.length) {
+      const { data: ci } = await supabase.from("cargo_items")
+        .select("container_no, seal_no")
+        .in("shipment_id", subIds)
+        .not("container_no", "is", null)
+        .limit(1);
+      if (ci?.[0]) {
+        containerNo = ci[0].container_no;
+        if (!sealNo) sealNo = ci[0].seal_no || null;
+      }
+    }
+  }
+
   const typeId = await getConsoleTypeId();
   const payload = {
-    container_no: master.container_no,
+    container_no: containerNo,
+    seal_no: sealNo,
     booking_no: master.booking_no,
     e_booking_no: master.e_booking_no || null,
     vessel: master.vessel || null,
@@ -900,11 +925,12 @@ async function syncContainerFromMaster(master) {
     type_id: typeId,
     customer: master.overseas_agent || master.end_customer || null,
   };
-  const { data: existing } = await supabase.from("containers")
-    .select("id")
-    .eq("booking_no", master.booking_no)
-    .eq("container_no", master.container_no)
-    .limit(1);
+
+  // 找已有行：按 booking_no 找；如果有 container_no 优先用 (booking_no, container_no)；
+  // 否则用第一条同 booking_no 的（兼容历史上 container_no 为 NULL 的行）
+  let q = supabase.from("containers").select("id, container_no").eq("booking_no", master.booking_no);
+  if (containerNo) q = q.or(`container_no.eq.${containerNo},container_no.is.null`);
+  const { data: existing } = await q;
   if (existing?.[0]) {
     await supabase.from("containers").update(payload).eq("id", existing[0].id);
     return existing[0].id;
@@ -1083,6 +1109,9 @@ async function recomputeMasterTotals(masterOrderNo) {
 async function syncContainerFull(master) {
   const containerId = await syncContainerFromMaster(master);
   if (!containerId) return null;
+  // 清掉 shipment_id 为 NULL 的孤儿（早期手工录的、跟分票不对应的），避免和 syncContainerItemFromSub
+  // 新插入的行重复显示
+  await supabase.from("container_items").delete().eq("container_id", containerId).is("shipment_id", null);
   const { data: subs } = await supabase.from("shipments")
     .select("id, order_no, supplier, po, customer_po, qty_packages, weight, volume, hbl_no")
     .eq("booking_no", master.booking_no)

@@ -528,7 +528,26 @@ function CargoPage({
                   </td>
                 </tr>
               ))}
-              {/* 末页底部：FREIGHT 类型 + Shipped on Board */}
+              {/* 末页底部：TOTAL 合计行（多于 1 条 cargo line 时显示）+ FREIGHT 类型 + Shipped on Board */}
+              {isLastCargoPage && rows.length > 1 && (
+                <tr style={{ background: BRAND_BG }}>
+                  <td style={tdStyle({ bold: true, fontSize: 10 })}>TOTAL</td>
+                  <td style={tdStyle({ bold: true })}>
+                    {totalPkg} {rows[0]?.unit || "CARTONS"}
+                  </td>
+                  <td style={tdStyle({ bold: true })}>
+                    <span>═══════</span>
+                    {"\n"}
+                    {totalPkg} {rows[0]?.unit || "CARTONS"}    {totalWt ? `${totalWt.toFixed(3)}KGS` : ""}    {totalCbm ? `${totalCbm.toFixed(3)}CBM` : ""}
+                  </td>
+                  <td style={{ ...tdStyle({ mono: true, align: "right", bold: true }) }}>
+                    {totalWt ? totalWt.toFixed(3) : "—"}
+                  </td>
+                  <td style={{ ...tdStyle({ mono: true, align: "right", bold: true }), borderRight: 0 }}>
+                    {totalCbm ? totalCbm.toFixed(3) : "—"}
+                  </td>
+                </tr>
+              )}
               {isLastCargoPage && (
                 <tr>
                   <td colSpan={5} style={{ padding: "60px 8px", verticalAlign: "bottom",

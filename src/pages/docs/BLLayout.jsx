@@ -136,7 +136,6 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         pkgs: it.qty || 0,
         unit: it.package_unit || "CARTONS",
         desc: [it.product_name_en || s.desc_en || s.cargo_type || "GENERAL CARGO",
-               it.hs_code ? `HS: ${it.hs_code}` : null,
                s.po ? `PO-${s.po}` : null,
               ].filter(Boolean).join("\n"),
         gw: parseFloat(it.gross_weight) || 0,

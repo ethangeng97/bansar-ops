@@ -1143,7 +1143,9 @@ async function syncContainerFromShipment(shipment) {
     etd: shipment.etd || null,
     qty_container: shipment.qty_container || null,
     type_id: typeId,
-    customer: shipment.customer || null,
+    // portal containers.customer 业务上是"海外货主"（如 KEPLIN），不是 ops 端的 customer
+    // 委托方/工厂中文名（如"温州永立箱包"）。跟 syncContainerFromMaster 对齐。
+    customer: shipment.overseas_agent || shipment.end_customer || shipment.customer || null,
   };
 
   // 找已有 container 行（按 booking_no + container_no；兼容历史 container_no=NULL 行）

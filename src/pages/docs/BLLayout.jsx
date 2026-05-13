@@ -129,8 +129,33 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     return str.replace(/(\d+x\d+)([A-Z]+)/g, "$1'$2");
   }
 
-  let rows = cargoItems.length > 0
-    ? cargoItems.map((it, i) => ({
+  // 同品名 + 同 HS + 同箱号 + 同唛头的多条 cargo_items 自动合并成一行
+  //（仓库进仓批次拆分不该体现在提单上）
+  const mergedCargo = (() => {
+    if (!cargoItems || cargoItems.length === 0) return [];
+    const order = [];
+    const map = new Map();
+    for (const it of cargoItems) {
+      const key = [it.product_name_en || "", it.hs_code || "", it.container_no || "", it.marks || ""].join("|");
+      if (!map.has(key)) {
+        map.set(key, {
+          ...it,
+          qty: 0,
+          gross_weight: 0,
+          volume: 0,
+        });
+        order.push(key);
+      }
+      const g = map.get(key);
+      g.qty += parseInt(it.qty) || 0;
+      g.gross_weight += parseFloat(it.gross_weight) || 0;
+      g.volume += parseFloat(it.volume) || 0;
+    }
+    return order.map(k => map.get(k));
+  })();
+
+  let rows = mergedCargo.length > 0
+    ? mergedCargo.map((it, i) => ({
         cnInfo: buildContainerBlock(),
         marks: it.marks || s.marks || "N/M",
         pkgs: it.qty || 0,

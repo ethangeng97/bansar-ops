@@ -5,6 +5,8 @@ import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, 
 import PortPicker from "../components/PortPicker.jsx";
 import ContainerEditor from "../components/ContainerEditor.jsx";
 import BLImportModal from "../components/BLImportModal.jsx";
+import Sino56ImportModal from "../components/Sino56ImportModal.jsx";
+import { buildSino56Manifest, downloadArrayBufferAsXls } from "../lib/sino56-manifest.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
 import { filterShipmentPayload } from "../lib/shipment-fields.js";
@@ -1106,6 +1108,14 @@ async function findOrCreateContainerIdForSub(sub) {
   return await syncContainerFromMaster(master);
 }
 
+// 自拼分票：这些字段统一在主单维护，分票自动继承（编辑器只读 + 主单保存时同步到所有分票）
+const SUB_INHERIT_FROM_MASTER = new Set([
+  "vessel", "voyage",
+  "pol", "pol_code",
+  "pod", "pod_code",
+  "destination", "destination_code",
+]);
+
 // ═══════════════════════════════════════════════════════════════
 // OrderNoField - 作业号字段
 // 主拼号主体（如 BSOEC260100001）永远 readonly
@@ -1167,6 +1177,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [masterAggCargoLines, setMasterAggCargoLines] = useState([]);
   // 解析提单 modal 开关
   const [blImportOpen, setBlImportOpen] = useState(false);
+  // 解析 56 舱单 modal 开关
+  const [sino56ImportOpen, setSino56ImportOpen] = useState(false);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -1369,6 +1381,118 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       }
     }
   };
+
+  // 从 Sino56 舱单 modal 应用字段：N 个集装箱 + N 条货物明细
+  // 主字段合并到 ed；集装箱直接写 shipment_containers；货物明细追加到 cargoLinesDraft
+  const applySino56Import = async (fields, extras) => {
+    if (!editing) {
+      setEd(prev => ({ ...order, ...prev, ...fields }));
+      setEditing(true);
+    } else {
+      setEd(prev => ({ ...prev, ...fields }));
+    }
+    // 货物明细：追加全部
+    if (Array.isArray(extras?.cargoLines) && extras.cargoLines.length > 0) {
+      setCargoLinesDraft(prev => [
+        ...prev,
+        ...extras.cargoLines.map((cl, i) => ({
+          _tmp: Date.now() + Math.random() + i,
+          sort_order: prev.length + i + 1,
+          hbl_no: cl.hbl_no || fields.mbl_no || null,
+          container_no: cl.container_no || null,
+          seal_no: cl.seal_no || null,
+          container_type: cl.container_type || null,
+          product_name_en: cl.product_name_en || null,
+          hs_code: cl.hs_code || null,
+          qty: cl.qty || null,
+          package_unit: cl.package_unit || "CARTONS",
+          gross_weight: cl.gross_weight || null,
+          volume: cl.volume || null,
+          marks: cl.marks || null,
+          un: cl.un || null,
+          cl: cl.cl || null,
+        })),
+      ]);
+    }
+    // 集装箱：每箱写一条 shipment_containers 行
+    if (Array.isArray(extras?.containers) && extras.containers.length > 0 && order?.id) {
+      try {
+        const parseSize = (t) => {
+          const m = String(t || "").match(/^(\d{2})(.*)$/);
+          return m ? { container_size: m[1], container_type: m[2] || "GP" } : { container_size: null, container_type: t || null };
+        };
+        const rows = extras.containers.map((c, i) => {
+          const { container_size, container_type } = parseSize(c.container_type);
+          return {
+            shipment_id: order.id,
+            container_size,
+            container_type,
+            qty: 1,
+            container_no: c.container_no || null,
+            seal_no: c.seal_no || null,
+            cargo_qty: c.qty || null,
+            cargo_weight: c.weight || null,
+            cargo_volume: c.volume || null,
+            sort_order: i,
+          };
+        });
+        await supabase.from("shipment_containers").insert(rows);
+      } catch (e) {
+        console.error("Sino56 import: insert shipment_containers error:", e);
+      }
+    }
+  };
+
+  // 导出当前作业为 Sino56 舱单 .xls
+  const exportSino56Manifest = async () => {
+    if (!order?.id) { alert("请先保存作业再导出"); return; }
+    try {
+      const [{ data: containers }, { data: lines }] = await Promise.all([
+        supabase.from("shipment_containers").select("*").eq("shipment_id", order.id).order("sort_order"),
+        supabase.from("cargo_items").select("*").eq("shipment_id", order.id).order("sort_order"),
+      ]);
+      const data = {
+        vessel: order.vessel || "",
+        voyage: order.voyage || "",
+        pod: order.pod || "",
+        mbl_no: order.mbl_no || order.booking_no || "",
+        booking_no: order.booking_no || "",
+        containers: (containers || []).map(c => ({
+          container_no: c.container_no || "",
+          seal_no: c.seal_no || "",
+          container_type: [c.container_size, c.container_type].filter(Boolean).join(""),
+          qty: c.cargo_qty,
+          weight: c.cargo_weight,
+          volume: c.cargo_volume,
+        })),
+        cargoLines: (lines || []).map(l => ({
+          hbl_no: l.hbl_no || order.hbl_no || order.mbl_no || "",
+          container_no: l.container_no || "",
+          seal_no: l.seal_no || "",
+          container_type: l.container_type || "",
+          product_name_en: l.product_name_en || "",
+          hs_code: l.hs_code || "",
+          qty: l.qty,
+          package_unit: l.package_unit || "CARTONS",
+          gross_weight: l.gross_weight,
+          volume: l.volume,
+          marks: l.marks || "",
+          un: l.un || "",
+          cl: l.cl || "",
+        })),
+        // shipper/consignee/notifier 文本回拆成 name/address 这里偷懒：放 name 字段
+        shipper: order.shipper ? { name: order.shipper } : null,
+        consignee: order.consignee ? { name: order.consignee } : null,
+        notifier: order.notify_party ? { name: order.notify_party } : null,
+      };
+      const buf = await buildSino56Manifest(data);
+      const fname = `Sino56-${order.mbl_no || order.booking_no || order.order_no || "manifest"}.xls`;
+      downloadArrayBufferAsXls(buf, fname);
+    } catch (e) {
+      console.error(e);
+      alert("导出失败：" + (e?.message || e));
+    }
+  };
   const save = async () => {
     // ── 创建模式：INSERT 新订单 ──
     if (isCreating) {
@@ -1454,6 +1578,22 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       const { data, error } = await supabase.from("shipments").update(cleanChanges).eq("id", order.id).select().single();
       if (error) { alert(error.message); return; }
       if (data && onUpdated) onUpdated(data);
+      // 主单：船名/航次/起运港/卸货港/目的港 变了 → 同步到所有分票
+      if (isMaster) {
+        const inheritedChanges = {};
+        for (const k of Object.keys(changes)) {
+          if (SUB_INHERIT_FROM_MASTER.has(k)) inheritedChanges[k] = changes[k];
+        }
+        if (Object.keys(inheritedChanges).length > 0 && order.order_no) {
+          try {
+            await supabase.from("shipments")
+              .update(inheritedChanges)
+              .like("order_no", order.order_no + "-%");
+          } catch (e) {
+            console.error("propagate inherited fields to sub-tickets error:", e);
+          }
+        }
+      }
       // 同步到 portal containers / container_items
       if (data) {
         if (isMaster) {
@@ -1524,6 +1664,13 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
   const v = (f) => editing ? (ed[f] ?? "") : (order[f] ?? "");
   const ch = (f, val) => setEd(p => ({ ...p, [f]: val }));
+
+  // 自拼分票：船名/航次/起运港/卸货港/目的港 字段从主单继承，分票编辑器不可改
+  const isInheritedFromMaster = (f) =>
+    order.shipment_type === "Console"
+    && order.order_no && /-\d+$/.test(order.order_no)
+    && SUB_INHERIT_FROM_MASTER.has(f);
+  const inheritTitle = "随主单填写，分票自动继承（主单保存后同步）";
 
   const titlePrefix = order.shipment_type === "LCL" ? "拼箱" : order.shipment_type === "Console" ? "自拼" : "整箱";
   const isLocked = order.lifecycle === "已完结" || order.lifecycle === "已关闭";
@@ -1849,6 +1996,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         onClose={() => setBlImportOpen(false)}
         onApply={applyBLImport}
       />
+      <Sino56ImportModal
+        open={sino56ImportOpen}
+        onClose={() => setSino56ImportOpen(false)}
+        onApply={applySino56Import}
+      />
       <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
       {/* 第一行工具栏：主操作（白底） */}
@@ -1944,6 +2096,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           </>
         )}
         <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
+        <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入56舱单</Mi>
+        <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
         <Mi arrow>订舱模板</Mi>
         <Mi arrow>费用确认</Mi>
         <Mi arrow>相关操作</Mi>
@@ -2034,9 +2188,9 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 </Df>
                 <Df label="电话"><input value={v("phone")} onChange={e => ch("phone", e.target.value)} disabled={!editing} /></Df>
                 <Df label="船名" refLabel>
-                  {editing
+                  {editing && !isInheritedFromMaster("vessel")
                     ? <ComboBox value={v("vessel")} onChange={val => ch("vessel", val)} options={[]} />
-                    : <input value={v("vessel")} disabled className="notnull" />}
+                    : <input value={v("vessel")} disabled className="notnull" title={isInheritedFromMaster("vessel") ? inheritTitle : undefined} />}
                 </Df>
                 <Df label="状态"><input value={v("status") || "处理中"} disabled className="readonly" /></Df>
                 <Df label="贸易条款">
@@ -2049,7 +2203,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
                 <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
                 <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
-                <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", e.target.value)} disabled={!editing || isInheritedFromMaster("voyage")} className="notnull" title={isInheritedFromMaster("voyage") ? inheritTitle : undefined} /></Df>
                 <Df label="揽货类型">
                   <select value={v("solicit_type") || "代理货"} onChange={e => ch("solicit_type", e.target.value)} disabled={!editing}>
                     <option>自揽货</option>
@@ -2380,7 +2534,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                       <PortRow label="起运港" required
                                value={{ code: v("pol_code"), name: v("pol") }}
                                onChange={({code, name}) => { ch("pol_code", code); ch("pol", name); }}
-                               disabled={!editing} />
+                               disabled={!editing || isInheritedFromMaster("pol")}
+                               title={isInheritedFromMaster("pol") ? inheritTitle : undefined} />
 
                       {/* 中转港 */}
                       <PortRow label="中转港"
@@ -2392,13 +2547,15 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                       <PortRow label="卸货港" required
                                value={{ code: v("pod_code"), name: v("pod") }}
                                onChange={({code, name}) => { ch("pod_code", code); ch("pod", name); }}
-                               disabled={!editing} />
+                               disabled={!editing || isInheritedFromMaster("pod")}
+                               title={isInheritedFromMaster("pod") ? inheritTitle : undefined} />
 
                       {/* 目的港 - 必填 */}
                       <PortRow label="目的港" required
                                value={{ code: v("destination_code"), name: v("destination") }}
                                onChange={({code, name}) => { ch("destination_code", code); ch("destination", name); }}
-                               disabled={!editing} />
+                               disabled={!editing || isInheritedFromMaster("destination")}
+                               title={isInheritedFromMaster("destination") ? inheritTitle : undefined} />
 
                       {/* 起运港码头（单框） */}
                       <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
@@ -2467,7 +2624,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                         <input
                           value={v("vessel")}
                           onChange={e => ch("vessel", liveUpper(e.target.value))}
-                          disabled={!editing}
+                          disabled={!editing || isInheritedFromMaster("vessel")}
+                          title={isInheritedFromMaster("vessel") ? inheritTitle : undefined}
                           style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
                         />
                       </div>
@@ -2476,7 +2634,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                         <input
                           value={v("voyage")}
                           onChange={e => ch("voyage", liveUpper(e.target.value))}
-                          disabled={!editing}
+                          disabled={!editing || isInheritedFromMaster("voyage")}
+                          title={isInheritedFromMaster("voyage") ? inheritTitle : undefined}
                           style={{ ...tmStyles.input, width: 269, fontFamily: "Consolas,monospace" }}
                         />
                       </div>
@@ -2750,7 +2909,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 }
 
 const cellHead = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, fontWeight: "bold", color: "#444", textAlign: "left", whiteSpace: "nowrap" };
-const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, whiteSpace: "nowrap" };
+const cellBody = { padding: "5px 8px", border: "1px solid #ddd", fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
 // ═══════════════════════════════════════════════════════════════
 // CargoLinesEditor — 货物明细（cargo_items）编辑器
@@ -2980,7 +3139,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                   <td style={cellBody}>{g.container_no || "—"}</td>
                   <td style={cellBody}>{g.seal_no || "—"}</td>
                   <td style={cellBody}>{g.container_type || "—"}</td>
-                  <td style={cellBody}>{g.names.join(" / ")}</td>
+                  <td style={cellBody} title={g.names.join(" / ")}>{g.names.join(" / ")}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.qty || "—"}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.wt ? g.wt.toFixed(3) : "—"}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.vol ? g.vol.toFixed(4) : "—"}</td>
@@ -3012,7 +3171,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                 .map((g, i) => (
                 <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
                   <td style={cellBody}>{g.hbl_no || "—"}</td>
-                  <td style={cellBody}>{g.names.join(" / ")}</td>
+                  <td style={cellBody} title={g.names.join(" / ")}>{g.names.join(" / ")}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.qty || "—"}</td>
                   <td style={cellBody}>{g.pkg_unit || "CARTONS"}</td>
                   <td style={{ ...cellBody, textAlign: "right", fontFamily: "Consolas,monospace" }}>{g.wt ? g.wt.toFixed(3) : "—"}</td>
@@ -5028,9 +5187,9 @@ const tmStyles = {
 
 // V5：港口行（label + 双框）— V4 标准模式
 // label 75px / code 60px / name flex 撑满（约 200px）
-function PortRow({ label, required, value, onChange, disabled }) {
+function PortRow({ label, required, value, onChange, disabled, title }) {
   return (
-    <div style={{ ...tmStyles.subSection, ...tmStyles.row }}>
+    <div style={{ ...tmStyles.subSection, ...tmStyles.row }} title={title}>
       <label style={{
         ...tmStyles.label,
         ...(required ? tmStyles.labelBlue : tmStyles.labelRef),

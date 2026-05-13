@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { STATUS_COLORS } from "../lib/constants.js";
 
 export const Badge = ({ value, small }) => {
@@ -89,6 +89,10 @@ export const Spinner = () => <div style={{ display: "flex", justifyContent: "cen
 export const EmptyState = ({ children }) => <div style={{ padding: "40px 20px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>{children}</div>;
 
 // ── ComboBox: searchable dropdown ────────────────────────────────
+// options 接受两种形态：
+//   1. string[]                                    （兜底，单值匹配）
+//   2. Array<{ value: string, aliases?: string[] }> （富对象，可按缩写/英文名等别名搜，命中后排序更近）
+// 排序：精确 > value 前缀 > alias 前缀 > value 子串 > alias 子串
 export function ComboBox({ value, onChange, options, placeholder, style: extStyle }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -101,11 +105,43 @@ export function ComboBox({ value, onChange, options, placeholder, style: extStyl
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const filtered = (options || []).filter(o =>
-    !query || o.toLowerCase().includes(query.toLowerCase())
-  );
+  // 规范化：统一成 { value, aliases }
+  const normalized = useMemo(() => (options || []).map(o =>
+    typeof o === "string"
+      ? { value: o, aliases: [] }
+      : { value: o.value, aliases: (o.aliases || []).filter(Boolean) }
+  ), [options]);
+
+  // 过滤 + 按"最接近"排序，返回带 _hint（命中的别名，用于在下拉里淡显）
+  const filtered = useMemo(() => {
+    if (!query) return normalized.map(o => ({ ...o, _hint: "" }));
+    const lq = query.toLowerCase();
+    const scored = [];
+    for (const o of normalized) {
+      const v = (o.value || "").toLowerCase();
+      let score = -1, hint = "";
+      if (v === lq) score = 0;
+      else if (v.startsWith(lq)) score = 1;
+      else {
+        const aliasMatch = (cmp) => {
+          for (const a of o.aliases) {
+            if (cmp(String(a).toLowerCase(), lq)) { hint = a; return true; }
+          }
+          return false;
+        };
+        if (aliasMatch((a, q) => a === q)) score = 2;
+        else if (aliasMatch((a, q) => a.startsWith(q))) score = 3;
+        else if (v.includes(lq)) score = 4;
+        else if (aliasMatch((a, q) => a.includes(q))) score = 5;
+      }
+      if (score >= 0) scored.push({ ...o, _score: score, _hint: hint });
+    }
+    scored.sort((a, b) => a._score - b._score || a.value.localeCompare(b.value));
+    return scored;
+  }, [normalized, query]);
 
   const display = open ? query : (value || "");
+  const exactMatch = useMemo(() => normalized.some(o => o.value === query), [normalized, query]);
 
   return (
     <div ref={ref} style={{ position: "relative", ...extStyle }}>
@@ -144,18 +180,23 @@ export function ComboBox({ value, onChange, options, placeholder, style: extStyl
             <div style={{ padding: "8px 10px", fontSize: 11, color: "#94a3b8" }}>无匹配项</div>
           )}
           {filtered.slice(0, 50).map((o) => (
-            <div key={o}
-              onClick={() => { onChange(o); setOpen(false); setQuery(""); }}
+            <div key={o.value}
+              onClick={() => { onChange(o.value); setOpen(false); setQuery(""); }}
               style={{
                 padding: "6px 10px", fontSize: 11.5, cursor: "pointer",
-                background: o === value ? "#f0f9ff" : "transparent",
-                color: o === value ? "#0369a1" : "#334155",
+                background: o.value === value ? "#f0f9ff" : "transparent",
+                color: o.value === value ? "#0369a1" : "#334155",
               }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "#f0f9ff")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = o === value ? "#f0f9ff" : "transparent")}
-            >{o}</div>
+              onMouseLeave={(e) => (e.currentTarget.style.background = o.value === value ? "#f0f9ff" : "transparent")}
+            >
+              {o.value}
+              {o._hint && o._hint !== o.value && (
+                <span style={{ marginLeft: 6, color: "#94a3b8", fontSize: 10 }}>（{o._hint}）</span>
+              )}
+            </div>
           ))}
-          {query && !options.includes(query) && (
+          {query && !exactMatch && (
             <div
               onClick={() => { onChange(query); setOpen(false); setQuery(""); }}
               style={{ padding: "6px 10px", fontSize: 11.5, cursor: "pointer", color: "#0ea5e9", borderTop: "1px solid #f1f5f9" }}

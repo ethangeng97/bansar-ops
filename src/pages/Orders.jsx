@@ -1282,15 +1282,19 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
   useEffect(() => {
     // 业务字典走全局缓存（首次加载后页内复用，详情页重开不再重复请求）
+    // customers_full 含 name_short / name_en / code，给 ComboBox 做别名搜索 + 排序用
     Promise.all([
       getCachedRef("suppliers"),
-      getCachedRef("customers"),
+      getCachedRef("customers_full"),
       getCachedRef("staff"),
-    ]).then(([suppliers, customers, staff]) => {
+    ]).then(([suppliers, customersFull, staff]) => {
       // 防御：任何字段为 undefined 时回退到 []
       setRefData({
         suppliers: suppliers || [],
-        customers: customers || [],
+        customers: (customersFull || []).map(c => ({
+          value: c.name,
+          aliases: [c.name_short, c.name_en, c.code].filter(Boolean),
+        })),
         ports: [],
         staff: staff || [],
       });
@@ -4383,12 +4387,17 @@ function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {
   // 加载客商分类
   useEffect(() => {
     supabase.from("customers")
-      .select("name, partner_type, active")
+      .select("name, name_short, name_en, code, partner_type, active")
       .eq("active", true)
       .then(({ data }) => {
         const all = data || [];
+        // 客户的 ComboBox 用富对象（带 name_short/name_en/code 做别名搜索）
+        const toRich = (c) => ({
+          value: c.name,
+          aliases: [c.name_short, c.name_en, c.code].filter(Boolean),
+        });
         setRefData({
-          customers: all.filter(c => c.partner_type === "客户").map(c => c.name),
+          customers: all.filter(c => c.partner_type === "客户").map(toRich),
           agents:    all.filter(c => c.partner_type === "海外代理").map(c => c.name),
           carriers:  all.filter(c => c.partner_type === "船东").map(c => c.name),
           ports: [],  // 港口暂时手输

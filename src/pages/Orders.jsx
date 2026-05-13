@@ -2189,7 +2189,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 <Df label="电话"><input value={v("phone")} onChange={e => ch("phone", e.target.value)} disabled={!editing} /></Df>
                 <Df label="船名" refLabel>
                   {editing && !isInheritedFromMaster("vessel")
-                    ? <ComboBox value={v("vessel")} onChange={val => ch("vessel", val)} options={[]} />
+                    ? <ComboBox value={v("vessel")} onChange={val => ch("vessel", val ? liveUpper(val) : val)} options={[]} />
                     : <input value={v("vessel")} disabled className="notnull" title={isInheritedFromMaster("vessel") ? inheritTitle : undefined} />}
                 </Df>
                 <Df label="状态"><input value={v("status") || "处理中"} disabled className="readonly" /></Df>
@@ -2203,7 +2203,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
                 <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
                 <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
-                <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", e.target.value)} disabled={!editing || isInheritedFromMaster("voyage")} className="notnull" title={isInheritedFromMaster("voyage") ? inheritTitle : undefined} /></Df>
+                <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", liveUpper(e.target.value))} disabled={!editing || isInheritedFromMaster("voyage")} className="notnull" title={isInheritedFromMaster("voyage") ? inheritTitle : undefined} /></Df>
                 <Df label="揽货类型">
                   <select value={v("solicit_type") || "代理货"} onChange={e => ch("solicit_type", e.target.value)} disabled={!editing}>
                     <option>自揽货</option>
@@ -4527,10 +4527,10 @@ function NewOrderModal({ onClose, onSaved, defaultType = "FCL" }) {
                 <ComboBox value={form.carrier} onChange={v => set("carrier", v)} options={refData.carriers} />
               </div></div>
               <div className="tms-df full2"><label>船名</label><div className="tms-df-blk">
-                <input value={form.vessel} onChange={e => set("vessel", e.target.value)} placeholder="例如 EMMA MAERSK" />
+                <input value={form.vessel} onChange={e => set("vessel", liveUpper(e.target.value))} placeholder="例如 EMMA MAERSK" />
               </div></div>
               <div className="tms-df"><label>航次</label><div className="tms-df-blk">
-                <input value={form.voyage} onChange={e => set("voyage", e.target.value)} placeholder="例如 619W" />
+                <input value={form.voyage} onChange={e => set("voyage", liveUpper(e.target.value))} placeholder="例如 619W" />
               </div></div>
               <div className="tms-df full2"><label className="req">MB/L No.</label><div className="tms-df-blk">
                 <input value={form.booking_no} onChange={e => set("booking_no", e.target.value)} className="notnull" />

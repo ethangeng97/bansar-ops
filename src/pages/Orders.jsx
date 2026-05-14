@@ -7,6 +7,8 @@ import ContainerEditor from "../components/ContainerEditor.jsx";
 import BLImportModal from "../components/BLImportModal.jsx";
 import Sino56ImportModal from "../components/Sino56ImportModal.jsx";
 import { buildSino56Manifest, downloadArrayBufferAsXls } from "../lib/sino56-manifest.js";
+import Statement from "./docs/Statement.jsx";
+import AttachmentsPanel from "../components/AttachmentsPanel.jsx";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
 import { filterShipmentPayload } from "../lib/shipment-fields.js";
@@ -517,11 +519,23 @@ export function OrdersPage({ user, onBack }) {
     );
   }
 
-  if (selOrder) return (
+  if (selOrder) {
+    // 上行/下行导航：基于当前过滤后的列表
+    const navIds = filtered.map(o => o.id);
+    const curIdx = navIds.indexOf(selOrder.id);
+    const prevId = curIdx > 0 ? navIds[curIdx - 1] : null;
+    const nextId = curIdx >= 0 && curIdx < navIds.length - 1 ? navIds[curIdx + 1] : null;
+    return (
     <OrderDetail
       order={selOrder}
       role={role}
       user={user}
+      prevId={prevId}
+      nextId={nextId}
+      onNavigate={(id) => {
+        setSelectedId(id);
+        window.history.replaceState(null, "", `#/sea_export?id=${id}`);
+      }}
       onBack={() => {
         // 如果是新标签打开（URL 有 ?id=），关闭标签；否则回列表
         const fromUrlId = window.location.hash.match(/[?&]id=/);
@@ -535,7 +549,8 @@ export function OrdersPage({ user, onBack }) {
       onReload={load}
       onUpdated={applyUpdated}
     />
-  );
+    );
+  }
 
   const cols = COLS_DEF.map(c => ({ ...c, w: colWidths[c.k] }));
   const totalW = cols.reduce((a, c) => a + c.w, 0);
@@ -1284,7 +1299,7 @@ function OrderNoField({ order, editing, onChange }) {
 }
 
 
-function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, createMode = null, onCreated = null }) {
+function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, createMode = null, onCreated = null, prevId = null, nextId = null, onNavigate = null }) {
   const isCreating = !!createMode;
   // 创建模式：editing 默认 true，初始 ed 已填默认值
   const [editing, setEditing] = useState(isCreating);
@@ -1303,6 +1318,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [blImportOpen, setBlImportOpen] = useState(false);
   // 解析 56 舱单 modal 开关
   const [sino56ImportOpen, setSino56ImportOpen] = useState(false);
+  // 内部利润分析 modal 开关
+  const [profitOpen, setProfitOpen] = useState(false);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -2255,6 +2272,13 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         onClose={() => setSino56ImportOpen(false)}
         onApply={applySino56Import}
       />
+      <ProfitModal
+        open={profitOpen}
+        onClose={() => setProfitOpen(false)}
+        shipment={order}
+        isMaster={isMaster}
+        subTickets={subTickets}
+      />
       <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
       {/* 第一行工具栏：主操作（白底） */}
@@ -2293,11 +2317,19 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
               <Mi onClick={() => setLifecycle("处理中")}>恢复处理中</Mi>
             )}
             <Tbl/>
-            <Mi>内部利润分析</Mi>
+            <Mi disabled={!order.id} onClick={() => setProfitOpen(true)}>内部利润分析</Mi>
             <Mi arrow>动作</Mi>
-            <Mi arrow>打印</Mi>
-            <Mi disabled>上行</Mi>
-            <Mi disabled>下行</Mi>
+            <MiDropdown disabled={!order.id} options={[
+              { label: "委托书",           onClick: () => window.open(`#/docs/booking/${order.id}`, "_blank") },
+              { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}`, "_blank") },
+              { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}`, "_blank") },
+              { label: "电放件",             onClick: () => window.open(`#/docs/telex/${order.id}`, "_blank") },
+              { label: "放舱信息",           onClick: () => window.open(`#/docs/release/${order.id}`, "_blank") },
+              { label: "单票对账单",         onClick: () => window.open(`#/docs/stmt/${order.id}`, "_blank") },
+              { label: "📤 56 舱单 (.xls)",   onClick: exportSino56Manifest, disabled: isCreating },
+            ]}>打印</MiDropdown>
+            <Mi disabled={!prevId || !onNavigate} onClick={() => prevId && onNavigate?.(prevId)}>上行</Mi>
+            <Mi disabled={!nextId || !onNavigate} onClick={() => nextId && onNavigate?.(nextId)}>下行</Mi>
             <Tbl/>
             <Mi onClick={onBack}>关闭</Mi>
           </>
@@ -3157,11 +3189,13 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         )}
 
         {tab === "代理对账单" && (
-          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>代理对账单功能开发中</div>
+          order.id
+            ? <Statement shipmentId={order.id} mode="single" onBack={() => setTab("作业")} />
+            : <div style={{ padding: 30, color: "#888", textAlign: "center" }}>请先保存订单</div>
         )}
 
         {tab === "附件" && (
-          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>附件管理功能开发中</div>
+          <AttachmentsPanel shipmentId={order.id} user={user} />
         )}
 
         {tab === "SOP 进度" && (
@@ -5456,6 +5490,124 @@ const tmStyles = {
 
 // V5：港口行（label + 双框）— V4 标准模式
 // label 75px / code 60px / name flex 撑满（约 200px）
+// ═══════════════════════════════════════════════════════════════
+// ProfitModal — 内部利润分析
+// 拉本票（如果是自拼母单，包含所有分票）的 charges 行
+// 按 direction (AR/AP) × currency 分组合计，AR-AP = 利润
+// ═══════════════════════════════════════════════════════════════
+function ProfitModal({ open, onClose, shipment, isMaster, subTickets }) {
+  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    if (!open || !shipment?.id) return;
+    setLoading(true);
+    const ids = [shipment.id, ...(isMaster ? subTickets.map(s => s.id) : [])];
+    supabase.from("charges").select("direction, currency, amount_total, amount_cny, partner_name")
+      .in("shipment_id", ids)
+      .then(({ data }) => {
+        setRows(data || []);
+        setLoading(false);
+      });
+  }, [open, shipment?.id, isMaster, subTickets]);
+
+  if (!open) return null;
+
+  // 按 direction × currency 分组
+  const groups = {};   // { 'AR': { CNY: 0, USD: 0 }, 'AP': { ... } }
+  let arCny = 0, apCny = 0;
+  for (const c of rows) {
+    const dir = c.direction || "?";
+    const cur = c.currency || "?";
+    if (!groups[dir]) groups[dir] = {};
+    groups[dir][cur] = (groups[dir][cur] || 0) + (Number(c.amount_total) || 0);
+    const cny = Number(c.amount_cny) || 0;
+    if (dir === "AR") arCny += cny;
+    else if (dir === "AP") apCny += cny;
+  }
+  const profit = arCny - apCny;
+  const allCurrencies = new Set();
+  Object.values(groups).forEach(g => Object.keys(g).forEach(c => allCurrencies.add(c)));
+
+  const numFmt = (n) => Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex",
+                  alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={onClose}>
+      <div style={{ width: "min(640px, 95vw)", maxHeight: "90vh", background: "#fff", borderRadius: 6,
+                    boxShadow: "0 6px 30px rgba(0,0,0,.2)", display: "flex", flexDirection: "column" }}
+           onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #eee" }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>📊 内部利润分析</div>
+          <div style={{ flex: 1 }} />
+          <button onClick={onClose} style={{ padding: "4px 12px" }}>关闭</button>
+        </div>
+        <div style={{ padding: 16, overflow: "auto", flex: 1 }}>
+          {loading ? (
+            <div style={{ padding: 24, textAlign: "center", color: "#888" }}>加载中…</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "#888" }}>本票暂无费用</div>
+          ) : (
+            <>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: "#f5f5f5" }}>
+                    <th style={{ padding: 6, border: "1px solid #ddd", textAlign: "left" }}>方向</th>
+                    {[...allCurrencies].sort().map(cur => (
+                      <th key={cur} style={{ padding: 6, border: "1px solid #ddd", textAlign: "right", fontFamily: "Consolas,monospace" }}>{cur}</th>
+                    ))}
+                    <th style={{ padding: 6, border: "1px solid #ddd", textAlign: "right", background: "#e6f4ff" }}>CNY 合计</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: 6, border: "1px solid #ddd", fontWeight: 600, color: "#1990ff" }}>应收 (AR)</td>
+                    {[...allCurrencies].sort().map(cur => (
+                      <td key={cur} style={{ padding: 6, border: "1px solid #ddd", textAlign: "right", fontFamily: "Consolas,monospace" }}>
+                        {groups.AR?.[cur] ? numFmt(groups.AR[cur]) : "—"}
+                      </td>
+                    ))}
+                    <td style={{ padding: 6, border: "1px solid #ddd", textAlign: "right", fontFamily: "Consolas,monospace", background: "#e6f4ff", fontWeight: 600 }}>
+                      {numFmt(arCny)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: 6, border: "1px solid #ddd", fontWeight: 600, color: "#c00" }}>应付 (AP)</td>
+                    {[...allCurrencies].sort().map(cur => (
+                      <td key={cur} style={{ padding: 6, border: "1px solid #ddd", textAlign: "right", fontFamily: "Consolas,monospace" }}>
+                        {groups.AP?.[cur] ? numFmt(groups.AP[cur]) : "—"}
+                      </td>
+                    ))}
+                    <td style={{ padding: 6, border: "1px solid #ddd", textAlign: "right", fontFamily: "Consolas,monospace", background: "#fff3e6", fontWeight: 600 }}>
+                      {numFmt(apCny)}
+                    </td>
+                  </tr>
+                  <tr style={{ background: profit >= 0 ? "#f6ffed" : "#fff1f0" }}>
+                    <td style={{ padding: 8, border: "1px solid #ddd", fontWeight: 700 }}>利润 (AR − AP)</td>
+                    <td colSpan={allCurrencies.size} style={{ padding: 8, border: "1px solid #ddd", color: "#888", fontSize: 11 }}>
+                      按 amount_cny（已折算 CNY）计算
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ddd", textAlign: "right",
+                                 fontFamily: "Consolas,monospace", fontWeight: 700, fontSize: 14,
+                                 color: profit >= 0 ? "#52c41a" : "#c00" }}>
+                      {profit >= 0 ? "+" : ""}{numFmt(profit)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{ marginTop: 10, fontSize: 11, color: "#888" }}>
+                {isMaster
+                  ? `已聚合母单 + ${subTickets.length} 个分票的全部费用（共 ${rows.length} 条）`
+                  : `本票共 ${rows.length} 条费用`}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PortRow({ label, required, value, onChange, disabled, title }) {
   return (
     <div style={{ ...tmStyles.subSection, ...tmStyles.row }} title={title}>

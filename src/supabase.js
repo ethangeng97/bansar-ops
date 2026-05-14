@@ -180,7 +180,62 @@ function createClient() {
     }
   };
 
-  return { auth, from, api, rpc, getSession };
+  // ── Storage: Supabase Storage API（上传/下载/签 URL/删除）──
+  // 用法:
+  //   await supabase.storage.from("bucket").upload("path/file.pdf", File)
+  //   const url = await supabase.storage.from("bucket").createSignedUrl("path", 3600)
+  //   await supabase.storage.from("bucket").remove(["path1", "path2"])
+  const storage = {
+    from: (bucket) => ({
+      upload: async (path, file, { upsert = false } = {}) => {
+        const url = `${SUPABASE_URL}/storage/v1/object/${bucket}/${encodeURI(path).replace(/#/g, "%23")}`;
+        const h = {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${accessToken || SUPABASE_KEY}`,
+          "x-upsert": upsert ? "true" : "false",
+        };
+        if (file.type) h["Content-Type"] = file.type;
+        try {
+          let res = await fetch(url, { method: "POST", headers: h, body: file });
+          if (res.status === 401 && refreshToken && await refreshIfNeeded()) {
+            h.Authorization = `Bearer ${accessToken}`;
+            res = await fetch(url, { method: "POST", headers: h, body: file });
+          }
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            return { data: null, error: new Error(err.message || err.error || res.statusText) };
+          }
+          return { data: await res.json().catch(() => ({})), error: null };
+        } catch (err) {
+          return { data: null, error: err };
+        }
+      },
+      createSignedUrl: async (path, expiresIn = 3600) => {
+        try {
+          const data = await api(`/storage/v1/object/sign/${bucket}/${encodeURI(path).replace(/#/g, "%23")}`, {
+            method: "POST",
+            body: JSON.stringify({ expiresIn }),
+          });
+          return { data: { signedUrl: `${SUPABASE_URL}/storage/v1${data.signedURL}` }, error: null };
+        } catch (err) {
+          return { data: null, error: err };
+        }
+      },
+      remove: async (paths) => {
+        try {
+          const data = await api(`/storage/v1/object/${bucket}`, {
+            method: "DELETE",
+            body: JSON.stringify({ prefixes: paths }),
+          });
+          return { data, error: null };
+        } catch (err) {
+          return { data: null, error: err };
+        }
+      },
+    }),
+  };
+
+  return { auth, from, api, rpc, getSession, storage };
 }
 
 export const supabase = createClient();

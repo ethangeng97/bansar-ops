@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useImperativeHandle } from "react";
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
 import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
@@ -11,6 +11,12 @@ import Statement from "./docs/Statement.jsx";
 import AttachmentsPanel from "../components/AttachmentsPanel.jsx";
 import HistoryModal from "../components/HistoryModal.jsx";
 import BookingTemplateModal from "../components/BookingTemplateModal.jsx";
+import {
+  ChargeImportModal,
+  ChargeCopyFromShipmentModal,
+  ChargeTemplateApplyModal,
+  ChargeTemplateSaveModal,
+} from "../components/ChargesToolbarModals.jsx";
 import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
@@ -1358,6 +1364,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [historyOpen, setHistoryOpen] = useState(false);
   // 订舱模板 modal 开关
   const [templateOpen, setTemplateOpen] = useState(false);
+  // ChargesPanel 操作句柄（用于费用 tab 下工具栏按钮调用）
+  const chargesRef = useRef(null);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -2427,25 +2435,39 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         ))}
       </div>
 
-      {/* 第二行工具栏：子操作（米色） */}
-      <div className="tms-dtb2">
-        {!editing ? (
-          <Mi disabled={isLocked} onClick={startEdit}>编辑</Mi>
-        ) : (
-          <>
-            <Mi onClick={save}>保存</Mi>
-            <Mi onClick={cancel}>取消</Mi>
-          </>
-        )}
-        <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
-        <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入56舱单</Mi>
-        <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
-        <Mi arrow onClick={() => setTemplateOpen(true)} title="从模板创建 / 把当前作业存为模板">订舱模板</Mi>
-        <Mi onClick={onReload}>刷新</Mi>
-        <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接入口">数据交换</Mi>
-        <Mi disabled arrow title="敬请期待：自动发邮件/短信给客户（开船/到港/提单可取）">通知</Mi>
-        <Mi disabled={!order.id} onClick={() => setHistoryOpen(true)} title="本票修改历史 audit log">历史</Mi>
-      </div>
+      {/* 第二行工具栏：按 tab 切换 ─ 作业/装箱/小票 → 作业操作；费用 → 费用操作；其他 tab 隐藏 */}
+      {(tab === "作业" || tab === "装箱" || tab === "小票") && (
+        <div className="tms-dtb2">
+          {!editing ? (
+            <Mi disabled={isLocked} onClick={startEdit}>编辑</Mi>
+          ) : (
+            <>
+              <Mi onClick={save}>保存</Mi>
+              <Mi onClick={cancel}>取消</Mi>
+            </>
+          )}
+          <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
+          <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入56舱单</Mi>
+          <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
+          <Mi arrow onClick={() => setTemplateOpen(true)} title="从模板创建 / 把当前作业存为模板">订舱模板</Mi>
+          <Mi onClick={onReload}>刷新</Mi>
+          <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接入口">数据交换</Mi>
+          <Mi disabled arrow title="敬请期待：自动发邮件/短信给客户（开船/到港/提单可取）">通知</Mi>
+          <Mi disabled={!order.id} onClick={() => setHistoryOpen(true)} title="本票修改历史 audit log">历史</Mi>
+        </div>
+      )}
+      {tab === "费用" && (
+        <div className="tms-dtb2">
+          <Mi disabled={isLocked || !order.id} onClick={() => chargesRef.current?.openImport()} title="从 Excel 导入费用行">📥 导入费用</Mi>
+          <Mi disabled={!order.id} onClick={() => chargesRef.current?.exportExcel()} title="把当前 AR/AP 导成 Excel">📤 导出费用</Mi>
+          <Mi disabled={isLocked || !order.id} onClick={() => chargesRef.current?.openCopyFromShipment()} title="从历史作业整批拷贝费用过来">📋 复制其他作业的费用</Mi>
+          <Mi disabled={isLocked || !order.id} onClick={() => chargesRef.current?.openApplyTemplate()} arrow title="按客户挑模板一键套用">应用费用模板</Mi>
+          <Mi disabled={isLocked || !order.id} onClick={() => chargesRef.current?.openSaveAsTemplate()} title="把当前 AR 或 AP 存为该客户的费用模板">💾 存为模板</Mi>
+          <Mi disabled={!order.id} onClick={() => chargesRef.current?.print()} title="新标签页打开可打印的费用清单">🖨️ 打印费用清单</Mi>
+          <Mi onClick={onReload}>刷新</Mi>
+          <Mi disabled={!order.id} onClick={() => setHistoryOpen(true)} title="本票修改历史 audit log">历史</Mi>
+        </div>
+      )}
 
       {/* 主体 */}
       <div className="tms-detail-body">
@@ -3229,7 +3251,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         )}
 
         {tab === "费用" && (
-          <ChargesPanel order={order} role={role} user={user} isLocked={isLocked} />
+          <ChargesPanel ref={chargesRef} order={order} role={role} user={user} isLocked={isLocked} />
         )}
 
         {tab === "凭证" && (
@@ -3838,7 +3860,7 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
   );
 }
 
-function ChargesPanel({ order, role, user, isLocked }) {
+function ChargesPanel({ ref, order, role, user, isLocked }) {
   const [arRows, setArRows] = useState([]);   // 应收（含已存+草稿）
   const [apRows, setApRows] = useState([]);   // 应付（含已存+草稿）
   const [chargeItems, setChargeItems] = useState([]);
@@ -3852,6 +3874,11 @@ function ChargesPanel({ order, role, user, isLocked }) {
   const [bills, setBills] = useState([]);   // 本票相关账单（用于显示账单号）
   const [batchMenuOpen, setBatchMenuOpen] = useState(null);   // 'AR' | 'AP' | null
   const [batchModal, setBatchModal] = useState(null);         // {direction, action, rowIds} | null
+  // 工具栏触发的 modal 开关
+  const [importOpen, setImportOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [applyTplOpen, setApplyTplOpen] = useState(false);
+  const [saveTplOpen, setSaveTplOpen] = useState(false);
 
   const isAdmin = role === "admin" || role === "finance";
   const canEdit = !isLocked ? (isAdmin || role === "operator") : isAdmin;
@@ -4175,6 +4202,91 @@ function ChargesPanel({ order, role, user, isLocked }) {
       return next;
     }));
   };
+
+  // ─── 工具栏功能 ──────────────────────────────────────────────────
+  // 把一组源行（已存 charge 或模板 item 等）转成本票 AR/AP 的草稿行
+  // 仅取展示/计算字段，不带 id/shipment_id/bill_id 等本票相关 ID
+  function rowsToDrafts(srcRows, direction) {
+    return srcRows.map((r, i) => ({
+      _draft: true,
+      _id: "draft-" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + i,
+      direction,
+      charge_item_id: r.charge_item_id || "",
+      partner_id: r.partner_id || "",
+      partner_name: r.partner_name || "",
+      unit: r.unit || "票",
+      quantity: r.quantity ?? 1,
+      unit_price: r.unit_price ?? "",
+      tax_rate: r.tax_rate ?? 0,
+      currency: r.currency || "CNY",
+      exchange_rate: r.exchange_rate || rates[r.currency || "CNY"] || 1,
+      remark: r.remark || "",
+      status: "草稿",
+    }));
+  }
+
+  // 导出当前 AR/AP 为 Excel（两个 sheet）
+  const exportExcel = async () => {
+    const XLSX = await import("xlsx");
+    const ciMap = Object.fromEntries(chargeItems.map(c => [c.id, c]));
+    const pMap = Object.fromEntries(partners.map(p => [p.id, p]));
+    const toAoa = (rows) => {
+      const header = ["费用名称", "结算单位", "计费单位", "数量", "单价", "币种", "汇率", "税率%", "原币合计", "折 CNY", "备注", "状态", "账单号"];
+      const body = rows.filter(r => !r._draft || (r.charge_item_id && r.unit_price)).map(r => [
+        ciMap[r.charge_item_id]?.name_zh || "",
+        pMap[r.partner_id]?.name || r.partner_name || "",
+        r.unit || "",
+        Number(r.quantity) || 0,
+        Number(r.unit_price) || 0,
+        r.currency || "CNY",
+        Number(r.exchange_rate) || 1,
+        Number(r.tax_rate) || 0,
+        Number(r.amount_total) || (Number(r.quantity) || 0) * (Number(r.unit_price) || 0),
+        Number(r.amount_cny) || 0,
+        r.remark || "",
+        r.status || "草稿",
+        billMap[r.bill_id]?.bill_no || "",
+      ]);
+      return [header, ...body];
+    };
+    const wb = XLSX.utils.book_new();
+    const wsAr = XLSX.utils.aoa_to_sheet(toAoa(arRows));
+    const wsAp = XLSX.utils.aoa_to_sheet(toAoa(apRows));
+    wsAr["!cols"] = wsAp["!cols"] = [18, 24, 10, 8, 10, 8, 8, 8, 12, 12, 18, 8, 14].map(w => ({ wch: w }));
+    XLSX.utils.book_append_sheet(wb, wsAr, "应收");
+    XLSX.utils.book_append_sheet(wb, wsAp, "应付");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `费用_${order.order_no || order.id}.xlsx`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // 打印费用清单：新标签页打开 print 路由
+  const printCharges = () => {
+    window.open(`#/print/charges/${order.id}`, "_blank");
+  };
+
+  // 应用导入/复制/模板 → 推入草稿
+  const appendDrafts = (drafts) => {
+    const ar = drafts.filter(d => d.direction === "应收");
+    const ap = drafts.filter(d => d.direction === "应付");
+    if (ar.length) setArRows(p => [...p, ...ar]);
+    if (ap.length) setApRows(p => [...p, ...ap]);
+  };
+
+  // 暴露给父组件工具栏调用
+  useImperativeHandle(ref, () => ({
+    exportExcel,
+    print: printCharges,
+    openImport: () => setImportOpen(true),
+    openCopyFromShipment: () => setCopyOpen(true),
+    openApplyTemplate: () => setApplyTplOpen(true),
+    openSaveAsTemplate: () => setSaveTplOpen(true),
+  }), [arRows, apRows, chargeItems, partners, billMap, order?.id, order?.order_no]);
 
   // 利润分析
   const profit = useMemo(() => {
@@ -4574,6 +4686,49 @@ function ChargesPanel({ order, role, user, isLocked }) {
           onCreatePartner={handleCreatePartner}
           onApply={(patch) => { batchUpdateField(batchModal.direction, batchModal.rowIds, patch); setBatchModal(null); }}
           onClose={() => setBatchModal(null)}
+        />
+      )}
+
+      {/* 工具栏调起的 modal */}
+      {importOpen && (
+        <ChargeImportModal
+          chargeItems={chargeItems}
+          partners={partners}
+          rates={rates}
+          onClose={() => setImportOpen(false)}
+          onConfirm={(drafts) => { appendDrafts(drafts); setImportOpen(false); }}
+        />
+      )}
+      {copyOpen && (
+        <ChargeCopyFromShipmentModal
+          currentShipmentId={order.id}
+          chargeItems={chargeItems}
+          partners={partners}
+          rowsToDrafts={rowsToDrafts}
+          onClose={() => setCopyOpen(false)}
+          onConfirm={(drafts) => { appendDrafts(drafts); setCopyOpen(false); }}
+        />
+      )}
+      {applyTplOpen && (
+        <ChargeTemplateApplyModal
+          defaultPartnerId={partners.find(p => p.name === order?.customer)?.id || ""}
+          chargeItems={chargeItems}
+          partners={partners}
+          rates={rates}
+          rowsToDrafts={rowsToDrafts}
+          onClose={() => setApplyTplOpen(false)}
+          onConfirm={(drafts) => { appendDrafts(drafts); setApplyTplOpen(false); }}
+        />
+      )}
+      {saveTplOpen && (
+        <ChargeTemplateSaveModal
+          arRows={arRows.filter(r => !r._draft || (r.charge_item_id && r.unit_price))}
+          apRows={apRows.filter(r => !r._draft || (r.charge_item_id && r.unit_price))}
+          chargeItems={chargeItems}
+          partners={partners}
+          defaultPartnerId={partners.find(p => p.name === order?.customer)?.id || ""}
+          userId={user.id}
+          onClose={() => setSaveTplOpen(false)}
         />
       )}
     </div>

@@ -24,6 +24,7 @@ import StatementImport from "./pages/StatementImport.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
 import PaymentsList from "./pages/PaymentsList.jsx";
 import ChargesList from "./pages/ChargesList.jsx";
+import ChargesPrint from "./pages/ChargesPrint.jsx";
 import SettlementsList from "./pages/SettlementsList.jsx";
 import ChargeTypesList from "./pages/ChargeTypesList.jsx";
 import ExchangeRatesList from "./pages/ExchangeRatesList.jsx";
@@ -230,6 +231,12 @@ export default function App() {
         onBack={() => { window.history.back(); }}
       />
     );
+  }
+
+  // 动态路由：费用清单打印 #/print/charges/:shipmentId
+  if (route.startsWith("print/charges/")) {
+    const shipmentId = route.slice("print/charges/".length);
+    return <ChargesPrint shipmentId={shipmentId} onBack={() => window.close()} />;
   }
 
   // 动态路由：单证 - 委托书 #/docs/booking/:id

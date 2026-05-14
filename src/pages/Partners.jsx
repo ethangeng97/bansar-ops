@@ -9,6 +9,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
+import { exportToXlsx } from "../lib/excel-export.js";
+import PartnerImportModal from "../components/PartnerImportModal.jsx";
 
 // 8 种 partner_type 定义
 const PARTNER_TYPES = [
@@ -57,6 +59,8 @@ export function PartnersPage({ user, onBack }) {
   const [pageSize] = useState(50);
   // 列表"改类型"浮层：存当前打开浮层的 partner.id，null = 都关闭
   const [changeTypeFor, setChangeTypeFor] = useState(null);
+  // 批量导入 modal 开关
+  const [importOpen, setImportOpen] = useState(false);
 
   // 列宽
   const [colWidths, setColWidths] = useState(() => {
@@ -166,6 +170,37 @@ export function PartnersPage({ user, onBack }) {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paged = filtered.slice(page * pageSize, (page + 1) * pageSize);
 
+  // 客商导出 Excel
+  const exportPartners = async (rows, type, counts) => {
+    if (!rows || rows.length === 0) { alert("当前没有可导出的数据"); return; }
+    const stampLocal = new Date().toISOString().slice(0, 10);
+    await exportToXlsx({
+      filename: `Bansar-客商-${type}-${stampLocal}.xlsx`,
+      sheetName: type,
+      columns: [
+        { key: "code",          label: "编号",      width: 10 },
+        { key: "name",          label: "名称(中文)", width: 30 },
+        { key: "name_en",       label: "英文名",    width: 26 },
+        { key: "name_short",    label: "简称",      width: 14 },
+        { key: "address_zh",    label: "中文地址",  width: 30 },
+        { key: "address_en",    label: "英文地址",  width: 30 },
+        { key: "country",       label: "国家/地区", width: 12 },
+        { key: "contact_name",  label: "联系人",    width: 12 },
+        { key: "contact_phone", label: "电话",      width: 18 },
+        { key: "contact_email", label: "邮箱",      width: 24 },
+        { key: "tax_id",        label: "税号 (USCI/VAT)", width: 22 },
+        { key: "credit_terms",  label: "信用条款",  width: 14 },
+        { key: "bank_name",     label: "开户行",    width: 22 },
+        { key: "bank_account",  label: "银行账号",  width: 22 },
+        { key: "invoice_title", label: "发票抬头",  width: 26 },
+        { key: "active",        label: "状态",      width: 8, format: v => v === false ? "停用" : "启用" },
+        { key: "order_count",   label: "订单数",    width: 8,
+          format: (_v, r) => counts[r.name] || 0 },
+      ],
+      rows,
+    });
+  };
+
   const selPartner = partners.find(p => p.id === selectedId);
 
   if (loading) return <div style={{ padding: 50, textAlign: "center" }}>加载中...</div>;
@@ -191,8 +226,8 @@ export function PartnersPage({ user, onBack }) {
         <Mi onClick={() => setShowNew(true)}>新建客商</Mi>
         <Mi onClick={load}>刷新</Mi>
         <Tbl/>
-        <Mi disabled title="敬请期待：客商列表导出 Excel">导出</Mi>
-        <Mi disabled title="敬请期待：客商批量导入 Excel（适合新分公司一次性建客商）">导入</Mi>
+        <Mi onClick={() => exportPartners(filtered, tab, orderCounts)} title="把当前过滤后的客商列表导出 Excel">导出</Mi>
+        <Mi onClick={() => setImportOpen(true)} title="批量导入客商 Excel（支持新增 + 更新）">导入</Mi>
         <Tbl/>
         <Mi checked={showInactive} onClick={() => setShowInactive(s => !s)}>显示已停用</Mi>
       </div>
@@ -316,6 +351,12 @@ export function PartnersPage({ user, onBack }) {
           onSaved={() => { setShowNew(false); load(); }}
         />
       )}
+
+      <PartnerImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={load}
+      />
     </div>
   );
 }

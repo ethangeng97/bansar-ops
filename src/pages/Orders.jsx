@@ -9,6 +9,9 @@ import Sino56ImportModal from "../components/Sino56ImportModal.jsx";
 import { buildSino56Manifest, downloadArrayBufferAsXls } from "../lib/sino56-manifest.js";
 import Statement from "./docs/Statement.jsx";
 import AttachmentsPanel from "../components/AttachmentsPanel.jsx";
+import HistoryModal from "../components/HistoryModal.jsx";
+import BookingTemplateModal from "../components/BookingTemplateModal.jsx";
+import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
 import { filterShipmentPayload } from "../lib/shipment-fields.js";
@@ -448,6 +451,44 @@ export function OrdersPage({ user, onBack }) {
 
   const clearF = () => { setFilters({}); setSearch(""); };
 
+  // 列表导出 Excel
+  const exportOrdersList = async (rows) => {
+    if (!rows || rows.length === 0) { alert("当前没有可导出的数据"); return; }
+    const stampLocal = new Date().toISOString().slice(0, 10);
+    await exportToXlsx({
+      filename: `Bansar-海运出口-${stampLocal}.xlsx`,
+      sheetName: "海运出口",
+      columns: [
+        { key: "order_no", label: "作业号", width: 18 },
+        { key: "shipment_type", label: "类型", width: 8 },
+        { key: "customer", label: "委托单位", width: 28 },
+        { key: "supplier", label: "供应商", width: 16 },
+        { key: "booking_no", label: "MB/L No.", width: 18 },
+        { key: "hbl_no", label: "HBL", width: 18 },
+        { key: "po", label: "PO#", width: 18 },
+        { key: "customer_po", label: "客户 PO", width: 18 },
+        { key: "vessel", label: "船名", width: 22 },
+        { key: "voyage", label: "航次", width: 10 },
+        { key: "pol", label: "起运港", width: 14 },
+        { key: "pod", label: "卸货港", width: 14 },
+        { key: "destination", label: "目的地", width: 14 },
+        { key: "etd", label: "ETD", width: 12 },
+        { key: "atd", label: "ATD", width: 12 },
+        { key: "qty_container", label: "箱型箱量", width: 14 },
+        { key: "container_no", label: "箱号", width: 14 },
+        { key: "qty_packages", label: "件数", width: 8 },
+        { key: "weight", label: "毛重(KG)", width: 12, format: v => v == null ? "" : Number(v).toFixed(2) },
+        { key: "volume", label: "体积(CBM)", width: 12, format: v => v == null ? "" : Number(v).toFixed(4) },
+        { key: "lifecycle", label: "状态", width: 8 },
+        { key: "qc_status", label: "QC", width: 12 },
+        { key: "space_status", label: "出运状态", width: 10 },
+        { key: "carrier", label: "船东", width: 14 },
+        { key: "overseas_agent", label: "海外代理", width: 18 },
+      ],
+      rows,
+    });
+  };
+
   // 保存成功后立即把 update returning 的行推回到本地状态，省去一次刷新
   // （supabase wrapper 默认带 Prefer: return=representation）
   const applyUpdated = useCallback((row) => {
@@ -652,7 +693,7 @@ export function OrdersPage({ user, onBack }) {
         <Mi disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>上页</Mi>
         <Mi disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>下页</Mi>
         <Tbl/>
-        <Mi disabled arrow title="敬请期待：把当前过滤后的列表导出 Excel">导出</Mi>
+        <Mi onClick={() => exportOrdersList(filtered)} title="把当前过滤后的列表导出 Excel">导出</Mi>
         <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接">数据交换</Mi>
         <Tbl/>
         <Mi onClick={onBack}>关闭</Mi>
@@ -1313,6 +1354,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [sino56ImportOpen, setSino56ImportOpen] = useState(false);
   // 内部利润分析 modal 开关
   const [profitOpen, setProfitOpen] = useState(false);
+  // 历史 modal 开关
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // 订舱模板 modal 开关
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -2272,6 +2317,25 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         isMaster={isMaster}
         subTickets={subTickets}
       />
+      <HistoryModal
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        shipmentId={order.id}
+      />
+      <BookingTemplateModal
+        open={templateOpen}
+        onClose={() => setTemplateOpen(false)}
+        shipment={editing ? ed : order}
+        onApply={(snap) => {
+          // 模板字段合并到当前 ed；自动进 editing 态
+          if (!editing) {
+            setEd(prev => ({ ...order, ...prev, ...snap }));
+            setEditing(true);
+          } else {
+            setEd(prev => ({ ...prev, ...snap }));
+          }
+        }}
+      />
       <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
       {/* 第一行工具栏：主操作（白底） */}
@@ -2376,11 +2440,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
         <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入56舱单</Mi>
         <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
-        <Mi disabled arrow title="敬请期待：常用航线/客户预设模板，一键带出 vessel/POL/POD/承运人等">订舱模板</Mi>
+        <Mi arrow onClick={() => setTemplateOpen(true)} title="从模板创建 / 把当前作业存为模板">订舱模板</Mi>
         <Mi onClick={onReload}>刷新</Mi>
         <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接入口">数据交换</Mi>
         <Mi disabled arrow title="敬请期待：自动发邮件/短信给客户（开船/到港/提单可取）">通知</Mi>
-        <Mi disabled title="敬请期待：本票修改历史 audit log">历史</Mi>
+        <Mi disabled={!order.id} onClick={() => setHistoryOpen(true)} title="本票修改历史 audit log">历史</Mi>
       </div>
 
       {/* 主体 */}

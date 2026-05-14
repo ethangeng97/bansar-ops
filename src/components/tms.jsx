@@ -43,9 +43,9 @@ export function TmsTitle({ title, user, role, onClose }) {
 }
 
 /* ── 工具栏：菜单按钮 ───────────────────────────────────────── */
-export function Mi({ children, onClick, checked, disabled, arrow }) {
+export function Mi({ children, onClick, checked, disabled, arrow, title }) {
   return (
-    <div className="tms-mi">
+    <div className="tms-mi" title={title}>
       <div
         className={"tms-mb" + (checked ? " checked" : "") + (disabled ? " disable" : "")}
         onClick={disabled ? undefined : onClick}

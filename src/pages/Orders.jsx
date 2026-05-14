@@ -648,19 +648,12 @@ export function OrdersPage({ user, onBack }) {
         <Mi onClick={load} disabled={loading}>{loading ? "搜索中..." : "搜索"}</Mi>
         <Tbl/>
         <Mi onClick={() => setShowTypePicker(true)}>新建作业</Mi>
-        <Mi arrow>显示预览</Mi>
-        <Mi>统计模板</Mi>
-        <Tbl/>
-        <Mi arrow>数据范围</Mi>
         <Tbl/>
         <Mi disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>上页</Mi>
         <Mi disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>下页</Mi>
         <Tbl/>
-        <Mi arrow>导出</Mi>
-        <Mi arrow>打印</Mi>
-        <Mi arrow>数据交换</Mi>
-        <Mi>数据分析</Mi>
-        <Mi arrow>系统功能</Mi>
+        <Mi disabled arrow title="敬请期待：把当前过滤后的列表导出 Excel">导出</Mi>
+        <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接">数据交换</Mi>
         <Tbl/>
         <Mi onClick={onBack}>关闭</Mi>
 
@@ -2318,7 +2311,6 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             )}
             <Tbl/>
             <Mi disabled={!order.id} onClick={() => setProfitOpen(true)}>内部利润分析</Mi>
-            <Mi arrow>动作</Mi>
             <MiDropdown disabled={!order.id} options={[
               { label: "委托书",           onClick: () => window.open(`#/docs/booking/${order.id}`, "_blank") },
               { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}`, "_blank") },
@@ -2384,19 +2376,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
         <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入56舱单</Mi>
         <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
-        <Mi arrow>订舱模板</Mi>
-        <Mi arrow>费用确认</Mi>
-        <Mi arrow>相关操作</Mi>
-        <Mi arrow>动作</Mi>
+        <Mi disabled arrow title="敬请期待：常用航线/客户预设模板，一键带出 vessel/POL/POD/承运人等">订舱模板</Mi>
         <Mi onClick={onReload}>刷新</Mi>
-        <Mi>显示预览</Mi>
-        <Mi arrow>数据交换</Mi>
-        <Mi arrow>通知</Mi>
-        <Mi arrow>打印</Mi>
-        <Mi>工作流</Mi>
-        <Mi>附件</Mi>
-        <Mi>历史</Mi>
-        <Mi arrow>系统功能</Mi>
+        <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接入口">数据交换</Mi>
+        <Mi disabled arrow title="敬请期待：自动发邮件/短信给客户（开船/到港/提单可取）">通知</Mi>
+        <Mi disabled title="敬请期待：本票修改历史 audit log">历史</Mi>
       </div>
 
       {/* 主体 */}

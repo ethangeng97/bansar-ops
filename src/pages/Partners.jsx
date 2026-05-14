@@ -191,8 +191,8 @@ export function PartnersPage({ user, onBack }) {
         <Mi onClick={() => setShowNew(true)}>新建客商</Mi>
         <Mi onClick={load}>刷新</Mi>
         <Tbl/>
-        <Mi disabled>导出</Mi>
-        <Mi disabled>导入</Mi>
+        <Mi disabled title="敬请期待：客商列表导出 Excel">导出</Mi>
+        <Mi disabled title="敬请期待：客商批量导入 Excel（适合新分公司一次性建客商）">导入</Mi>
         <Tbl/>
         <Mi checked={showInactive} onClick={() => setShowInactive(s => !s)}>显示已停用</Mi>
       </div>

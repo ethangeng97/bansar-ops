@@ -2299,12 +2299,12 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             {isSubTicket && masterExists === false && <Mi disabled={isLocked} onClick={createMaster}>补建母单</Mi>}
             <Mi disabled={isLocked} onClick={deleteOrder}>删除</Mi>
             <Tbl/>
-            <Mi disabled={isLocked}>舱单确认</Mi>
-            <Mi disabled={isLocked}>航线确认</Mi>
-            <Mi disabled={isLocked}>订舱确认</Mi>
-            <Mi disabled={isLocked}>放舱确认</Mi>
-            <Mi disabled={isLocked}>放箱确认</Mi>
-            <Mi disabled={isLocked}>开船确认</Mi>
+            <ConfirmStep field="manifest_confirmed_at" label="舱单" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="route_confirmed_at"     label="航线" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="booking_confirmed_at"   label="订舱" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="space_released_at"      label="放舱" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="container_released_at"  label="放箱" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="atd" label="开船" type="date" defaultFrom="etd" order={order} updateField={updateField} isLocked={isLocked} />
             <Mi disabled={isLocked}>单证锁定</Mi>
             <Tbl/>
             <Mi disabled={order.lifecycle === "已关闭"} onClick={() => {
@@ -5490,6 +5490,39 @@ const tmStyles = {
 
 // V5：港口行（label + 双框）— V4 标准模式
 // label 75px / code 60px / name flex 撑满（约 200px）
+// ═══════════════════════════════════════════════════════════════
+// ConfirmStep — 工具栏流程确认按钮
+// 字段未填时显示"XX确认"，点击 confirm → 写时间戳 / 日期；
+// 字段已填时显示"✓ 已XX (date)" 不可点
+// type="date" 时弹日期选择（开船用，写 atd 字段——BL 用作 Loading on Board Date）
+// type 默认是 timestamp，stamp now()
+// ═══════════════════════════════════════════════════════════════
+function ConfirmStep({ field, label, type = "timestamp", defaultFrom, order, updateField, isLocked }) {
+  const v = order?.[field];
+  const fmtDate = (s) => {
+    if (!s) return "";
+    const d = new Date(s);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  if (v) {
+    return <Mi disabled>✓ 已{label} {fmtDate(v)}</Mi>;
+  }
+  const onClick = () => {
+    if (type === "date") {
+      const today = new Date().toISOString().slice(0, 10);
+      const def = order?.[defaultFrom] || today;
+      const date = prompt(`${label}日期 (YYYY-MM-DD)：`, def);
+      if (!date) return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert("日期格式错误，必须是 YYYY-MM-DD"); return; }
+      updateField(field, date);
+    } else {
+      if (!confirm(`确认${label}？\n\n会记录当前时间。`)) return;
+      updateField(field, new Date().toISOString());
+    }
+  };
+  return <Mi disabled={isLocked} onClick={onClick}>{label}确认</Mi>;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // ProfitModal — 内部利润分析
 // 拉本票（如果是自拼母单，包含所有分票）的 charges 行

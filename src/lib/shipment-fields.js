@@ -58,6 +58,10 @@ export const SHIPMENT_DB_COLUMNS = new Set([
 
   // Migration 005 加的列
   "service_type",
+
+  // Migration 014 加的 5 个工作流确认时间戳
+  "manifest_confirmed_at", "route_confirmed_at", "booking_confirmed_at",
+  "space_released_at", "container_released_at",
 ]);
 
 /**

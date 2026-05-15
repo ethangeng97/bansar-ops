@@ -3988,7 +3988,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
     setter(prev => prev.map(r => {
       const id = r.id || r._id;
       if (id !== rowId) return r;
-      const next = { ...r, ...patch };
+      const next = { ...r, ...patch, _dirty: true };
       // 币种变化时自动填汇率
       if (patch.currency && patch.currency !== r.currency) {
         next.exchange_rate = rates[patch.currency] || 1;
@@ -4064,7 +4064,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
       const toIdx = arr.findIndex(r => (r.id || r._id) === targetRowId);
       if (fromIdx < 0 || toIdx < 0) return prev;
       const [moved] = arr.splice(fromIdx, 1);
-      arr.splice(toIdx, 0, moved);
+      arr.splice(toIdx, 0, { ...moved, _dirty: true });
       return arr;
     });
     setDraggingId(null);
@@ -4259,7 +4259,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
     setter(prev => prev.map(r => {
       const id = r.id || r._id;
       if (!ids.has(id)) return r;
-      const next = { ...r, ...patch };
+      const next = { ...r, ...patch, _dirty: true };
       // 币种变化时同步默认汇率（除非 patch 同时给了 exchange_rate）
       if (patch.currency && patch.currency !== r.currency && patch.exchange_rate === undefined) {
         next.exchange_rate = rates[patch.currency] || 1;
@@ -4380,7 +4380,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
   }, [arRows, apRows]);
 
   const hasUnsaved = useMemo(() => {
-    return arRows.some(r => r._draft) || apRows.some(r => r._draft);
+    return arRows.some(r => r._draft || r._dirty) || apRows.some(r => r._draft || r._dirty);
   }, [arRows, apRows]);
 
   if (!order?.id) {

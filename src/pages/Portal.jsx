@@ -60,7 +60,7 @@ const NODES_SEA = {
   4: [
     { name: "业务综合查询", icon: "search",   href: null, todo: "开发中" },
     { name: "箱量统计",     icon: "bar",      href: null, todo: "开发中" },
-    { name: "利润分析",     icon: "line",     href: null, todo: "开发中" },
+    { name: "利润分析",     icon: "line",     href: "#/profit-analysis" },
     { name: "对账明细",     icon: "filelist", href: null, todo: "开发中" },
   ],
 };
@@ -447,48 +447,21 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
     (async () => {
-      const [shipsRes, billsRes, recentRes] = await Promise.all([
-        supabase.from("shipments")
-          .select("id, lifecycle, has_hbl, qc_status, space_status, hbl_status, mbl_status, finance_status, created_at"),
-        supabase.from("bills")
-          .select("amount_total, amount_cny, settled_amount, created_at, status"),
+      // 统计走 RPC：1 次 SQL 聚合返回所有指标（之前要拉全表到前端算）
+      const [statsRes, recentRes] = await Promise.all([
+        supabase.rpc("portal_stats"),
         supabase.from("shipments")
           .select("id, order_no, customer, pol, pod, etd, lifecycle, created_at")
           .order("created_at", { ascending: false }).limit(10),
       ]);
-
-      const ships = shipsRes.data || [];
-      const monthOrders = ships.filter(s => s.created_at >= monthStart).length;
-      const openOrders = ships.filter(s => s.lifecycle !== "已关闭" && s.lifecycle !== "已完结").length;
-
-      // 各 SOP 节点未完成数（取 active 单）
-      const active = ships.filter(s => s.lifecycle !== "已关闭" && s.lifecycle !== "已完结");
-      const sopUntouched = {};
-      for (const node of SOP_NODES) {
-        const pool = node.requiresHbl ? active.filter(o => o.has_hbl) : active;
-        sopUntouched[node.code] = pool.filter(o => !isNodeDone(node, o[node.field])).length;
-      }
-
-      const bills = billsRes.data || [];
-      const monthBills = bills.filter(b => b.created_at >= monthStart).length;
-      // 已销账记原币，未销 CNY = amount_cny × (未销原币 / amount_total)
-      const unsettledCny = bills.reduce((s, b) => {
-        const total = Number(b.amount_total || 0);
-        const settled = Number(b.settled_amount || 0);
-        const cny = Number(b.amount_cny || 0);
-        if (total <= 0) return s;
-        const ratio = Math.max(0, 1 - settled / total);
-        return s + cny * ratio;
-      }, 0);
-
+      const s = statsRes.data || {};
       setStats({
-        monthOrders, openOrders, monthBills,
-        unsettledCny: Math.round(unsettledCny),
-        sopUntouched,
+        monthOrders: s.month_orders || 0,
+        openOrders:  s.open_orders  || 0,
+        monthBills:  s.month_bills  || 0,
+        unsettledCny: s.unsettled_cny || 0,
+        sopUntouched: s.sop_untouched || {},
         recent: recentRes.data || [],
       });
       setLoading(false);

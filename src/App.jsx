@@ -25,6 +25,7 @@ import InvoicesList from "./pages/InvoicesList.jsx";
 import PaymentsList from "./pages/PaymentsList.jsx";
 import ChargesList from "./pages/ChargesList.jsx";
 import ChargesPrint from "./pages/ChargesPrint.jsx";
+import ProfitAnalysis from "./pages/ProfitAnalysis.jsx";
 import SettlementsList from "./pages/SettlementsList.jsx";
 import ChargeTypesList from "./pages/ChargeTypesList.jsx";
 import ExchangeRatesList from "./pages/ExchangeRatesList.jsx";
@@ -237,6 +238,11 @@ export default function App() {
   if (route.startsWith("print/charges/")) {
     const shipmentId = route.slice("print/charges/".length);
     return <ChargesPrint shipmentId={shipmentId} onBack={() => window.close()} />;
+  }
+
+  // 利润分析看板 #/profit-analysis
+  if (route === "profit-analysis") {
+    return <ProfitAnalysis user={user} role={user.profile?.role} onBack={() => { window.location.hash = ""; }} />;
   }
 
   // 动态路由：单证 - 委托书 #/docs/booking/:id

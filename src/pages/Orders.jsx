@@ -17,6 +17,7 @@ import {
   ChargeTemplateApplyModal,
   ChargeTemplateSaveModal,
 } from "../components/ChargesToolbarModals.jsx";
+import { JoinSubTicketModal, RemoveSubTicketModal } from "../components/SubTicketModals.jsx";
 import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
@@ -121,7 +122,7 @@ export function OrdersPage({ user, onBack }) {
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
-  const [maxRows, setMaxRows] = useState(2000);
+  const [maxRows, setMaxRows] = useState(500);
   const [activeTab, setActiveTab] = useState("过滤");
 
   // 从 URL hash 解析 SOP 过滤参数（如 #/sea_export?sop=qc）
@@ -252,6 +253,21 @@ export function OrdersPage({ user, onBack }) {
       }
       // admin / finance：不加过滤
 
+      // 服务端过滤：搜索关键字 + ETD 日期范围
+      // 把 PostgREST 里有特殊含义的字符转义，避免破坏 .or() 表达式
+      const escIlike = (s) => String(s).replace(/[\\(),%]/g, "\\$&");
+      const q = (search || "").trim();
+      if (q) {
+        const esc = escIlike(q);
+        // 6 个最常用列；其它字段（HBL/容器号等）依然由前端二次过滤兜底
+        query = query.or(
+          `order_no.ilike.%${esc}%,mbl_no.ilike.%${esc}%,booking_no.ilike.%${esc}%,` +
+          `customer.ilike.%${esc}%,po.ilike.%${esc}%,vessel.ilike.%${esc}%`
+        );
+      }
+      if (filters.etd_from) query = query.gte("etd", filters.etd_from);
+      if (filters.etd_to)   query = query.lte("etd", filters.etd_to);
+
       const { data, error } = await query;
       if (error) console.error("load shipments error:", error);
       let result = data || [];
@@ -282,7 +298,7 @@ export function OrdersPage({ user, onBack }) {
     } finally {
       setLoading(false);
     }
-  }, [role, user?.id, user?.profile?.full_name, maxRows]);
+  }, [role, user?.id, user?.profile?.full_name, maxRows, search, filters.etd_from, filters.etd_to]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1366,6 +1382,9 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [templateOpen, setTemplateOpen] = useState(false);
   // ChargesPanel 操作句柄（用于费用 tab 下工具栏按钮调用）
   const chargesRef = useRef(null);
+  // 加入/移除分票 modal 开关（仅主拼场景）
+  const [joinSubOpen, setJoinSubOpen] = useState(false);
+  const [removeSubOpen, setRemoveSubOpen] = useState(false);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
@@ -2344,6 +2363,22 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           }
         }}
       />
+      {joinSubOpen && isMaster && (
+        <JoinSubTicketModal
+          master={order}
+          existingSubTickets={subTickets}
+          onClose={() => setJoinSubOpen(false)}
+          onJoined={onReload}
+        />
+      )}
+      {removeSubOpen && isMaster && (
+        <RemoveSubTicketModal
+          master={order}
+          existingSubTickets={subTickets}
+          onClose={() => setRemoveSubOpen(false)}
+          onRemoved={onReload}
+        />
+      )}
       <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
       {/* 第一行工具栏：主操作（白底） */}
@@ -3177,8 +3212,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             <div className="tms-tx-toolbar">
               <button className="primary" disabled={isLocked} onClick={createSubTicket}>+ 新增分票</button>
               <button disabled title="点击下方表格中分票号即可编辑">编辑分票</button>
-              <button disabled title="开发中">加入分票</button>
-              <button disabled title="开发中">移除分票</button>
+              <button disabled={isLocked} onClick={() => setJoinSubOpen(true)} title="把一个独立作业并入当前母拼">加入分票</button>
+              <button disabled={isLocked || subTickets.length === 0} onClick={() => setRemoveSubOpen(true)} title="把分票从母拼解绑成独立作业">移除分票</button>
             </div>
 
             {/* 分票表格 */}

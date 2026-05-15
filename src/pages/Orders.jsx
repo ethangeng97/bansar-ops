@@ -254,15 +254,16 @@ export function OrdersPage({ user, onBack }) {
       // admin / finance：不加过滤
 
       // 服务端过滤：搜索关键字 + ETD 日期范围
-      // 把 PostgREST 里有特殊含义的字符转义，避免破坏 .or() 表达式
-      const escIlike = (s) => String(s).replace(/[\\(),%]/g, "\\$&");
+      // PostgREST ilike 用 *  做通配符（裸 % 现在会被网关 500 掉，必须 URL-encode 或换成 *）
+      // 转义 \(),*  避免破坏 .or() 表达式
+      const escIlike = (s) => String(s).replace(/[\\(),*]/g, "\\$&");
       const q = (search || "").trim();
       if (q) {
         const esc = escIlike(q);
         // 6 个最常用列；其它字段（HBL/容器号等）依然由前端二次过滤兜底
         query = query.or(
-          `order_no.ilike.%${esc}%,mbl_no.ilike.%${esc}%,booking_no.ilike.%${esc}%,` +
-          `customer.ilike.%${esc}%,po.ilike.%${esc}%,vessel.ilike.%${esc}%`
+          `order_no.ilike.*${esc}*,mbl_no.ilike.*${esc}*,booking_no.ilike.*${esc}*,` +
+          `customer.ilike.*${esc}*,po.ilike.*${esc}*,vessel.ilike.*${esc}*`
         );
       }
       if (filters.etd_from) query = query.gte("etd", filters.etd_from);

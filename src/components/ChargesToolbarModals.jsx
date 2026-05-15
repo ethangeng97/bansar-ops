@@ -221,7 +221,7 @@ export function ChargeCopyFromShipmentModal({ currentShipmentId, chargeItems, pa
         .order("etd", { ascending: false, nullsLast: true })
         .limit(30);
       const term = q.trim();
-      if (term) qb = qb.or(`order_no.ilike.%${term}%,mbl_no.ilike.%${term}%,customer.ilike.%${term}%`);
+      if (term) qb = qb.or(`order_no.ilike.*${term}*,mbl_no.ilike.*${term}*,customer.ilike.*${term}*`);
       const { data } = await qb;
       if (!cancel) {
         setCandidates(data || []);

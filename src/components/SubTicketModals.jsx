@@ -46,7 +46,7 @@ export function JoinSubTicketModal({ master, existingSubTickets, onClose, onJoin
         .neq("booking_no", master.booking_no || "__none__")
         .order("created_at", { ascending: false })
         .limit(30);
-      if (term) qb = qb.or(`order_no.ilike.%${term}%,mbl_no.ilike.%${term}%,customer.ilike.%${term}%`);
+      if (term) qb = qb.or(`order_no.ilike.*${term}*,mbl_no.ilike.*${term}*,customer.ilike.*${term}*`);
       const { data } = await qb;
       if (!cancel) {
         setCandidates(data || []);

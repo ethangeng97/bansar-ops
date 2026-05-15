@@ -120,6 +120,10 @@ export function OrdersPage({ user, onBack }) {
   const [search, setSearch] = useState("");
   const [showFilter, setShowFilter] = useState(true);
   const [filters, setFilters] = useState({});
+  // 让 load() 内能读到最新的 filters（搜索按钮触发时），但不把它们塞进 useCallback deps，
+  // 否则用户每敲一个字符就会触发后端查询。
+  const filtersRef = useRef(filters);
+  useEffect(() => { filtersRef.current = filters; });
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
   const [maxRows, setMaxRows] = useState(500);
@@ -268,6 +272,24 @@ export function OrdersPage({ user, onBack }) {
       }
       if (filters.etd_from) query = query.gte("etd", filters.etd_from);
       if (filters.etd_to)   query = query.lte("etd", filters.etd_to);
+
+      // 标识类过滤字段推到服务端，避免"目标记录在最近 500 条之外就找不到"
+      // 这些字段不放进 useCallback deps（见 filtersRef 注释），所以从 ref 读最新值
+      const fNow = filtersRef.current || {};
+      const ilikeArg = (s) => `*${escIlike(s)}*`;
+      const mblQ = String(fNow.booking_no || "").trim();
+      if (mblQ) {
+        const e = escIlike(mblQ);
+        query = query.or(`booking_no.ilike.*${e}*,mbl_no.ilike.*${e}*,e_booking_no.ilike.*${e}*`);
+      }
+      const hblQ = String(fNow.hbl_no || "").trim();
+      if (hblQ) query = query.ilike("hbl_no", ilikeArg(hblQ));
+      const cntQ = String(fNow.container_no || "").trim();
+      if (cntQ) query = query.ilike("container_no", ilikeArg(cntQ));
+      const ordQ = String(fNow.order_no || "").trim();
+      if (ordQ) query = query.ilike("order_no", ilikeArg(ordQ));
+      const poQ = String(fNow.po || "").trim();
+      if (poQ) query = query.ilike("po", ilikeArg(poQ));
 
       const { data, error } = await query;
       if (error) console.error("load shipments error:", error);

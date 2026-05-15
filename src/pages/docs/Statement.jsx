@@ -455,7 +455,7 @@ function ChargeTable({ charges, chargeItemMap }) {
                 {cny.toFixed(2)}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888", fontSize: 9 }}>
-                {ch.notes || ""}
+                {ch.remark || ""}
               </td>
             </tr>
           );

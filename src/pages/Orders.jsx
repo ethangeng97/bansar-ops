@@ -2482,7 +2482,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             </>
           )}
           <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
-          <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入56舱单</Mi>
+          <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入舱单 (56/兴港)</Mi>
           <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
           <Mi arrow onClick={() => setTemplateOpen(true)} title="从模板创建 / 把当前作业存为模板">订舱模板</Mi>
           <Mi onClick={onReload}>刷新</Mi>

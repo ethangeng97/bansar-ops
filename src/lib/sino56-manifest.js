@@ -81,6 +81,7 @@ function parsePartyBlock(aoa, headerRow) {
     "名称": "name",
     "地址": "address",
     "国家/地区代码": "country_code",
+    "国家代码": "country_code",
     "电话": "phone",
     "AEO企业编码": "aeo",
     "具体联系人": "contact",
@@ -102,16 +103,22 @@ function parsePartyBlock(aoa, headerRow) {
 }
 
 // ───────────────────────────────────────────────────────────────
-// parseSino56Manifest
+// parseSino56Manifest — 解析 Sino56 或浙江兴港 .xls 舱单（自动按 row 0 识别）
+//   两个格式 ROW 1/2 头部 + cargo / container 段名 / party 块都略有差异，
+//   解析后返回相同结构供 flattenSino56ForApply 使用
 // ───────────────────────────────────────────────────────────────
 export async function parseSino56Manifest(arrayBuffer) {
   const XLSX = await getXLSX();
   const wb = XLSX.read(arrayBuffer, { type: "array" });
-  const sheetName = wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
-  // 转成二维数组，按空格 fill 默认值，保留所有 row（包括空行做对齐）
+  const sheet = wb.Sheets[wb.SheetNames[0]];
   const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: true, raw: false });
 
+  const banner = (aoa[0] || []).map(c => s(c)).join(" ");
+  if (banner.includes("浙江兴港") || banner.includes("兴港对接")) return parseXinggang(aoa);
+  return parseSino56(aoa);
+}
+
+function parseSino56(aoa) {
   const out = {
     vessel: "", voyage: "", pod: "",
     mbl_no: "", booking_no: "",
@@ -203,6 +210,96 @@ export async function parseSino56Manifest(arrayBuffer) {
   }
 
   // Party 块
+  out.shipper = parsePartyBlock(aoa, findSectionRow(aoa, "发货人(Shipper)"));
+  out.consignee = parsePartyBlock(aoa, findSectionRow(aoa, "收货人(Consignee)"));
+  out.notifier = parsePartyBlock(aoa, findSectionRow(aoa, "通知人(Notifier)"));
+
+  return out;
+}
+
+// ───────────────────────────────────────────────────────────────
+// 浙江兴港预配舱单 3.0 布局：
+//   row 1: 船名 | <vessel> | 航次 | <voyage> | 总提单号 | <mbl> | 客户编号 | ...
+//          （无目的港/外运编号字段）
+//   rows 3-8 / 10-16 / 18-23: 发货人 / 收货人 / 通知人（"国家代码" 无斜杠）
+//   row 26: "明细品名及箱数据"  ← cargo lines
+//   row 27: 提单号 | 箱号 | 封号 | 箱型 | 英文品名 | HSCode | 件数 | 包装单位 | 毛重(KGS) | 体积(CBM) | 唛头 | UN | CL | 总重
+//   row 32: "按箱统计数据 - (系统自动合成)"  ← container summary
+//   row 33: 按箱箱号 | 按箱封号 | 按箱箱型 | 按箱总品名 | 按箱总件数 | 按箱总毛重 | 按箱总体积
+//   后续 "分票统计数据" / "总票统计数据" 系统自动合成，无 VGM
+// ───────────────────────────────────────────────────────────────
+function parseXinggang(aoa) {
+  const out = {
+    vessel: "", voyage: "", pod: "",
+    mbl_no: "", booking_no: "",
+    containers: [],
+    cargoLines: [],
+    shipper: null, consignee: null, notifier: null,
+  };
+
+  // 头部单行：扫前几行的 label→next-cell
+  for (let i = 0; i < Math.min(aoa.length, 4); i++) {
+    const row = aoa[i] || [];
+    for (let j = 0; j < row.length; j++) {
+      const label = s(row[j]);
+      const val = s(row[j + 1]);
+      if (!val) continue;
+      if (label === "船名") out.vessel = val;
+      else if (label === "航次") out.voyage = val;
+      else if (label === "总提单号") out.mbl_no = val;
+      else if (label === "客户编号") out.booking_no = val;  // 兴港无外运编号，把客户编号兜底
+    }
+  }
+
+  // cargo lines：「明细品名及箱数据」段
+  const cargoSection = findSectionRow(aoa, "明细品名及箱数据");
+  if (cargoSection >= 0) {
+    for (let i = cargoSection + 2; i < aoa.length; i++) {
+      const row = aoa[i] || [];
+      const c0 = s(row[0]);
+      if (!c0) break;
+      // 自动合成段一律跳出
+      if (/统计数据|品名条款|生成时间/.test(c0)) break;
+      // 列: 0=提单号 1=箱号 2=封号 3=箱型 4=英文品名 5=HSCode 6=件数 7=包装单位 8=毛重 9=体积 10=唛头 11=UN 12=CL (13=总重 忽略)
+      out.cargoLines.push({
+        hbl_no: c0,
+        container_no: s(row[1]),
+        seal_no: s(row[2]),
+        container_type: s(row[3]),
+        product_name_en: s(row[4]),
+        hs_code: s(row[5]),
+        qty: n(row[6]),
+        package_unit: s(row[7]) || "CARTONS",
+        gross_weight: n(row[8]),
+        volume: n(row[9]),
+        marks: s(row[10]),
+        un: s(row[11]),
+        cl: s(row[12]),
+      });
+    }
+  }
+
+  // containers：「按箱统计数据」段
+  //   兴港这段有合并单元格，实际列序：0=箱号 1=封号 2=箱型 3=品名 5=件数 7=毛重 9=体积
+  const ctnSection = findSectionRow(aoa, "按箱统计数据");
+  if (ctnSection >= 0) {
+    for (let i = ctnSection + 2; i < aoa.length; i++) {
+      const row = aoa[i] || [];
+      const c0 = s(row[0]);
+      if (!c0) break;
+      if (/统计数据|品名条款|生成时间/.test(c0)) break;
+      out.containers.push({
+        container_no: c0,
+        seal_no: s(row[1]),
+        container_type: s(row[2]),
+        qty: n(row[5]),
+        weight: n(row[7]),
+        volume: n(row[9]),
+      });
+    }
+  }
+
+  // Party 块（"国家代码" 已在 fieldMap 里加过映射）
   out.shipper = parsePartyBlock(aoa, findSectionRow(aoa, "发货人(Shipper)"));
   out.consignee = parsePartyBlock(aoa, findSectionRow(aoa, "收货人(Consignee)"));
   out.notifier = parsePartyBlock(aoa, findSectionRow(aoa, "通知人(Notifier)"));

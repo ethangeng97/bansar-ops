@@ -69,7 +69,7 @@ export default function Sino56ImportModal({ open, onClose, onApply }) {
     <div style={overlayStyle} onClick={onClose}>
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #eee" }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>📋 导入 56 舱单 (Sino56 .xls)</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>📋 导入舱单 (Sino56 / 浙江兴港 .xls)</div>
           <div style={{ flex: 1 }} />
           <button onClick={onClose} style={{ padding: "4px 12px" }}>关闭</button>
         </div>
@@ -78,7 +78,7 @@ export default function Sino56ImportModal({ open, onClose, onApply }) {
           {!parsed ? (
             <>
               <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>
-                把 Sino56 导出的 .xls 文件拖到下方，或点击选择。系统会自动提取船名/箱号/VGM/收发货人等字段。
+                把 Sino56 或浙江兴港的 .xls 舱单拖到下方，或点击选择。系统会自动识别格式并提取船名/箱号/收发货人等字段。
               </div>
               <div
                 onDragOver={e => { e.preventDefault(); setDragOver(true); }}

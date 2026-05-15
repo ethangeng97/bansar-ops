@@ -111,6 +111,18 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
     })();
   }, [shipmentId, statementId, mode]);
 
+  // 把浏览器 tab/打印另存为的默认文件名设成「主单号-对账单」
+  useEffect(() => {
+    if (shipments.length === 0) return;
+    const prev = document.title;
+    const fs = shipments[0];
+    const mainNo = (isBatch && statement)
+      ? statement.statement_no
+      : (fs.mbl_no || fs.booking_no || fs.order_no || "");
+    if (mainNo) document.title = `${mainNo}-对账单`;
+    return () => { document.title = prev; };
+  }, [shipments, statement, isBatch]);
+
   if (loading) return <div style={{ padding: 24 }}>加载中...</div>;
   if (error) return <div style={{ padding: 24, color: "red" }}>{error}</div>;
   if (shipments.length === 0) return <div style={{ padding: 24 }}>无数据</div>;

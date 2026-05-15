@@ -4197,17 +4197,15 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
     await load();
   };
 
-  // 复制成应付：把选中的应收行镜像到应付（清空结算单位/账单/状态，留待用户编辑）
-  const copyArToAp = (rowIds) => {
-    const ids = new Set(rowIds);
-    const src = arRows.filter(r => ids.has(r.id || r._id));
-    if (src.length === 0) return;
-    const drafts = src.map(r => ({
+  // 把若干行镜像到对侧（结算单位/账单/状态清空，留待用户编辑）
+  const mirrorRowsToOther = (srcRows, targetDirection) => {
+    if (!srcRows.length) return [];
+    return srcRows.map((r, i) => ({
       _draft: true,
-      _id: "draft-" + Date.now() + "-" + Math.random().toString(36).slice(2),
-      direction: "应付",
+      _id: "draft-" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + i,
+      direction: targetDirection,
       charge_item_id: r.charge_item_id,
-      partner_id: "",        // 供应商需另选
+      partner_id: "",
       partner_name: "",
       unit: r.unit || "票",
       quantity: r.quantity,
@@ -4218,8 +4216,40 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
       remark: r.remark || "",
       status: "草稿",
     }));
+  };
+
+  // 复制成应付：把选中的应收行镜像到应付
+  const copyArToAp = (rowIds) => {
+    const ids = new Set(rowIds);
+    const src = arRows.filter(r => ids.has(r.id || r._id));
+    const drafts = mirrorRowsToOther(src, "应付");
+    if (drafts.length === 0) return;
     setApRows(p => [...p, ...drafts]);
     setSelectedAr(new Set());
+  };
+
+  // 复制成应收：把选中的应付行镜像到应收
+  const copyApToAr = (rowIds) => {
+    const ids = new Set(rowIds);
+    const src = apRows.filter(r => ids.has(r.id || r._id));
+    const drafts = mirrorRowsToOther(src, "应收");
+    if (drafts.length === 0) return;
+    setArRows(p => [...p, ...drafts]);
+    setSelectedAp(new Set());
+  };
+
+  // 复制对侧全部费用到本侧（不要求勾选，过滤掉空草稿）
+  const copyOtherSide = (targetDirection) => {
+    const sourceRows = targetDirection === "应收" ? apRows : arRows;
+    const usable = sourceRows.filter(r => r.charge_item_id && !r._draft || (r.charge_item_id && r.unit_price));
+    if (usable.length === 0) {
+      alert(`没有${targetDirection === "应收" ? "应付" : "应收"}费用可以复制`);
+      return;
+    }
+    if (!confirm(`将 ${usable.length} 条${targetDirection === "应收" ? "应付" : "应收"}费用复制到${targetDirection}？\n（结算单位会清空，需要重新选择）`)) return;
+    const drafts = mirrorRowsToOther(usable, targetDirection);
+    if (targetDirection === "应收") setArRows(p => [...p, ...drafts]);
+    else setApRows(p => [...p, ...drafts]);
   };
 
   // 批量改字段（仅本地状态；保存按钮统一持久化）
@@ -4399,6 +4429,13 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
             {canEdit && (
               <>
                 <button onClick={() => addBlankRow(direction)} style={btnSmallPrimary(color.text)}>+ 费用名称</button>
+                <button
+                  onClick={() => copyOtherSide(direction)}
+                  style={btnSmallPrimary("#722ed1")}
+                  title={`将所有${direction === "应收" ? "应付" : "应收"}费用复制到此处（结算单位需重选）`}
+                >
+                  ⎘ 复制{direction === "应收" ? "应付" : "应收"}
+                </button>
                 {selected.size > 0 && (
                   <>
                     <button onClick={() => createBill(direction)} style={btnSmallPrimary("#13c2c2")}>
@@ -4413,7 +4450,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
                       selectedHasBound={selectedHasBound}
                       onDelete={() => deleteRows(direction, [...selected])}
                       onUnbind={() => unbindBill(direction)}
-                      onCopyToAp={() => copyArToAp([...selected])}
+                      onCopyToOther={() => direction === "应收" ? copyArToAp([...selected]) : copyApToAr([...selected])}
                       onModifyPartner={() => setBatchModal({ direction, action: "partner", rowIds: [...selected] })}
                       onModifyCurrency={() => setBatchModal({ direction, action: "currency", rowIds: [...selected] })}
                       onModifyRate={() => setBatchModal({ direction, action: "rate", rowIds: [...selected] })}
@@ -4429,6 +4466,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
         <table className="tms-tx-table" style={{ margin: 0, width: "100%", borderRadius: 0, fontSize: 11 }}>
           <thead>
             <tr>
+              <th style={{ width: 22, textAlign: "center" }} title="拖动排序"></th>
               <th style={{ width: 30, textAlign: "center" }}>
                 {canEdit && (
                   <input type="checkbox"
@@ -4455,7 +4493,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={16} style={{ textAlign: "center", padding: 20, color: "#999" }}>
+              <tr><td colSpan={17} style={{ textAlign: "center", padding: 20, color: "#999" }}>
                 暂无{direction}，点上方「+ 费用名称」添加
               </td></tr>
             ) : rows.map((r, idx) => {
@@ -4465,19 +4503,30 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
               const lockedByBill = isRowLockedByBill(r);    // 已开票/已结算账单锁定
               const rowEditable = canEdit && !lockedByBill;   // 整行是否可编辑
               const rowBill = r.bill_id ? billMap[r.bill_id] : null;
+              const dragEnabled = rowEditable;
               return (
                 <tr key={rowId}
-                  draggable={rowEditable && !isDraft}
-                  onDragStart={() => onDragStart(rowId)}
                   onDragOver={onDragOver}
                   onDrop={() => onDrop(direction, rowId)}
                   style={{
                     background: isDraft ? "#fff8e9"
                               : lockedByBill ? "#f5f5f5"
                               : isSelected ? "#e6f4ff" : undefined,
-                    cursor: rowEditable && !isDraft ? "move" : undefined,
                     opacity: lockedByBill ? 0.85 : 1,
                   }}>
+                  <td
+                    draggable={dragEnabled}
+                    onDragStart={dragEnabled ? () => onDragStart(rowId) : undefined}
+                    onDragEnd={() => setDraggingId(null)}
+                    style={{
+                      textAlign: "center",
+                      cursor: dragEnabled ? "grab" : "not-allowed",
+                      color: "#bbb",
+                      userSelect: "none",
+                      fontSize: 13,
+                    }}
+                    title={dragEnabled ? "拖动排序" : (lockedByBill ? "已绑定账单，不能排序" : "")}
+                  >⋮⋮</td>
                   <td style={{ textAlign: "center" }}>
                     {canEdit && (
                       <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(direction, rowId)} />
@@ -4604,7 +4653,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
             })}
             {rows.length > 0 && (
               <tr style={{ background: color.bgLight, fontWeight: "bold" }}>
-                <td colSpan={11} style={{ textAlign: "right", color: color.text }}>合计 (CNY):</td>
+                <td colSpan={12} style={{ textAlign: "right", color: color.text }}>合计 (CNY):</td>
                 <td style={{ textAlign: "right", color: color.text, fontSize: 13 }}>{totalCny.toFixed(2)}</td>
                 <td colSpan={4}></td>
               </tr>
@@ -4772,7 +4821,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
 
 // 批量操作下拉菜单
 function BatchOpsMenu({ direction, open, onToggle, onClose, selectedCount, selectedHasBound,
-                       onDelete, onUnbind, onCopyToAp, onModifyPartner, onModifyCurrency, onModifyRate }) {
+                       onDelete, onUnbind, onCopyToOther, onModifyPartner, onModifyCurrency, onModifyRate }) {
   const wrapRef = useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -4811,7 +4860,7 @@ function BatchOpsMenu({ direction, open, onToggle, onClose, selectedCount, selec
           {item("修改结算单位", onModifyPartner)}
           {item("修改币种", onModifyCurrency)}
           {item("修改汇率", onModifyRate)}
-          {direction === "应收" && item("复制成应付", onCopyToAp)}
+          {item(direction === "应收" ? "复制成应付" : "复制成应收", onCopyToOther)}
           {item("解绑账单", onUnbind, { disabled: !selectedHasBound })}
           <div style={{ height: 1, background: "#f0f0f0", margin: "4px 0" }} />
           {item("删除", onDelete, { danger: true })}

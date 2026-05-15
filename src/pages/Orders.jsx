@@ -1672,7 +1672,28 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             sort_order: i,
           };
         });
-        await supabase.from("shipment_containers").insert(rows);
+        // 按 (shipment_id, container_no) 去重：重复导入同一份舱单时，已有的箱号 update，
+        // 没见过的箱号才 insert。container_no 为空的行直接 insert（无法判定是否同一箱）。
+        const { data: existing } = await supabase.from("shipment_containers")
+          .select("id, container_no").eq("shipment_id", order.id);
+        const idByNo = new Map();
+        for (const r of (existing || [])) {
+          if (r.container_no) idByNo.set(r.container_no, r.id);
+        }
+        const toInsert = [];
+        const toUpdate = [];
+        for (const r of rows) {
+          if (r.container_no && idByNo.has(r.container_no)) {
+            toUpdate.push({ id: idByNo.get(r.container_no), row: r });
+          } else {
+            toInsert.push(r);
+          }
+        }
+        if (toInsert.length) await supabase.from("shipment_containers").insert(toInsert);
+        for (const u of toUpdate) {
+          const { shipment_id: _ignore, ...patch } = u.row;
+          await supabase.from("shipment_containers").update(patch).eq("id", u.id);
+        }
 
         // 同步 shipments.qty_container 汇总字段（对账单 / 列表页等老代码读这个）
         // 把刚插的 + DB 已有的全部 shipment_containers 行 group by 箱型 → 拼成 "1x40HC,2x20GP"

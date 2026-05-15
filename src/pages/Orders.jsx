@@ -1650,6 +1650,25 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           };
         });
         await supabase.from("shipment_containers").insert(rows);
+
+        // 同步 shipments.qty_container 汇总字段（对账单 / 列表页等老代码读这个）
+        // 把刚插的 + DB 已有的全部 shipment_containers 行 group by 箱型 → 拼成 "1x40HC,2x20GP"
+        const { data: allCtns } = await supabase.from("shipment_containers")
+          .select("container_size, container_type, qty").eq("shipment_id", order.id);
+        const map = {};
+        for (const r of (allCtns || [])) {
+          const key = `${r.container_size || ""}${r.container_type || ""}`;
+          if (!key) continue;
+          map[key] = (map[key] || 0) + (parseInt(r.qty) || 0);
+        }
+        const summary = Object.entries(map)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, q]) => `${q}x${k}`)
+          .join(",");
+        if (summary) {
+          await supabase.from("shipments").update({ qty_container: summary }).eq("id", order.id);
+          setEd(prev => ({ ...prev, qty_container: summary }));
+        }
       } catch (e) {
         console.error("Sino56 import: insert shipment_containers error:", e);
       }

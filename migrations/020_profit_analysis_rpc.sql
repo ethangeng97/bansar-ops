@@ -50,7 +50,7 @@ AS $$
       CASE p_dimension
         WHEN 'month'       THEN COALESCE(to_char(s.etd, 'YYYY-MM'), '未排船')
         WHEN 'customer'    THEN COALESCE(s.customer, '（无委托单位）')
-        WHEN 'salesperson' THEN COALESCE(up.display_name, up.full_name, up.email, '（未指派销售）')
+        WHEN 'salesperson' THEN COALESCE(up.display_name, up.full_name, '（未指派销售）')
         WHEN 'route'       THEN COALESCE(s.pol, '?') || ' → ' || COALESCE(s.pod, '?')
         WHEN 'carrier'     THEN COALESCE(s.carrier, '（无船公司）')
         ELSE 'all'

@@ -314,6 +314,55 @@ export default function ChargesPanel({ shipment, currentUser, canEdit = true, on
     await reload()
   }
 
+  // 拖拽重排（限同 direction 内）
+  const reorderRows = (fromIdx, toIdx, direction) => {
+    if (fromIdx === toIdx) return
+    setRows(prev => {
+      const section = prev.filter(r => r.direction === direction)
+      if (fromIdx < 0 || fromIdx >= section.length || toIdx < 0 || toIdx >= section.length) return prev
+      const next = [...section]
+      const [moved] = next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, moved)
+      next.forEach((r, i) => { r.sort_order = i })
+      let q = 0
+      return prev.map(r => r.direction === direction ? next[q++] : r)
+    })
+    setDirty(true)
+  }
+
+  // 复制对侧费用为本侧草稿（结算单位清空，需手动选）
+  const copyFromOther = (targetDirection) => {
+    const sourceDir = targetDirection === 'AR' ? 'AP' : 'AR'
+    const source = rows.filter(r => r.direction === sourceDir && r.charge_item_id)
+    if (source.length === 0) {
+      alert(`没有${sourceDir === 'AR' ? '应收' : '应付'}费用可以复制`)
+      return
+    }
+    if (!confirm(`将 ${source.length} 条${sourceDir === 'AR' ? '应收' : '应付'}费用复制到${targetDirection === 'AR' ? '应收' : '应付'}？\n（结算单位会清空，需要重新选择）`)) return
+    const base = rows.filter(r => r.direction === targetDirection).length
+    const ts = Date.now()
+    const copies = source.map((r, i) => ({
+      _tmpId: `tmp_${ts}_${i}_${Math.random()}`,
+      _draft: true,
+      shipment_id: shipment.id,
+      direction: targetDirection,
+      charge_item_id: r.charge_item_id,
+      partner_id: null,
+      unit: r.unit,
+      quantity: r.quantity,
+      currency: r.currency,
+      exchange_rate: r.exchange_rate,
+      unit_price: r.unit_price,
+      tax_rate: r.tax_rate,
+      sort_order: base + i,
+      remark: r.remark,
+      status: 'draft',
+      bill_id: null,
+    }))
+    setRows(prev => [...prev, ...copies])
+    setDirty(true)
+  }
+
   // 解绑账单
   const unbindBill = async () => {
     const ids = [...selected].filter(id => !String(id).startsWith('tmp_'))
@@ -382,6 +431,8 @@ export default function ChargesPanel({ shipment, currentUser, canEdit = true, on
         onAdd={() => addRow('AR')}
         onCreatePartner={handleCreatePartner}
         onOpenBill={onOpenBill}
+        onReorder={(from, to) => reorderRows(from, to, 'AR')}
+        onCopyFromOther={() => copyFromOther('AR')}
         sumCny={arTotal}
         themeColor="#1890ff"
       />
@@ -407,6 +458,8 @@ export default function ChargesPanel({ shipment, currentUser, canEdit = true, on
         onAdd={() => addRow('AP')}
         onCreatePartner={handleCreatePartner}
         onOpenBill={onOpenBill}
+        onReorder={(from, to) => reorderRows(from, to, 'AP')}
+        onCopyFromOther={() => copyFromOther('AP')}
         sumCny={apTotal}
         themeColor="#fa8c16"
       />
@@ -436,9 +489,13 @@ function ChargeSection({
   title, direction, rows, partnerLabel, partnerType, partners, chargeItems,
   rateMap, billMap, selected, canEdit,
   onToggleSel, onToggleAll, onUpdate, onAdd, onCreatePartner, onOpenBill,
+  onReorder, onCopyFromOther,
   sumCny, themeColor
 }) {
   const allSelected = rows.length > 0 && rows.every(r => selected.has(r.id || r._tmpId))
+  const [dragFromIdx, setDragFromIdx] = useState(null)
+  const [dragOverIdx, setDragOverIdx] = useState(null)
+  const copyLabel = direction === 'AR' ? '复制应付' : '复制应收'
 
   const calcAmount = (r) => {
     const total = Number(r.quantity || 0) * Number(r.unit_price || 0) * (1 + Number(r.tax_rate || 0) / 100)
@@ -464,6 +521,9 @@ function ChargeSection({
         {canEdit && (
           <>
             <div style={{ flex: 1 }} />
+            <button onClick={onCopyFromOther} className="tms-btn tms-btn-sm" title={`复制对侧费用为${direction === 'AR' ? '应收' : '应付'}草稿`}>
+              ⎘ {copyLabel}
+            </button>
             <button onClick={onAdd} className="tms-btn tms-btn-sm">+ 费用名称</button>
           </>
         )}
@@ -473,6 +533,7 @@ function ChargeSection({
         <table className="tms-table" style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fafafa' }}>
+              <th style={{ width: 24, padding: 6 }} title="拖动排序"></th>
               <th style={{ width: 30, padding: 6 }}>
                 <input type="checkbox" checked={allSelected} onChange={onToggleAll} />
               </th>
@@ -500,12 +561,46 @@ function ChargeSection({
               const amt = calcAmount(r)
               const bill = r.bill_id ? billMap[r.bill_id] : null
 
+              const dragEnabled = canEdit && !locked && !!onReorder
+              const isDropTarget = dragOverIdx === idx && dragFromIdx !== null && dragFromIdx !== idx
               return (
                 <tr key={id}
+                  onDragOver={dragEnabled ? (e) => {
+                    if (dragFromIdx === null) return
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    if (dragOverIdx !== idx) setDragOverIdx(idx)
+                  } : undefined}
+                  onDragLeave={dragEnabled ? () => {
+                    if (dragOverIdx === idx) setDragOverIdx(null)
+                  } : undefined}
+                  onDrop={dragEnabled ? (e) => {
+                    e.preventDefault()
+                    const from = dragFromIdx
+                    setDragFromIdx(null)
+                    setDragOverIdx(null)
+                    if (from === null || from === idx) return
+                    onReorder(from, idx)
+                  } : undefined}
                   style={{
                     background: draft ? '#fffbe6' : (locked ? '#f5f5f5' : '#fff'),
-                    borderTop: '1px solid #f0f0f0'
+                    borderTop: isDropTarget ? `2px solid ${themeColor}` : '1px solid #f0f0f0',
+                    opacity: dragFromIdx === idx ? 0.4 : 1,
                   }}>
+                  <td style={{ padding: 4, textAlign: 'center', color: '#bbb',
+                               cursor: dragEnabled ? 'grab' : 'not-allowed',
+                               userSelect: 'none', fontSize: 14 }}
+                    draggable={dragEnabled}
+                    onDragStart={dragEnabled ? (e) => {
+                      setDragFromIdx(idx)
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData('text/plain', String(idx))
+                    } : undefined}
+                    onDragEnd={() => { setDragFromIdx(null); setDragOverIdx(null) }}
+                    title={dragEnabled ? '拖动排序' : (locked ? '已绑定账单，不能排序' : '')}
+                  >
+                    ⋮⋮
+                  </td>
                   <td style={{ padding: 4, textAlign: 'center' }}>
                     <input type="checkbox"
                       checked={selected.has(id)}
@@ -651,7 +746,7 @@ function ChargeSection({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={15} style={{ padding: 20, textAlign:'center', color:'#999', fontSize: 12 }}>
+                <td colSpan={16} style={{ padding: 20, textAlign:'center', color:'#999', fontSize: 12 }}>
                   暂无{direction === 'AR' ? '应收' : '应付'}，点上方「+ 费用名称」添加
                 </td>
               </tr>
@@ -659,7 +754,7 @@ function ChargeSection({
           </tbody>
           <tfoot>
             <tr style={{ background: '#fafafa', fontWeight: 600 }}>
-              <td colSpan={11} style={{ padding: 6, textAlign:'right' }}>合计 (CNY)：</td>
+              <td colSpan={12} style={{ padding: 6, textAlign:'right' }}>合计 (CNY)：</td>
               <td style={{ padding: 6, textAlign:'right', fontFamily:'monospace', color: themeColor }}>
                 {sumCny.toFixed(2)}
               </td>

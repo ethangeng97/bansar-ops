@@ -20,17 +20,39 @@ const FIELD_LABELS = {
   shipper: "发货人", consignee: "收货人", notify_party: "通知人",
 };
 
-export default function Sino56ImportModal({ open, onClose, onApply }) {
+export default function Sino56ImportModal({ open, onClose, onApply, subShipments = [], currentOrderNo = "" }) {
   const [parsed, setParsed] = useState(null);
   const [fileName, setFileName] = useState("");
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [mappings, setMappings] = useState({}); // { [hbl_no]: shipment_id | "" }（""=母单）
   const inputRef = useRef(null);
 
   if (!open) return null;
 
-  const reset = () => { setParsed(null); setFileName(""); setErr(null); };
+  const reset = () => { setParsed(null); setFileName(""); setErr(null); setMappings({}); };
+
+  // 默认映射启发式：hbl 后缀字母 A/B/C... 对应分票尾号 -1/-2/-3...
+  // 用户告诉我："1-A、2-B、3-C 基本上就是对应的，但不是锁死，看实际情况"
+  const buildDefaultMappings = (uniqueHbls, subs) => {
+    const tailOf = (no) => parseInt((no || "").match(/-(\d+)$/)?.[1] || "0") || 0;
+    const suffixOf = (hbl) => {
+      const m = String(hbl || "").match(/([A-Z])$/i);
+      return m ? m[1].toUpperCase().charCodeAt(0) - 64 : 0; // A=1, B=2...
+    };
+    const subByTail = {};
+    for (const s of subs) {
+      const t = tailOf(s.order_no);
+      if (t > 0) subByTail[t] = s.id;
+    }
+    const out = {};
+    for (const hbl of uniqueHbls) {
+      const idx = suffixOf(hbl);
+      out[hbl] = subByTail[idx] || ""; // 找不到 → 默认走母单
+    }
+    return out;
+  };
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -42,6 +64,12 @@ export default function Sino56ImportModal({ open, onClose, onApply }) {
       const data = await parseSino56Manifest(buf);
       const { fields, extras } = flattenSino56ForApply(data);
       setParsed({ raw: data, fields, extras });
+      // 算出唯一 HBL，按字母后缀排序，建默认映射
+      const uniqueHbls = [...new Set((extras.cargoLines || []).map(c => c.hbl_no).filter(Boolean))]
+        .sort();
+      if (uniqueHbls.length > 0 && subShipments.length > 0) {
+        setMappings(buildDefaultMappings(uniqueHbls, subShipments));
+      }
     } catch (e) {
       console.error(e);
       setErr("解析失败：" + (e?.message || e));
@@ -60,7 +88,9 @@ export default function Sino56ImportModal({ open, onClose, onApply }) {
   const updateField = (k, v) => setParsed(p => ({ ...p, fields: { ...p.fields, [k]: v } }));
 
   const doApply = () => {
-    onApply(parsed.fields, parsed.extras);
+    // 把 hbl→分票 映射打包到 extras 里，父组件 applySino56Import 据此把 cargo 写到对应分票
+    const extras = { ...parsed.extras, mappings };
+    onApply(parsed.fields, extras);
     reset();
     onClose();
   };
@@ -140,6 +170,47 @@ export default function Sino56ImportModal({ open, onClose, onApply }) {
                   ))}
                 </tbody>
               </table>
+
+              {/* HBL → 分票 映射（自拼母单才出现） */}
+              {(subShipments.length > 0 && Object.keys(mappings).length > 0) && (
+                <div style={{ marginTop: 12, padding: 10, background: "#fffbe6", border: "1px solid #ffe58f", borderRadius: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#874d00", marginBottom: 6 }}>
+                    分票分配（{currentOrderNo} 是自拼母单）
+                  </div>
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
+                    舱单里每个 HBL 写到哪个分票。默认按字母后缀对位（A→-1, B→-2...），可改。
+                  </div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "#fff7d6" }}>
+                        <th style={{ ...th, width: "40%" }}>HBL 号</th>
+                        <th style={th}>目标分票</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.keys(mappings).sort().map(hbl => (
+                        <tr key={hbl}>
+                          <td style={td}>{hbl}</td>
+                          <td style={td}>
+                            <select
+                              value={mappings[hbl] ?? ""}
+                              onChange={e => setMappings(p => ({ ...p, [hbl]: e.target.value }))}
+                              style={{ width: "100%", fontSize: 12, padding: "2px 4px" }}
+                            >
+                              <option value="">母单 ({currentOrderNo})</option>
+                              {subShipments.map(s => (
+                                <option key={s.id} value={s.id}>
+                                  {s.order_no}{s.customer ? `（${s.customer}）` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* 明细预览（只读，方便确认） */}
               {(parsed.extras.containers?.length > 0) && (

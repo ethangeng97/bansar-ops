@@ -1565,20 +1565,20 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             return na - nb;
           });
           setSubTickets(sorted);
-          // 聚合分票的箱信息和货物明细
-          const ids = sorted.map(s => s.id);
-          if (ids.length > 0) {
-            Promise.all([
-              supabase.from("shipment_containers").select("*").in("shipment_id", ids).order("sort_order", { ascending: true }),
-              supabase.from("cargo_items").select("*").in("shipment_id", ids).order("sort_order", { ascending: true }),
-            ]).then(([ctnRes, cargoRes]) => {
-              setMasterAggContainers(ctnRes.data || []);
-              setMasterAggCargoLines(cargoRes.data || []);
-            });
-          } else {
-            setMasterAggContainers([]);
-            setMasterAggCargoLines([]);
-          }
+          // 聚合：母单 + 分票 的箱信息 / 货物明细
+          // 容器通常归母单（拼箱共用一只箱），所以查询要包含 order.id；
+          // 货物明细按设计走分票（每个货主一条）。
+          const subIds = sorted.map(s => s.id);
+          const ctnIds = [order.id, ...subIds];
+          Promise.all([
+            supabase.from("shipment_containers").select("*").in("shipment_id", ctnIds).order("sort_order", { ascending: true }),
+            subIds.length > 0
+              ? supabase.from("cargo_items").select("*").in("shipment_id", subIds).order("sort_order", { ascending: true })
+              : Promise.resolve({ data: [] }),
+          ]).then(([ctnRes, cargoRes]) => {
+            setMasterAggContainers(ctnRes.data || []);
+            setMasterAggCargoLines(cargoRes.data || []);
+          });
         });
     }
   }, [order.id]);
@@ -1627,11 +1627,25 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     } else {
       setEd(prev => ({ ...prev, ...fields }));
     }
-    // 货物明细：追加全部
-    if (Array.isArray(extras?.cargoLines) && extras.cargoLines.length > 0) {
+    // 货物明细：按 mappings 分流。映射到分票的直接写 DB（按 hbl_no 替换），
+    // 没映射 / 映射到"母单"的走旧路径（追加到 cargoLinesDraft，保存时落到本票）。
+    const mappings = extras?.mappings || {};
+    const allCargo = Array.isArray(extras?.cargoLines) ? extras.cargoLines : [];
+    const toMaster = [];
+    const bySubId = {};
+    for (const cl of allCargo) {
+      const target = mappings[cl.hbl_no];
+      if (target) {
+        if (!bySubId[target]) bySubId[target] = [];
+        bySubId[target].push(cl);
+      } else {
+        toMaster.push(cl);
+      }
+    }
+    if (toMaster.length > 0) {
       setCargoLinesDraft(prev => [
         ...prev,
-        ...extras.cargoLines.map((cl, i) => ({
+        ...toMaster.map((cl, i) => ({
           _tmp: Date.now() + Math.random() + i,
           sort_order: prev.length + i + 1,
           hbl_no: cl.hbl_no || fields.mbl_no || null,
@@ -1649,6 +1663,36 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           cl: cl.cl || null,
         })),
       ]);
+    }
+    // 写到分票：按 (sub_id, hbl_no) 替换，重导入幂等
+    for (const [subId, lines] of Object.entries(bySubId)) {
+      try {
+        const hbls = [...new Set(lines.map(l => l.hbl_no).filter(Boolean))];
+        if (hbls.length > 0) {
+          await supabase.from("cargo_items").delete()
+            .eq("shipment_id", subId).in("hbl_no", hbls);
+        }
+        const rows = lines.map((cl, i) => ({
+          shipment_id: subId,
+          sort_order: i + 1,
+          hbl_no: cl.hbl_no || fields.mbl_no || null,
+          container_no: cl.container_no || null,
+          seal_no: cl.seal_no || null,
+          container_type: cl.container_type || null,
+          product_name_en: cl.product_name_en || null,
+          hs_code: cl.hs_code || null,
+          qty: cl.qty || null,
+          package_unit: cl.package_unit || "CARTONS",
+          gross_weight: cl.gross_weight || null,
+          volume: cl.volume || null,
+          marks: cl.marks || null,
+          un: cl.un || null,
+          cl: cl.cl || null,
+        }));
+        if (rows.length) await supabase.from("cargo_items").insert(rows);
+      } catch (e) {
+        console.error("Sino56 import: write cargo to sub", subId, "error:", e);
+      }
     }
     // 集装箱：每箱写一条 shipment_containers 行
     if (Array.isArray(extras?.containers) && extras.containers.length > 0 && order?.id) {
@@ -2399,6 +2443,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         open={sino56ImportOpen}
         onClose={() => setSino56ImportOpen(false)}
         onApply={applySino56Import}
+        subShipments={isMaster && order?.shipment_type === "Console" ? subTickets : []}
+        currentOrderNo={order?.order_no || ""}
       />
       <ProfitModal
         open={profitOpen}
@@ -3686,9 +3732,12 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
         <tbody>
           {containers.length === 0 ? (
             <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: "#999" }}>分票未录入集装箱</td></tr>
-          ) : containers.map((c, i) => (
+          ) : containers.map((c, i) => {
+            const tail = subTailById[c.shipment_id];
+            const source = tail ? `-${tail}` : "母单";
+            return (
             <tr key={c.id || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
-              <td style={cellBody}>-{subTailById[c.shipment_id] || "?"}</td>
+              <td style={cellBody}>{source}</td>
               <td style={cellBody}>{c.container_size || "—"}</td>
               <td style={cellBody}>{c.container_type || "—"}</td>
               <td style={{ ...cellBody, textAlign: "right" }}>{c.qty || "—"}</td>
@@ -3696,7 +3745,8 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
               <td style={cellBody}>{c.seal_no || "—"}</td>
               <td style={cellBody}>{c.notes || ""}</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
 

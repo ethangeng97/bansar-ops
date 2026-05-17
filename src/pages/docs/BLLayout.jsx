@@ -205,6 +205,10 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const totalPkg = rows.reduce((sum, r) => sum + (r.pkgs || 0), 0);
   const totalWt  = rows.reduce((sum, r) => sum + (r.gw || 0), 0);
   const totalCbm = rows.reduce((sum, r) => sum + (r.cbm || 0), 0);
+  // TOTAL 行里加一行品名汇总（多个不同品名用 " / " 连接）
+  const distinctProducts = mergedCargo.length > 0
+    ? [...new Set(mergedCargo.map(it => it.product_name_en).filter(Boolean))]
+    : (s.desc_en ? [s.desc_en] : []);
 
   // 分页
   const cargoPages = [];
@@ -587,6 +591,12 @@ function CargoPage({
                     <span>═══════</span>
                     {"\n"}
                     {totalPkg} {rows[0]?.unit || "CARTONS"}    {totalWt ? `${totalWt.toFixed(3)}KGS` : ""}    {totalCbm ? `${totalCbm.toFixed(3)}CBM` : ""}
+                    {distinctProducts.length > 0 && (
+                      <>
+                        {"\n"}
+                        {distinctProducts.join(" / ")}
+                      </>
+                    )}
                   </td>
                   <td style={{ ...tdStyle({ mono: true, align: "right", bold: true }) }}>
                     {totalWt ? totalWt.toFixed(3) : "—"}

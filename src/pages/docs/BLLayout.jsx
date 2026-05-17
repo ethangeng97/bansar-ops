@@ -334,6 +334,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           pageIdx={pageIdx} totalPages={totalPages}
           isFirstPage={pageIdx === 0} isLastCargoPage={pageIdx === totalCargoPages - 1}
           rows={pageRows} totalPkg={totalPkg} totalWt={totalWt} totalCbm={totalCbm}
+          distinctProducts={distinctProducts}
           isDraft={isDraft} isCopy={isCopy} isTelex={isTelex}
           s={s} co={co} blNo={blNo} onBoardDate={onBoardDate} issueDate={issueDate}
           isPrepaid={isPrepaid} isCollect={isCollect}
@@ -352,7 +353,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
 // ============================================================================
 function CargoPage({
   pageIdx, totalPages, isFirstPage, isLastCargoPage,
-  rows, totalPkg, totalWt, totalCbm,
+  rows, totalPkg, totalWt, totalCbm, distinctProducts = [],
   isDraft, isCopy, isTelex,
   s, co, blNo, onBoardDate, issueDate,
   isPrepaid, isCollect, numOriginals, blType, carrierName,
@@ -546,6 +547,30 @@ function CargoPage({
               </tr>
             </thead>
             <tbody>
+              {/* 首页 cargo 表顶部加 SUMMARY 横条，一眼能看到本票总件/毛/体 + 品名 */}
+              {isFirstPage && rows.length > 0 && totalPkg > 0 && (
+                <tr style={{ background: "#fff8e1" }}>
+                  <td style={{ ...tdStyle({ bold: true, fontSize: 10 }), color: "#874d00" }}>SUMMARY</td>
+                  <td style={tdStyle({ bold: true })}>
+                    {totalPkg} {rows[0]?.unit || "CARTONS"}
+                  </td>
+                  <td style={tdStyle({ bold: true })}>
+                    {totalPkg} {rows[0]?.unit || "CARTONS"}    {totalWt ? `${totalWt.toFixed(3)}KGS` : ""}    {totalCbm ? `${totalCbm.toFixed(3)}CBM` : ""}
+                    {distinctProducts.length > 0 && (
+                      <>
+                        {"\n"}
+                        {distinctProducts.join(" / ")}
+                      </>
+                    )}
+                  </td>
+                  <td style={{ ...tdStyle({ mono: true, align: "right", bold: true }) }}>
+                    {totalWt ? totalWt.toFixed(3) : "—"}
+                  </td>
+                  <td style={{ ...tdStyle({ mono: true, align: "right", bold: true }), borderRight: 0 }}>
+                    {totalCbm ? totalCbm.toFixed(3) : "—"}
+                  </td>
+                </tr>
+              )}
               {rows.length === 0 ? (
                 <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#999",
                                               border: "1px solid #555", borderTop: 0 }}>

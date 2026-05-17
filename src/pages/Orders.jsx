@@ -7,6 +7,7 @@ import ContainerEditor from "../components/ContainerEditor.jsx";
 import BLImportModal from "../components/BLImportModal.jsx";
 import Sino56ImportModal from "../components/Sino56ImportModal.jsx";
 import { buildSino56Manifest, downloadArrayBufferAsXls } from "../lib/sino56-manifest.js";
+import { exportDraftBLToXlsx } from "../lib/draft-bl-xlsx.js";
 import Statement from "./docs/Statement.jsx";
 import AttachmentsPanel from "../components/AttachmentsPanel.jsx";
 import HistoryModal from "../components/HistoryModal.jsx";
@@ -2530,6 +2531,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             <MiDropdown disabled={!order.id} options={[
               { label: "委托书",           onClick: () => window.open(`#/docs/booking/${order.id}`, "_blank") },
               { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}`, "_blank") },
+              { label: "📤 提单确认件 (Excel, 一代版)", onClick: () => exportDraftBLToXlsx(order.id) },
               { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}`, "_blank") },
               { label: "电放件",             onClick: () => window.open(`#/docs/telex/${order.id}`, "_blank") },
               { label: "放舱信息",           onClick: () => window.open(`#/docs/release/${order.id}`, "_blank") },

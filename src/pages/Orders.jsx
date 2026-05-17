@@ -3961,6 +3961,8 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
   const docs = [
     { key: "booking",  name: "订舱委托书",   en: "Booking Confirmation", desc: "发船公司/订舱代理，确认舱位",  ready: true },
     { key: "draft_bl", name: "提单确认件",   en: "Draft B/L",            desc: "发客户确认提单内容",            ready: true },
+    { key: "draft_bl_xlsx", name: "提单确认件 Excel", en: "Draft B/L (xlsx)", desc: "一代版，关键字段平铺表格",     ready: true,
+      action: () => exportDraftBLToXlsx(shipmentId) },
     { key: "bl_copy",  name: "提单 Copy",    en: "B/L Copy",             desc: "提单副本，签发后用",            ready: true },
     { key: "telex",    name: "电放件",       en: "Telex Release",        desc: "电放票专用，替代正本提单",      ready: true, highlight: isTelex },
     { key: "release",  name: "放舱信息",     en: "Release Notice",       desc: "舱位确认后通知发货方",          ready: true },
@@ -3988,15 +3990,26 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
             <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{d.en}</div>
             <div style={{ fontSize: 11, color: "#666", marginBottom: 10 }}>{d.desc}</div>
             {d.ready ? (
-              <a
-                href={`#/docs/${d.key}/${shipmentId}`}
-                target="_blank" rel="noreferrer"
-                style={{
-                  display: "inline-block", padding: "5px 14px",
-                  background: d.highlight ? "#fa541c" : "#1990FF", color: "#fff",
-                  textDecoration: "none", borderRadius: 3, fontSize: 12,
-                }}
-              >生成 / 打开 →</a>
+              d.action ? (
+                <button
+                  onClick={d.action}
+                  style={{
+                    padding: "5px 14px", border: "none",
+                    background: d.highlight ? "#fa541c" : "#1990FF", color: "#fff",
+                    borderRadius: 3, fontSize: 12, cursor: "pointer",
+                  }}
+                >下载 Excel →</button>
+              ) : (
+                <a
+                  href={`#/docs/${d.key}/${shipmentId}`}
+                  target="_blank" rel="noreferrer"
+                  style={{
+                    display: "inline-block", padding: "5px 14px",
+                    background: d.highlight ? "#fa541c" : "#1990FF", color: "#fff",
+                    textDecoration: "none", borderRadius: 3, fontSize: 12,
+                  }}
+                >生成 / 打开 →</a>
+              )
             ) : (
               <button disabled style={{
                 padding: "5px 14px", background: "#ccc", color: "#fff",

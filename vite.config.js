@@ -12,6 +12,7 @@ export default defineConfig({
             if (id.includes('react')) return 'vendor-react';
             if (id.includes('@supabase')) return 'vendor-supabase';
             if (id.includes('/xlsx/')) return 'vendor-xlsx';
+            if (id.includes('/exceljs/')) return 'vendor-exceljs';
             return 'vendor';
           }
           // 业务页面分包（每个模块独立 chunk）

@@ -129,14 +129,16 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     return str.replace(/(\d+x\d+)([A-Z]+)/g, "$1'$2");
   }
 
-  // 同品名 + 同 HS + 同箱号 + 同唛头的多条 cargo_items 自动合并成一行
-  //（仓库进仓批次拆分不该体现在提单上）
+  // 同品名 + 同 HS + 同唛头的多条 cargo_items 自动合并成一行。
+  // 不再按 container_no 拆 —— 提单的货物描述是按品名级的，跨箱同品名应合计；
+  // 每个箱的箱号已经在上方"集装箱块"里完整列出（cnInfo），无需在描述区重复拆。
+  // 之前按箱号拆会导致整柜同品名货物变 6 行 + TOTAL 被挤到末页，用户看不到合计。
   const mergedCargo = (() => {
     if (!cargoItems || cargoItems.length === 0) return [];
     const order = [];
     const map = new Map();
     for (const it of cargoItems) {
-      const key = [it.product_name_en || "", it.hs_code || "", it.container_no || "", it.marks || ""].join("|");
+      const key = [it.product_name_en || "", it.hs_code || "", it.marks || ""].join("|");
       if (!map.has(key)) {
         map.set(key, {
           ...it,

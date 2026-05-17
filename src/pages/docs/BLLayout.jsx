@@ -129,16 +129,14 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     return str.replace(/(\d+x\d+)([A-Z]+)/g, "$1'$2");
   }
 
-  // 同品名 + 同 HS + 同唛头的多条 cargo_items 自动合并成一行。
-  // 不再按 container_no 拆 —— 提单的货物描述是按品名级的，跨箱同品名应合计；
-  // 每个箱的箱号已经在上方"集装箱块"里完整列出（cnInfo），无需在描述区重复拆。
-  // 之前按箱号拆会导致整柜同品名货物变 6 行 + TOTAL 被挤到末页，用户看不到合计。
+  // 同品名 + 同 HS + 同箱号 + 同唛头的多条 cargo_items 自动合并成一行
+  //（仓库进仓批次拆分不该体现在提单上，但每个箱仍独立一行以显示箱号 / 件毛体）
   const mergedCargo = (() => {
     if (!cargoItems || cargoItems.length === 0) return [];
     const order = [];
     const map = new Map();
     for (const it of cargoItems) {
-      const key = [it.product_name_en || "", it.hs_code || "", it.marks || ""].join("|");
+      const key = [it.product_name_en || "", it.hs_code || "", it.container_no || "", it.marks || ""].join("|");
       if (!map.has(key)) {
         map.set(key, {
           ...it,
@@ -156,9 +154,32 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     return order.map(k => map.get(k));
   })();
 
+  // 每行的"集装箱块"按行的 container_no 单独构建 —— 之前所有行都塞 buildContainerBlock()
+  // 整列（N 个柜子全列出），N 行就重复 N 次，把单页撑爆。改为每行只显示该行那只柜子。
+  // FCL/CY-CY 标记只挂在最后一行，避免每行都尾随。
+  const ctnByNo = {};
+  for (const c of containers) {
+    const k = (c.container_no || "").trim();
+    if (k) ctnByNo[k] = c;
+  }
+  const buildSingleCtnBlock = (containerNo, isLastRow) => {
+    const lines = [];
+    const k = (containerNo || "").trim();
+    const c = ctnByNo[k];
+    if (c) {
+      if (c.container_no) lines.push(c.container_no);
+      lines.push(`${c.qty || 1}x${c.container_size}'${c.container_type}`);
+      if (c.seal_no) lines.push(c.seal_no);
+    } else if (k) {
+      lines.push(k);
+    }
+    if (isLastRow) lines.push(`${fclTag}${s.service_type || "CY-CY"}`);
+    return lines.join("\n");
+  };
+
   let rows = mergedCargo.length > 0
     ? mergedCargo.map((it, i) => ({
-        cnInfo: buildContainerBlock(),
+        cnInfo: buildSingleCtnBlock(it.container_no, i === mergedCargo.length - 1),
         marks: it.marks || s.marks || "N/M",
         pkgs: it.qty || 0,
         unit: it.package_unit || "CARTONS",
@@ -169,6 +190,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         cbm: parseFloat(it.volume) || 0,
       }))
     : [{
+        // 无 cargo_items 时回退：单行显示所有柜子的汇总块（旧行为）
         cnInfo: buildContainerBlock(),
         marks: s.marks || "N/M",
         pkgs: parseInt(s.qty_packages) || 0,

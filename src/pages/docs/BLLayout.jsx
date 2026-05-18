@@ -95,7 +95,10 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   //   FCL/CY-CY
   // 多箱子时多组重复
   const isFCL = (s.shipment_type || "").toUpperCase().includes("FCL") || (s.shipment_type || "") === "整箱";
-  const fclTag = isFCL ? "FCL/" : "";
+  // 自拼分票（Console + 带 -N 后缀）跟普通 LCL 一样，对客户而言都是拼箱
+  const isLCL = (s.shipment_type || "").toUpperCase() === "LCL"
+    || (s.shipment_type === "Console" && /-\d+$/.test(s.order_no || ""));
+  const fclTag = isFCL ? "FCL/" : (isLCL ? "LCL/" : "");
   const buildContainerBlock = () => {
     if (containers.length === 0) {
       // 没有关联表数据时 fallback 到旧字段

@@ -547,8 +547,9 @@ function CargoPage({
               </tr>
             </thead>
             <tbody>
-              {/* 首页 cargo 表顶部加 SUMMARY 横条，一眼能看到本票总件/毛/体 + 品名 */}
-              {isFirstPage && rows.length > 0 && totalPkg > 0 && (
+              {/* 首页 cargo 表顶部加 SUMMARY 横条，一眼能看到本票总件/毛/体 + 品名。
+                  只有 1 行 cargo 时跳过——那行本身就是合计，再加 SUMMARY 是重复 */}
+              {isFirstPage && rows.length > 1 && totalPkg > 0 && (
                 <tr style={{ background: "#fff8e1" }}>
                   <td style={{ ...tdStyle({ bold: true, fontSize: 10 }), color: "#874d00" }}>SUMMARY</td>
                   <td style={tdStyle({ bold: true })}>

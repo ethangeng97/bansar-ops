@@ -2903,7 +2903,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           <label style={{ ...tmStyles.label, ...tmStyles.labelBlue, ...tmStyles.labelRef }}>发货人</label>
                           <input
                             value={v("shipper")}
-                            onChange={e => ch("shipper", e.target.value)}
+                            onChange={e => ch("shipper", e.target.value.toUpperCase())}
                             onBlur={e => {
                               const err = validateAsciiOnly(e.target.value);
                               if (err) alert("发货人：" + err);
@@ -2916,7 +2916,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                         <div style={{ ...tmStyles.row, marginTop: 4 }}>
                           <textarea
                             value={v("shipper")}
-                            onChange={e => ch("shipper", e.target.value)}
+                            onChange={e => ch("shipper", e.target.value.toUpperCase())}
                             disabled={!editing}
                             style={{ ...tmStyles.input, width: 369, height: 98, resize: "vertical", fontFamily: "Consolas,monospace" }}
                           />
@@ -2929,7 +2929,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           <label style={{ ...tmStyles.label, ...tmStyles.labelBlue, ...tmStyles.labelRef }}>收货人</label>
                           <input
                             value={v("consignee")}
-                            onChange={e => ch("consignee", e.target.value)}
+                            onChange={e => ch("consignee", e.target.value.toUpperCase())}
                             onBlur={e => {
                               const err = validateAsciiOnly(e.target.value);
                               if (err) alert("收货人：" + err);
@@ -2942,7 +2942,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                         <div style={{ ...tmStyles.row, marginTop: 4 }}>
                           <textarea
                             value={v("consignee")}
-                            onChange={e => ch("consignee", e.target.value)}
+                            onChange={e => ch("consignee", e.target.value.toUpperCase())}
                             disabled={!editing}
                             style={{ ...tmStyles.input, width: 369, height: 98, resize: "vertical", fontFamily: "Consolas,monospace" }}
                           />
@@ -2955,7 +2955,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           <label style={{ ...tmStyles.label, ...tmStyles.labelRef }}>通知人</label>
                           <input
                             value={v("notify_party")}
-                            onChange={e => ch("notify_party", e.target.value)}
+                            onChange={e => ch("notify_party", e.target.value.toUpperCase())}
                             onBlur={e => {
                               const err = validateAsciiOnly(e.target.value);
                               if (err) alert("通知人：" + err);
@@ -2968,7 +2968,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                         <div style={{ ...tmStyles.row, marginTop: 4 }}>
                           <textarea
                             value={v("notify_party")}
-                            onChange={e => ch("notify_party", e.target.value)}
+                            onChange={e => ch("notify_party", e.target.value.toUpperCase())}
                             disabled={!editing}
                             style={{ ...tmStyles.input, width: 369, height: 98, resize: "vertical", fontFamily: "Consolas,monospace" }}
                           />

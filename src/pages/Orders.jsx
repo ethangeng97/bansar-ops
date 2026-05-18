@@ -1632,8 +1632,59 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     }
     // 货物明细：按 mappings 分流。映射到分票的直接写 DB（按 hbl_no 替换），
     // 没映射 / 映射到"母单"的走旧路径（追加到 cargoLinesDraft，保存时落到本票）。
-    const mappings = extras?.mappings || {};
+    let mappings = extras?.mappings || {};
     const allCargo = Array.isArray(extras?.cargoLines) ? extras.cargoLines : [];
+
+    // 自拼母单还没分票 → 按舱单里的 HBL 自动建分票
+    // （HBL 字母后缀 A/B/C... 对应 -1/-2/-3...，跟模态框默认映射逻辑一致）
+    if (isMaster && subTickets.length === 0 && allCargo.length > 0 && order?.id) {
+      const uniqueHbls = [...new Set(allCargo.map(c => c.hbl_no).filter(Boolean))].sort();
+      if (uniqueHbls.length > 0 && window.confirm(`这单还没分票。要不要按舱单里的 ${uniqueHbls.length} 个 HBL 自动建分票？\n\n${uniqueHbls.map((h, i) => `  ${h} → ${order.order_no}-${i + 1}`).join("\n")}`)) {
+        const suffixOf = (hbl) => {
+          const m = String(hbl || "").match(/([A-Z])$/i);
+          return m ? m[1].toUpperCase().charCodeAt(0) - 64 : 0;
+        };
+        const tailOf = (hbl, idx) => suffixOf(hbl) || (idx + 1);
+        const newRows = uniqueHbls.map((hbl, idx) => filterShipmentPayload({
+          order_no: `${order.order_no}-${tailOf(hbl, idx)}`,
+          shipment_type: "Console",
+          booking_no: order.booking_no,
+          vessel: order.vessel || fields.vessel || null,
+          voyage: order.voyage || fields.voyage || null,
+          pol: order.pol,
+          pol_code: order.pol_code,
+          pod: order.pod || fields.pod || null,
+          pod_code: order.pod_code,
+          destination: order.destination,
+          destination_code: order.destination_code,
+          etd: order.etd,
+          carrier: order.carrier,
+          overseas_agent: order.overseas_agent,
+          solicit_type: order.solicit_type,
+          hbl_no: hbl,
+          lifecycle: "处理中",
+        }));
+        try {
+          const { data: created, error } = await supabase.from("shipments").insert(newRows).select();
+          if (error) throw error;
+          const sorted = (created || []).sort((a, b) => {
+            const na = parseInt((a.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            const nb = parseInt((b.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            return na - nb;
+          });
+          setSubTickets(sorted);
+          const newMap = { ...mappings };
+          for (const sub of sorted) {
+            if (sub.hbl_no) newMap[sub.hbl_no] = sub.id;
+          }
+          mappings = newMap;
+        } catch (e) {
+          console.error("Sino56 import: auto-create sub-shipments error:", e);
+          alert("自动创建分票失败：" + (e?.message || e));
+        }
+      }
+    }
+
     const toMaster = [];
     const bySubId = {};
     for (const cl of allCargo) {

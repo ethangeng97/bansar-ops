@@ -6,6 +6,7 @@ import PortPicker from "../components/PortPicker.jsx";
 import ContainerEditor from "../components/ContainerEditor.jsx";
 import BLImportModal from "../components/BLImportModal.jsx";
 import Sino56ImportModal from "../components/Sino56ImportModal.jsx";
+import SIDocImportModal from "../components/SIDocImportModal.jsx";
 import { buildSino56Manifest, downloadArrayBufferAsXls } from "../lib/sino56-manifest.js";
 import { exportDraftBLToXlsx } from "../lib/draft-bl-xlsx.js";
 import Statement from "./docs/Statement.jsx";
@@ -1398,6 +1399,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [blImportOpen, setBlImportOpen] = useState(false);
   // 解析 56 舱单 modal 开关
   const [sino56ImportOpen, setSino56ImportOpen] = useState(false);
+  const [siDocImportOpen, setSiDocImportOpen] = useState(false);
   // 内部利润分析 modal 开关
   const [profitOpen, setProfitOpen] = useState(false);
   // 历史 modal 开关
@@ -2447,6 +2449,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         subShipments={isMaster && order?.shipment_type === "Console" ? subTickets : []}
         currentOrderNo={order?.order_no || ""}
       />
+      <SIDocImportModal
+        open={siDocImportOpen}
+        onClose={() => setSiDocImportOpen(false)}
+        onApply={applySino56Import}
+      />
       <ProfitModal
         open={profitOpen}
         onClose={() => setProfitOpen(false)}
@@ -2594,6 +2601,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           )}
           <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
           <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入舱单 (56/兴港)</Mi>
+          <Mi disabled={isLocked} onClick={() => setSiDocImportOpen(true)}>📄 导入 SI (Word)</Mi>
           <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
           <Mi arrow onClick={() => setTemplateOpen(true)} title="从模板创建 / 把当前作业存为模板">订舱模板</Mi>
           <Mi onClick={onReload}>刷新</Mi>

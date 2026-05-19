@@ -96,6 +96,31 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           }
         }
 
+        // 3c. 分票 qty_packages/weight/volume 为空 → 聚合自身 cargo_items 兜底
+        // BSOEC260400005-1 这种情况：票级字段没填，但 cargo_items 里有数据
+        const subsNeedAgg = subShips.filter(
+          s => s.qty_packages == null && s.weight == null && s.volume == null
+        );
+        if (subsNeedAgg.length > 0) {
+          const { data: ciRows } = await supabase.from("cargo_items")
+            .select("shipment_id, qty, gross_weight, volume")
+            .in("shipment_id", subsNeedAgg.map(s => s.id));
+          const agg = {};  // ship_id → {qty, weight, volume}
+          (ciRows || []).forEach(r => {
+            const a = agg[r.shipment_id] || (agg[r.shipment_id] = { qty: 0, weight: 0, volume: 0 });
+            a.qty += parseInt(r.qty) || 0;
+            a.weight += parseFloat(r.gross_weight) || 0;
+            a.volume += parseFloat(r.volume) || 0;
+          });
+          for (const sub of subsNeedAgg) {
+            const a = agg[sub.id];
+            if (!a) continue;
+            if (sub.qty_packages == null && a.qty) sub.qty_packages = a.qty;
+            if (sub.weight == null && a.weight) sub.weight = Number(a.weight.toFixed(3));
+            if (sub.volume == null && a.volume) sub.volume = Number(a.volume.toFixed(4));
+          }
+        }
+
         // 4a. 取 shipment_containers（包括借的母单）
         const containerLookupIds = [
           ...shipIds,

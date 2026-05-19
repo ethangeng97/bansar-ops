@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "copy-pdfjs-cmaps": "node -e \"require('fs').cpSync('node_modules/pdfjs-dist/cmaps','public/pdfjs-cmaps',{recursive:true,force:true})\"",
+    "predev": "npm run copy-pdfjs-cmaps",
+    "prebuild": "npm run copy-pdfjs-cmaps",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
@@ -11,6 +14,7 @@
   },
   "dependencies": {
     "exceljs": "^4.4.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "xlsx": "^0.18.5"

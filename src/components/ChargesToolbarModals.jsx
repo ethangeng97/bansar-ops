@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../supabase.js";
 import { Modal, Button, Input } from "./ui.jsx";
+import { parseBillCfmPdf } from "../lib/bill-cfm-pdf-parser.js";
 
 const AR_AP_TO_DIR = { AR: "应收", AP: "应付" };
 
@@ -73,6 +74,7 @@ export function ChargeImportModal({ chargeItems, partners, rates, onClose, onCon
   const [drafts, setDrafts] = useState([]);  // [{direction, charge_item_id, partner_id, ...}]
   const [errors, setErrors] = useState([]);
   const [parsing, setParsing] = useState(false);
+  const [pdfHeader, setPdfHeader] = useState(null);  // PDF 模式下抽到的票头信息，仅展示
   const fileRef = useRef(null);
 
   const matchChargeItem = (name) => {
@@ -126,24 +128,60 @@ export function ChargeImportModal({ chargeItems, partners, rates, onClose, onCon
     });
   };
 
+  // PDF 费用确认单 → 全部当应付（结算给货代），币种 RMB 映射为 CNY
+  const pdfChargesToDrafts = (pdfResult) => {
+    const partnerName = pdfResult.partner_name || "";
+    const p = matchPartner(partnerName);
+    return pdfResult.charges.map(c => {
+      const ci = matchChargeItem(c.name);
+      const currency = c.currency === "RMB" ? "CNY" : (c.currency || "CNY");
+      const exRate = rates[currency] || 1;
+      return {
+        _draft: true,
+        _id: "draft-pdf-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+        _name: c.name,
+        direction: "应付",
+        charge_item_id: ci,
+        partner_id: p.id,
+        partner_name: p.name || partnerName,
+        unit: "票",
+        quantity: c.quantity || 1,
+        unit_price: c.unit_price || 0,
+        currency,
+        exchange_rate: exRate,
+        tax_rate: 0,
+        remark: "",
+        status: "草稿",
+      };
+    });
+  };
+
   const onFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setParsing(true);
     setErrors([]);
+    setPdfHeader(null);
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
     try {
-      const XLSX = await import("xlsx");
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      let arRows = [], apRows = [];
-      // 找应收 / 应付 sheet（按名字）；找不到就把所有 sheet 当应收
-      const sheetNames = wb.SheetNames;
-      const arSheet = sheetNames.find(n => n.includes("应收") || n.toUpperCase() === "AR") || sheetNames[0];
-      const apSheet = sheetNames.find(n => n.includes("应付") || n.toUpperCase() === "AP");
-      if (arSheet) arRows = XLSX.utils.sheet_to_json(wb.Sheets[arSheet], { defval: "", raw: false });
-      if (apSheet && apSheet !== arSheet) apRows = XLSX.utils.sheet_to_json(wb.Sheets[apSheet], { defval: "", raw: false });
-      const ds = [...sheetToDrafts(arRows, "应收"), ...sheetToDrafts(apRows, "应付")]
-        .filter(d => d._name || d.unit_price);
+      let ds;
+      if (ext === "pdf") {
+        const pdfResult = await parseBillCfmPdf(file);
+        ds = pdfChargesToDrafts(pdfResult);
+        setPdfHeader({ partner: pdfResult.partner_name, ...pdfResult.header });
+      } else {
+        const XLSX = await import("xlsx");
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        let arRows = [], apRows = [];
+        const sheetNames = wb.SheetNames;
+        const arSheet = sheetNames.find(n => n.includes("应收") || n.toUpperCase() === "AR") || sheetNames[0];
+        const apSheet = sheetNames.find(n => n.includes("应付") || n.toUpperCase() === "AP");
+        if (arSheet) arRows = XLSX.utils.sheet_to_json(wb.Sheets[arSheet], { defval: "", raw: false });
+        if (apSheet && apSheet !== arSheet) apRows = XLSX.utils.sheet_to_json(wb.Sheets[apSheet], { defval: "", raw: false });
+        ds = [...sheetToDrafts(arRows, "应收"), ...sheetToDrafts(apRows, "应付")]
+          .filter(d => d._name || d.unit_price);
+      }
       const errs = [];
       ds.forEach(d => {
         if (!d.charge_item_id) errs.push(`未匹配到费用项: "${d._name}"`);
@@ -151,7 +189,8 @@ export function ChargeImportModal({ chargeItems, partners, rates, onClose, onCon
       setDrafts(ds);
       setErrors(errs);
     } catch (err) {
-      alert("解析失败：" + err.message);
+      console.error(err);
+      alert("解析失败：" + (err?.message || err));
     } finally {
       setParsing(false);
     }
@@ -166,11 +205,28 @@ export function ChargeImportModal({ chargeItems, partners, rates, onClose, onCon
   return (
     <Modal title="导入费用单" onClose={onClose} width={760}>
       <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
-        Excel 格式：sheet 名 <b>应收</b> 和 <b>应付</b>（或 AR / AP），列：费用名称 / 结算单位 / 计费单位 / 数量 / 单价 / 币种 / 汇率 / 税率% / 备注。
-        费用名称必须能匹配到费用项字典；结算单位若未匹配上只保留文本，可在导入后手动重选。
+        支持两种格式：
+        <ul style={{ margin: "4px 0 0 0", paddingLeft: 20 }}>
+          <li><b>Excel</b>：sheet 名 <b>应收</b> 和 <b>应付</b>（或 AR / AP），列：费用名称 / 结算单位 / 计费单位 / 数量 / 单价 / 币种 / 汇率 / 税率% / 备注。</li>
+          <li><b>PDF</b>：货代发的费用确认单（如安俐达），所有费用默认作"应付"录入，RMB 自动映射为 CNY。</li>
+        </ul>
       </div>
-      <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ marginBottom: 12 }} />
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf" onChange={onFile} style={{ marginBottom: 12 }} />
       {parsing && <div style={{ color: "#888", fontSize: 12 }}>解析中…</div>}
+      {pdfHeader && (
+        <div style={{ marginBottom: 10, padding: 8, background: "#f0f5ff", border: "1px solid #adc6ff", borderRadius: 4, fontSize: 11.5, color: "#1d39c4" }}>
+          <div style={{ fontWeight: 600, marginBottom: 2 }}>📄 PDF 抬头</div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "2px 10px" }}>
+            {pdfHeader.partner && <><span style={{ color: "#666" }}>结算单位</span><span>{pdfHeader.partner}</span></>}
+            {pdfHeader.mbl_no && <><span style={{ color: "#666" }}>主单号</span><span>{pdfHeader.mbl_no}</span></>}
+            {pdfHeader.hbl_no && <><span style={{ color: "#666" }}>分单号</span><span>{pdfHeader.hbl_no}</span></>}
+            {pdfHeader.job_no && <><span style={{ color: "#666" }}>Job No</span><span>{pdfHeader.job_no}</span></>}
+            {pdfHeader.vessel_voyage && <><span style={{ color: "#666" }}>船名航次</span><span>{pdfHeader.vessel_voyage}</span></>}
+            {pdfHeader.etd && <><span style={{ color: "#666" }}>开航日</span><span>{pdfHeader.etd}</span></>}
+            {pdfHeader.total_amount != null && <><span style={{ color: "#666" }}>合计</span><span style={{ fontWeight: 600 }}>{pdfHeader.total_amount}</span></>}
+          </div>
+        </div>
+      )}
       {drafts.length > 0 && (
         <>
           <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 12 }}>

@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# pdfjs cmaps — copied from node_modules by predev/prebuild scripts
+public/pdfjs-cmaps
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

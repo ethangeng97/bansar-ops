@@ -83,7 +83,7 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
         const masterById = {};      // master.id -> master row (qty_container 兜底)
         if (masterOrderNos.length > 0) {
           const { data: masters } = await supabase.from("shipments")
-            .select("id, order_no, qty_container, container_no")
+            .select("id, order_no, qty_container, container_no, etd")
             .in("order_no", masterOrderNos);
           const masterByOrderNo = Object.fromEntries((masters || []).map(m => [m.order_no, m]));
           for (const sub of subShips) {
@@ -92,6 +92,7 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
             if (m) {
               subToMasterId[sub.id] = m.id;
               masterById[m.id] = m;
+              if (!sub.etd && m.etd) sub.etd = m.etd;  // 分票 etd 空 → 借母单的
             }
           }
         }

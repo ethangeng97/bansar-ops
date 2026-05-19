@@ -1335,6 +1335,7 @@ const SUB_INHERIT_FROM_MASTER = new Set([
   "pol", "pol_code",
   "pod", "pod_code",
   "destination", "destination_code",
+  "etd",
 ]);
 
 // ═══════════════════════════════════════════════════════════════

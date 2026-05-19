@@ -71,15 +71,57 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           .from("shipments").select("*").in("id", shipIds);
         setShipments(ships || []);
 
-        // 4a. 取 shipment_containers（箱号字段从这里取，不依赖 shipments.container_no 字符串）
+        // 3b. 自拼分票 (Console + 带 -N 后缀) 借母单的 container/qty_container
+        // 分票自己的 shipments 行只有票级 qty/weight/volume，箱子是绑在母单上的
+        const subShips = (ships || []).filter(
+          s => s.shipment_type === "Console" && /-\d+$/.test(s.order_no || "")
+        );
+        const masterOrderNos = [...new Set(
+          subShips.map(s => s.order_no.replace(/-\d+$/, "")).filter(Boolean)
+        )];
+        const subToMasterId = {};   // sub.id -> master.id
+        const masterById = {};      // master.id -> master row (qty_container 兜底)
+        if (masterOrderNos.length > 0) {
+          const { data: masters } = await supabase.from("shipments")
+            .select("id, order_no, qty_container, container_no")
+            .in("order_no", masterOrderNos);
+          const masterByOrderNo = Object.fromEntries((masters || []).map(m => [m.order_no, m]));
+          for (const sub of subShips) {
+            const masterNo = sub.order_no.replace(/-\d+$/, "");
+            const m = masterByOrderNo[masterNo];
+            if (m) {
+              subToMasterId[sub.id] = m.id;
+              masterById[m.id] = m;
+            }
+          }
+        }
+
+        // 4a. 取 shipment_containers（包括借的母单）
+        const containerLookupIds = [
+          ...shipIds,
+          ...Object.values(subToMasterId),
+        ];
         const { data: ctnRows } = await supabase.from("shipment_containers")
           .select("shipment_id, container_no, seal_no, container_size, container_type, qty")
-          .in("shipment_id", shipIds);
-        const ctnMap = {};
+          .in("shipment_id", [...new Set(containerLookupIds)]);
+        const ctnByShip = {};
         (ctnRows || []).forEach(c => {
-          if (!ctnMap[c.shipment_id]) ctnMap[c.shipment_id] = [];
-          ctnMap[c.shipment_id].push(c);
+          if (!ctnByShip[c.shipment_id]) ctnByShip[c.shipment_id] = [];
+          ctnByShip[c.shipment_id].push(c);
         });
+        // 分票借母单的 containers + qty_container 兜底
+        const ctnMap = { ...ctnByShip };
+        for (const sub of subShips) {
+          const masterId = subToMasterId[sub.id];
+          if (!masterId) continue;
+          if (!ctnMap[sub.id] || ctnMap[sub.id].length === 0) {
+            ctnMap[sub.id] = ctnByShip[masterId] || [];
+          }
+          // qty_container 兜底（不写回 DB，只在前端 props 里覆盖）
+          if (!sub.qty_container && masterById[masterId]?.qty_container) {
+            sub.qty_container = masterById[masterId].qty_container;
+          }
+        }
         setContainersByShip(ctnMap);
 
         // 4b. 取 charges。单票模式只取应收（对账单是给客户的），多票模式按 bills 已经过滤好的

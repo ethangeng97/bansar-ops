@@ -4240,23 +4240,25 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
   };
 
   // 删除行
+  // 注意：dbIds 必须在 setter 之外同步算出来。
+  // React 的 setState(fn) 回调要等下一次渲染才执行，把 dbIds.push 放进去
+  // 会让下面的 supabase.delete 在 dbIds 还空的时候就跑掉 → DB 没删,刷新行就回来。
   const deleteRows = async (direction, ids) => {
     if (!ids.length) return;
     if (!confirm(`确定删除选中的 ${ids.length} 条费用？`)) return;
     const setter = direction === "应收" ? setArRows : setApRows;
     const setSelected = direction === "应收" ? setSelectedAr : setSelectedAp;
-    // 已保存的删数据库
-    const dbIds = [];
-    setter(prev => prev.filter(r => {
-      const id = r.id || r._id;
-      if (!ids.includes(id)) return true;
-      if (r.id) dbIds.push(r.id);
-      return false;
-    }));
+    const currentRows = direction === "应收" ? arRows : apRows;
+    // 同步算出要落 DB 的 id（行里 r.id 存在 = 已落库；只有 _id 的是本地草稿）
+    const dbIds = currentRows
+      .filter(r => ids.includes(r.id || r._id) && r.id)
+      .map(r => r.id);
+    // 先 DB 删；DB 失败就保留行让用户重试
     if (dbIds.length) {
       const { error } = await supabase.from("charges").delete().in("id", dbIds);
-      if (error) { alert("删除失败：" + error.message); load(); return; }
+      if (error) { alert("删除失败：" + error.message); return; }
     }
+    setter(prev => prev.filter(r => !ids.includes(r.id || r._id)));
     setSelected(new Set());
   };
 

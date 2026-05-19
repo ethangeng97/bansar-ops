@@ -921,7 +921,7 @@ export function OrdersPage({ user, onBack }) {
                     <a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.order_no || ""}</a>
                   </td>
                   <td>{o.po || o.customer_po || ""}</td>
-                  <td><a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.booking_no || ""}</a></td>
+                  <td><a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.mbl_no || o.booking_no || ""}</a></td>
                   <td><a href={`#/sea_export?id=${o.id}`} target="_blank" rel="noopener" className="lk">{o.vessel || ""}</a></td>
                   <td>{o.voyage || ""}</td>
                   <td>{o.etd || ""}</td>

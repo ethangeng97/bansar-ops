@@ -7,6 +7,7 @@ import ContainerEditor from "../components/ContainerEditor.jsx";
 import BLImportModal from "../components/BLImportModal.jsx";
 import Sino56ImportModal from "../components/Sino56ImportModal.jsx";
 import SIDocImportModal from "../components/SIDocImportModal.jsx";
+import PackingListImportModal from "../components/PackingListImportModal.jsx";
 import { buildSino56Manifest, downloadArrayBufferAsXls } from "../lib/sino56-manifest.js";
 import { exportDraftBLToXlsx } from "../lib/draft-bl-xlsx.js";
 import Statement from "./docs/Statement.jsx";
@@ -1400,6 +1401,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   // 解析 56 舱单 modal 开关
   const [sino56ImportOpen, setSino56ImportOpen] = useState(false);
   const [siDocImportOpen, setSiDocImportOpen] = useState(false);
+  const [packingListImportOpen, setPackingListImportOpen] = useState(false);
   // 内部利润分析 modal 开关
   const [profitOpen, setProfitOpen] = useState(false);
   // 历史 modal 开关
@@ -1984,6 +1986,33 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       if (!isConsole && !ed.customer?.trim()) { alert("委托单位 必填"); return; }
       if (!ed.booking_no?.trim()) { alert("MB/L No. 必填"); return; }
 
+      // 同 booking_no + 同 shipment_type 已有作业时引导打开原单，避免重复建壳
+      // （Console 分票天然共享母单的 booking_no，靠 order_no 的 -N 后缀过滤掉）
+      {
+        const bookingNo = ed.booking_no.trim();
+        const { data: dups } = await supabase.from("shipments")
+          .select("id, order_no, vessel, voyage")
+          .eq("booking_no", bookingNo)
+          .eq("shipment_type", createMode);
+        const existing = (dups || []).find(d => d.order_no && !/-\d+$/.test(d.order_no));
+        if (existing) {
+          const tail = [existing.vessel, existing.voyage].filter(Boolean).join(" / ");
+          const typeLabel = createMode === "Console" ? "自拼母单"
+            : createMode === "LCL" ? "拼箱作业"
+            : "整柜作业";
+          const goOpen = window.confirm(
+            `订舱号 ${bookingNo} 下已有${typeLabel} ${existing.order_no}` +
+            (tail ? `（${tail}）` : "") + "。\n\n" +
+            `确定 → 打开已有作业（推荐，避免重复）\n` +
+            `取消 → 留在当前页（请改订舱号或退出新建）`
+          );
+          if (goOpen) {
+            window.location.hash = `#/sea_export?id=${existing.id}`;
+          }
+          return;
+        }
+      }
+
       const payload = { ...ed };
       // 自拼主拼空壳：清空票级字段
       if (isConsole) {
@@ -2505,6 +2534,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         onClose={() => setSiDocImportOpen(false)}
         onApply={applySino56Import}
       />
+      <PackingListImportModal
+        open={packingListImportOpen}
+        onClose={() => setPackingListImportOpen(false)}
+        onApply={applySino56Import}
+      />
       <ProfitModal
         open={profitOpen}
         onClose={() => setProfitOpen(false)}
@@ -2652,7 +2686,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           )}
           <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
           <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入舱单 (56/兴港)</Mi>
-          <Mi disabled={isLocked} onClick={() => setSiDocImportOpen(true)}>📄 导入 SI (Word)</Mi>
+          <Mi disabled={isLocked} onClick={() => setSiDocImportOpen(true)}>📄 导入 SI (Word/Excel)</Mi>
+          <Mi disabled={isLocked} onClick={() => setPackingListImportOpen(true)}>📦 导入装箱单</Mi>
           <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
           <Mi arrow onClick={() => setTemplateOpen(true)} title="从模板创建 / 把当前作业存为模板">订舱模板</Mi>
           <Mi onClick={onReload}>刷新</Mi>

@@ -1,11 +1,15 @@
 // ============================================================================
-// SIDocImportModal — 拖入一代/客户发来的 .doc SI（Shipping Information）
+// SIDocImportModal — 拖入一代/客户发来的 SI（Shipping Information / 提单补料）
 //
+// 支持两种格式：
+//   .doc  — Word 97-2003，走 si-doc-parser
+//   .xlsx — Excel 提单补料 / SI Form，走 si-xlsx-parser
 // 解析后预览字段（同 Sino56ImportModal 的样式），用户确认后调 onApply。
 // fields/extras 结构与 Sino56 一致，复用父组件的 applySino56Import handler。
 // ============================================================================
 import { useState, useRef } from "react";
 import { parseSIDocFile } from "../lib/si-doc-parser.js";
+import { parseSIXlsxFile } from "../lib/si-xlsx-parser.js";
 
 const FIELD_LABELS = {
   booking_no: "订舱号 SO No.",
@@ -44,7 +48,10 @@ export default function SIDocImportModal({ open, onClose, onApply }) {
     setBusy(true);
     setFileName(file.name);
     try {
-      const data = await parseSIDocFile(file);
+      const lower = file.name.toLowerCase();
+      const data = lower.endsWith(".xlsx") || lower.endsWith(".xls")
+        ? await parseSIXlsxFile(file)
+        : await parseSIDocFile(file);
       setParsed(data);
     } catch (e) {
       console.error(e);
@@ -73,7 +80,7 @@ export default function SIDocImportModal({ open, onClose, onApply }) {
     <div style={overlayStyle} onClick={onClose}>
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #eee" }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>📄 导入 SI (Word .doc)</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>📄 导入 SI (.doc / .xlsx)</div>
           <div style={{ flex: 1 }} />
           <button onClick={onClose} style={{ padding: "4px 12px" }}>关闭</button>
         </div>
@@ -82,11 +89,11 @@ export default function SIDocImportModal({ open, onClose, onApply }) {
           {!parsed ? (
             <>
               <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>
-                把一代发来的 .doc SI（Shipping Information / 装船指示）拖到下方，或点击选择。
-                系统会自动解析 SO号/Shipper/Consignee/Notify/POL/POD/箱号/件毛体 等字段。
+                把一代/客户发来的 SI（Shipping Information / 提单补料）拖到下方，或点击选择。
+                系统会自动解析 SO号/Shipper/Consignee/Notify/POL/POD/箱号/件毛体/VGM 等字段。
               </div>
               <div style={{ fontSize: 11, color: "#999", marginBottom: 10 }}>
-                只支持 .doc（Word 97-2003）；如果是 .docx 或 PDF 请先另存为 .doc 后再导入。
+                支持 .doc（Word 97-2003）和 .xlsx（Excel 提单补料）；按扩展名自动识别。
               </div>
               <div
                 onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -104,12 +111,12 @@ export default function SIDocImportModal({ open, onClose, onApply }) {
                   ? "解析中…"
                   : fileName
                     ? `已选择：${fileName}（若未自动解析，点这里重选）`
-                    : "📥 拖入或点击选择 .doc 文件"}
+                    : "📥 拖入或点击选择 .doc / .xlsx 文件"}
               </div>
               <input
                 ref={inputRef}
                 type="file"
-                accept=".doc,application/msword"
+                accept=".doc,.xlsx,.xls,application/msword,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                 style={{ display: "none" }}
                 onChange={e => handleFile(e.target.files?.[0])}
               />

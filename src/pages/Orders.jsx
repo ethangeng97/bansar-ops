@@ -1626,11 +1626,19 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   // 从 Sino56 舱单 modal 应用字段：N 个集装箱 + N 条货物明细
   // 主字段合并到 ed；集装箱直接写 shipment_containers；货物明细追加到 cargoLinesDraft
   const applySino56Import = async (fields, extras) => {
+    // shipper/consignee/notify_party 强制大写：编辑框的 onChange 已经这么干，
+    // 程序化导入也走同样规则，避免出现"Keplin Group Limited" 之类的小写漏网鱼
+    const normalizedFields = { ...fields };
+    for (const k of ["shipper", "consignee", "notify_party"]) {
+      if (typeof normalizedFields[k] === "string") {
+        normalizedFields[k] = normalizedFields[k].toUpperCase();
+      }
+    }
     if (!editing) {
-      setEd(prev => ({ ...order, ...prev, ...fields }));
+      setEd(prev => ({ ...order, ...prev, ...normalizedFields }));
       setEditing(true);
     } else {
-      setEd(prev => ({ ...prev, ...fields }));
+      setEd(prev => ({ ...prev, ...normalizedFields }));
     }
     // 货物明细：按 mappings 分流。映射到分票的直接写 DB（按 hbl_no 替换），
     // 没映射 / 映射到"母单"的走旧路径（追加到 cargoLinesDraft，保存时落到本票）。

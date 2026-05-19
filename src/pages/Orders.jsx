@@ -5011,6 +5011,11 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
           rates={rates}
           onClose={() => setImportOpen(false)}
           onConfirm={(drafts) => { appendDrafts(drafts); setImportOpen(false); }}
+          onChargeItemsRefresh={async () => {
+            const { data: ci } = await supabase
+              .from("charge_items").select("id, code, name_zh, name_en, sort").eq("active", true).order("sort");
+            setChargeItems(ci || []);
+          }}
         />
       )}
       {copyOpen && (

@@ -70,11 +70,13 @@ function getCol(row, names) {
 // 1) ChargeImportModal — 从 Excel 导入费用
 // 期望 Excel 有 应收 / 应付 两个 sheet（或单 sheet 通过列指明方向）
 // ────────────────────────────────────────────────────────────────────────────
-export function ChargeImportModal({ chargeItems, partners, rates, onClose, onConfirm }) {
+export function ChargeImportModal({ chargeItems, partners, rates, onClose, onConfirm, onChargeItemsRefresh }) {
   const [drafts, setDrafts] = useState([]);  // [{direction, charge_item_id, partner_id, ...}]
   const [errors, setErrors] = useState([]);
   const [parsing, setParsing] = useState(false);
   const [pdfHeader, setPdfHeader] = useState(null);  // PDF 模式下抽到的票头信息，仅展示
+  const [autoCreate, setAutoCreate] = useState(true);  // 未匹配的费用项自动建到字典
+  const [creating, setCreating] = useState(false);
   const fileRef = useRef(null);
 
   const matchChargeItem = (name) => {
@@ -196,8 +198,31 @@ export function ChargeImportModal({ chargeItems, partners, rates, onClose, onCon
     }
   };
 
-  const submit = () => {
-    const valid = drafts.filter(d => d.charge_item_id);
+  const submit = async () => {
+    let working = drafts;
+    // 自动建未匹配的费用项到字典
+    if (autoCreate) {
+      const missing = working.filter(d => !d.charge_item_id && d._name?.trim());
+      const uniqueNames = [...new Set(missing.map(d => d._name.trim()))];
+      if (uniqueNames.length > 0) {
+        setCreating(true);
+        const nameToId = {};
+        for (const name of uniqueNames) {
+          const { data, error } = await supabase.rpc("ensure_charge_item_quick_create", { p_name: name });
+          if (error) { setCreating(false); alert(`新建费用项「${name}」失败：${error.message}`); return; }
+          nameToId[name] = data;
+        }
+        working = working.map(d => {
+          if (d.charge_item_id) return d;
+          const id = nameToId[d._name?.trim()];
+          return id ? { ...d, charge_item_id: id } : d;
+        });
+        setDrafts(working);
+        setCreating(false);
+        if (onChargeItemsRefresh) await onChargeItemsRefresh();  // 让父组件重新拉 charge_items
+      }
+    }
+    const valid = working.filter(d => d.charge_item_id);
     if (valid.length === 0) { alert("没有可导入的有效行（费用名称必须能匹配上）"); return; }
     onConfirm(valid);
   };
@@ -242,11 +267,23 @@ export function ChargeImportModal({ chargeItems, partners, rates, onClose, onCon
               {errors.length > 10 && <div>… 还有 {errors.length - 10} 条</div>}
             </div>
           )}
+          {errors.length > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12, color: "#444", cursor: "pointer" }}>
+              <input type="checkbox" checked={autoCreate} onChange={e => setAutoCreate(e.target.checked)} />
+              自动把未匹配的 {errors.length} 个费用名添加到字典（用 EXTRA 系列编号，导入后可在「费用类型」页改名/分类）
+            </label>
+          )}
         </>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-        <Button variant="secondary" onClick={onClose}>取消</Button>
-        <Button onClick={submit} disabled={drafts.length === 0}>导入 {drafts.filter(d => d.charge_item_id).length} 行</Button>
+        <Button variant="secondary" onClick={onClose} disabled={creating}>取消</Button>
+        <Button onClick={submit} disabled={drafts.length === 0 || creating}>
+          {creating
+            ? "新建费用项中…"
+            : autoCreate && errors.length > 0
+              ? `导入 ${drafts.length} 行（含新建 ${errors.length} 项）`
+              : `导入 ${drafts.filter(d => d.charge_item_id).length} 行`}
+        </Button>
       </div>
     </Modal>
   );

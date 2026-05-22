@@ -97,15 +97,14 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           }
         }
 
-        // 3c. 分票 qty_packages/weight/volume 为空 → 聚合自身 cargo_items 兜底
-        // BSOEC260400005-1 这种情况：票级字段没填，但 cargo_items 里有数据
-        const subsNeedAgg = subShips.filter(
-          s => s.qty_packages == null && s.weight == null && s.volume == null
-        );
-        if (subsNeedAgg.length > 0) {
+        // 3c. 件毛体 cargo_items 优先：所有票（含主单/分票/独立票），只要有 cargo_items 行，
+        // 就用合计覆盖票级 qty_packages/weight/volume，确保操作员后续更新 cargo_items 能反映出来。
+        // 历史教训：BSOEC260400013-2 票级 volume=24.08 是旧值，cargo_items 合计 39.266 才是准的。
+        // 若票没有 cargo_items 行（agg 取不到），保留原票级值不动。
+        if (ships && ships.length > 0) {
           const { data: ciRows } = await supabase.from("cargo_items")
             .select("shipment_id, qty, gross_weight, volume")
-            .in("shipment_id", subsNeedAgg.map(s => s.id));
+            .in("shipment_id", ships.map(s => s.id));
           const agg = {};  // ship_id → {qty, weight, volume}
           (ciRows || []).forEach(r => {
             const a = agg[r.shipment_id] || (agg[r.shipment_id] = { qty: 0, weight: 0, volume: 0 });
@@ -113,12 +112,12 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
             a.weight += parseFloat(r.gross_weight) || 0;
             a.volume += parseFloat(r.volume) || 0;
           });
-          for (const sub of subsNeedAgg) {
-            const a = agg[sub.id];
+          for (const sh of ships) {
+            const a = agg[sh.id];
             if (!a) continue;
-            if (sub.qty_packages == null && a.qty) sub.qty_packages = a.qty;
-            if (sub.weight == null && a.weight) sub.weight = Number(a.weight.toFixed(3));
-            if (sub.volume == null && a.volume) sub.volume = Number(a.volume.toFixed(4));
+            if (a.qty) sh.qty_packages = a.qty;
+            if (a.weight) sh.weight = Number(a.weight.toFixed(3));
+            if (a.volume) sh.volume = Number(a.volume.toFixed(4));
           }
         }
 

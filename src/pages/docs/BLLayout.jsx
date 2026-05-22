@@ -197,10 +197,10 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }),
       { qty: 0, gw: 0, cbm: 0 }
     );
-    // 品名：cargo_items 多条不同品名 → "/" 连接；否则票级 desc
+    // 品名：cargo_items 多条不同品名 → 换行分开；否则票级 desc
     const ciProducts = [...new Set(mergedCargo.map(it => it.product_name_en).filter(Boolean))];
     const descLine = ciProducts.length > 0
-      ? ciProducts.join(" / ")
+      ? ciProducts.join("\n")
       : (s.desc_en || s.description || s.cargo_type || "GENERAL CARGO");
     rows = [{
       cnInfo: buildContainerBlock(),

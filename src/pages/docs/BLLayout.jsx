@@ -40,14 +40,26 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         supabase.from("shipment_containers").select("*").eq("shipment_id", shipmentId).order("sort_order"),
       ]);
       if (e1) { alert("加载票号失败: " + e1.message); setLoading(false); return; }
+      // 自拼分票（Console + -N 后缀）：atd/etd 没填时借母单的（实际开船日 ops 一般只在母单填）
+      const isSubBill = s.shipment_type === "Console" && /-\d+$/.test(s.order_no || "");
+      if (isSubBill && (!s.atd || !s.etd)) {
+        const masterOrderNo = (s.order_no || "").replace(/-\d+$/, "");
+        if (masterOrderNo) {
+          const { data: master } = await supabase.from("shipments")
+            .select("atd, etd").eq("order_no", masterOrderNo).single();
+          if (master) {
+            if (!s.atd && master.atd) s.atd = master.atd;
+            if (!s.etd && master.etd) s.etd = master.etd;
+          }
+        }
+      }
       setShipment(s);
       setCompany(c || {});
       setContainers(ctn || []);
       const { data: ci } = await supabase
         .from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order");
       setCargo(ci || []);
-      // 自拼分票（Console + -N 后缀）默认合并明细：客户提单一般只想看汇总
-      const isSubBill = s.shipment_type === "Console" && /-\d+$/.test(s.order_no || "");
+      // 默认合并明细（自拼分票场景：客户提单一般只想看汇总）
       setConsolidate(isSubBill);
       setLoading(false);
     })();

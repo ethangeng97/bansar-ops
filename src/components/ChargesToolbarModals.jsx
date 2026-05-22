@@ -309,12 +309,12 @@ export function ChargeCopyFromShipmentModal({ currentShipmentId, chargeItems, pa
     setSearching(true);
     (async () => {
       let qb = supabase.from("shipments")
-        .select("id, order_no, mbl_no, customer, etd, pol, pod")
+        .select("id, order_no, booking_no, mbl_no, hbl_no, customer, etd, pol, pod")
         .neq("id", currentShipmentId)
         .order("etd", { ascending: false, nullsLast: true })
         .limit(30);
       const term = q.trim();
-      if (term) qb = qb.or(`order_no.ilike.*${term}*,mbl_no.ilike.*${term}*,customer.ilike.*${term}*`);
+      if (term) qb = qb.or(`order_no.ilike.*${term}*,booking_no.ilike.*${term}*,mbl_no.ilike.*${term}*,hbl_no.ilike.*${term}*,customer.ilike.*${term}*`);
       const { data } = await qb;
       if (!cancel) {
         setCandidates(data || []);
@@ -350,7 +350,7 @@ export function ChargeCopyFromShipmentModal({ currentShipmentId, chargeItems, pa
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 14 }}>
         {/* 左：搜索 + 候选列表 */}
         <div>
-          <Input placeholder="搜索作业号 / MBL / 客户" value={q} onChange={e => setQ(e.target.value)} />
+          <Input placeholder="搜索作业号 / 订舱号 / MBL / HBL / 客户" value={q} onChange={e => setQ(e.target.value)} />
           <div style={{ marginTop: 8, maxHeight: 360, overflowY: "auto", border: "1px solid #eee", borderRadius: 4 }}>
             {searching && <div style={{ padding: 10, fontSize: 12, color: "#888" }}>搜索中…</div>}
             {!searching && candidates.length === 0 && <div style={{ padding: 10, fontSize: 12, color: "#999" }}>无匹配作业</div>}
@@ -366,7 +366,7 @@ export function ChargeCopyFromShipmentModal({ currentShipmentId, chargeItems, pa
                 >
                   <div style={{ fontWeight: 600 }}>{s.order_no || "（无作业号）"}</div>
                   <div style={{ color: "#888", fontSize: 11 }}>
-                    {s.customer || "—"} · {s.mbl_no || "无 MBL"} · {s.etd || "—"}
+                    {s.customer || "—"} · {s.booking_no || s.mbl_no || s.hbl_no || "无单号"} · {s.etd || "—"}
                   </div>
                 </div>
               );

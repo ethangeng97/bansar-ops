@@ -28,6 +28,8 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const [cargoItems, setCargo]  = useState([]);
   const [containers, setContainers] = useState([]);  // shipment_containers 关联表
   const [loading, setLoading]   = useState(true);
+  // 合并明细：自拼分票默认开（货代典型场景：多 SKU 拼一只柜，提单只显示汇总一行）
+  const [consolidate, setConsolidate] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -44,6 +46,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       const { data: ci } = await supabase
         .from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order");
       setCargo(ci || []);
+      // 自拼分票（Console + -N 后缀）默认合并明细：客户提单一般只想看汇总
+      const isSubBill = s.shipment_type === "Console" && /-\d+$/.test(s.order_no || "");
+      setConsolidate(isSubBill);
       setLoading(false);
     })();
   }, [shipmentId]);
@@ -180,30 +185,45 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     return lines.join("\n");
   };
 
-  let rows = mergedCargo.length > 0
-    ? mergedCargo.map((it, i) => ({
-        cnInfo: buildSingleCtnBlock(it.container_no, i === mergedCargo.length - 1),
-        marks: it.marks || s.marks || "N/M",
-        pkgs: it.qty || 0,
-        unit: it.package_unit || "CARTONS",
-        desc: [it.product_name_en || s.desc_en || s.cargo_type || "GENERAL CARGO",
-               s.po ? `PO-${s.po}` : null,
-              ].filter(Boolean).join("\n"),
-        gw: parseFloat(it.gross_weight) || 0,
-        cbm: parseFloat(it.volume) || 0,
-      }))
-    : [{
-        // 无 cargo_items 时回退：单行显示所有柜子的汇总块（旧行为）
-        cnInfo: buildContainerBlock(),
-        marks: s.marks || "N/M",
-        pkgs: parseInt(s.qty_packages) || 0,
-        unit: s.pkg_unit || "CARTONS",
-        desc: [s.desc_en || s.description || s.cargo_type || "GENERAL CARGO",
-               s.po ? `PO-${s.po}` : null,
-              ].filter(Boolean).join("\n"),
-        gw: parseFloat(s.weight) || 0,
-        cbm: parseFloat(s.volume) || 0,
-      }];
+  // consolidate 模式：强制单行汇总（即便有 cargo_items 多条也合并成一行）
+  // 件/毛/体优先用 cargo_items 合计，没合计再回退到票级字段
+  let rows;
+  if (consolidate || mergedCargo.length === 0) {
+    const ciSum = mergedCargo.reduce(
+      (acc, it) => ({
+        qty:  acc.qty  + (parseInt(it.qty) || 0),
+        gw:   acc.gw   + (parseFloat(it.gross_weight) || 0),
+        cbm:  acc.cbm  + (parseFloat(it.volume) || 0),
+      }),
+      { qty: 0, gw: 0, cbm: 0 }
+    );
+    // 品名：cargo_items 多条不同品名 → "/" 连接；否则票级 desc
+    const ciProducts = [...new Set(mergedCargo.map(it => it.product_name_en).filter(Boolean))];
+    const descLine = ciProducts.length > 0
+      ? ciProducts.join(" / ")
+      : (s.desc_en || s.description || s.cargo_type || "GENERAL CARGO");
+    rows = [{
+      cnInfo: buildContainerBlock(),
+      marks: s.marks || mergedCargo.find(it => it.marks)?.marks || "N/M",
+      pkgs: ciSum.qty || parseInt(s.qty_packages) || 0,
+      unit: mergedCargo[0]?.package_unit || s.pkg_unit || "CARTONS",
+      desc: [descLine, s.po ? `PO-${s.po}` : null].filter(Boolean).join("\n"),
+      gw:  ciSum.gw  || parseFloat(s.weight) || 0,
+      cbm: ciSum.cbm || parseFloat(s.volume) || 0,
+    }];
+  } else {
+    rows = mergedCargo.map((it, i) => ({
+      cnInfo: buildSingleCtnBlock(it.container_no, i === mergedCargo.length - 1),
+      marks: it.marks || s.marks || "N/M",
+      pkgs: it.qty || 0,
+      unit: it.package_unit || "CARTONS",
+      desc: [it.product_name_en || s.desc_en || s.cargo_type || "GENERAL CARGO",
+             s.po ? `PO-${s.po}` : null,
+            ].filter(Boolean).join("\n"),
+      gw: parseFloat(it.gross_weight) || 0,
+      cbm: parseFloat(it.volume) || 0,
+    }));
+  }
 
   const totalPkg = rows.reduce((sum, r) => sum + (r.pkgs || 0), 0);
   const totalWt  = rows.reduce((sum, r) => sum + (r.gw || 0), 0);
@@ -325,8 +345,17 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           <span style={{ marginLeft: 8, color: "#999" }}>· 共 {totalPages} 页</span>
         </span>
         <div style={{ flex: 1 }} />
+        <label style={{ fontSize: 12, color: "#333", cursor: "pointer", userSelect: "none" }}>
+          <input
+            type="checkbox"
+            checked={consolidate}
+            onChange={e => setConsolidate(e.target.checked)}
+            style={{ verticalAlign: "middle", marginRight: 4 }}
+          />
+          合并明细到一行
+        </label>
         <span style={{ fontSize: 12, color: "#999" }}>
-          点 🖨 → "目标"选 <b>"另存为 PDF"</b> → 文件名已自动生成
+          点 🖨 → "目标"选 <b>"另存为 PDF"</b>
         </span>
         <button onClick={print} style={btnPrimary}>🖨 打印 / 另存为 PDF</button>
       </div>

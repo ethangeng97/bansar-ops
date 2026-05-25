@@ -3811,12 +3811,17 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
 // 编辑入口在分票详情页，母单不在此处编辑。
 // ═══════════════════════════════════════════════════════════════
 function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabel, customerByShipmentId, onReload, isLocked }) {
-  // 分票 id → 分票尾数（用于"来源"列）
+  // 分票 id → 分票尾数 / HBL（用于"来源"列）
   const subTailById = {};
+  const hblBySubId = {};
   for (const s of subTickets) {
     const tail = (s.order_no || "").match(/-(\d+)$/)?.[1];
     if (s.id && tail) subTailById[s.id] = tail;
+    if (s.id && s.hbl_no) hblBySubId[s.id] = s.hbl_no;
   }
+  // 显示用：优先 HBL，没填回退到 "-1" 分票尾数
+  const sourceLabel = (shipment_id) =>
+    hblBySubId[shipment_id] || (subTailById[shipment_id] ? `-${subTailById[shipment_id]}` : "母单");
 
   // 「从分票货物明细同步集装箱」按钮 ——
   // 扫所有分票 cargo_items，按 (shipment_id, container_no) distinct 出箱号，
@@ -3862,8 +3867,7 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
       return;
     }
     const preview = toInsert.map(r => {
-      const tail = subTailById[r.shipment_id] ? `-${subTailById[r.shipment_id]}` : "母单";
-      return `  ${tail}  ${r.container_no}  ${r.container_size || ""}${r.container_type || ""}  ${r.cargo_qty}件  ${r.cargo_weight}KG`;
+      return `  ${sourceLabel(r.shipment_id)}  ${r.container_no}  ${r.container_size || ""}${r.container_type || ""}  ${r.cargo_qty}件  ${r.cargo_weight}KG`;
     }).join("\n");
     if (!confirm(`将向「集装箱」表新增 ${toInsert.length} 行：\n\n${preview}\n\n继续？`)) return;
     const { error } = await supabase.from("shipment_containers").insert(toInsert);
@@ -3899,7 +3903,7 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
         <thead>
           <tr style={{ background: "linear-gradient(#f9f9f9,#f0f0f0)" }}>
-            <th style={cellHead}>来源分票</th>
+            <th style={cellHead}>HBL</th>
             <th style={cellHead}>箱型</th>
             <th style={cellHead}>类型</th>
             <th style={cellHead}>数量</th>
@@ -3911,12 +3915,9 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
         <tbody>
           {containers.length === 0 ? (
             <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: "#999" }}>分票未录入集装箱</td></tr>
-          ) : containers.map((c, i) => {
-            const tail = subTailById[c.shipment_id];
-            const source = tail ? `-${tail}` : "母单";
-            return (
+          ) : containers.map((c, i) => (
             <tr key={c.id || i} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
-              <td style={cellBody}>{source}</td>
+              <td style={cellBody}>{sourceLabel(c.shipment_id)}</td>
               <td style={cellBody}>{c.container_size || "—"}</td>
               <td style={cellBody}>{c.container_type || "—"}</td>
               <td style={{ ...cellBody, textAlign: "right" }}>{c.qty || "—"}</td>
@@ -3924,8 +3925,7 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
               <td style={cellBody}>{c.seal_no || "—"}</td>
               <td style={cellBody}>{c.notes || ""}</td>
             </tr>
-            );
-          })}
+          ))}
         </tbody>
       </table>
 

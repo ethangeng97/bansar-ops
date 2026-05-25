@@ -157,37 +157,52 @@ export default function BillDetail({ billId, onBack }) {
   const remain = total - settled;
 
   return (
-    <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h1 className="page-title" style={{ margin: 0, display: "flex", alignItems: "center", gap: 10 }}>
-          账单详情
-          <span style={{ fontFamily: "monospace", color: "var(--shell-primary)", fontWeight: 600, fontSize: 14 }}>{bill.bill_no}</span>
-          <span className={"badge " + (bill.direction === "AR" ? "info" : "pending")}>{bill.direction === "AR" ? "应收 (AR)" : "应付 (AP)"}</span>
-          <span className="badge" style={{ background: st.bg, color: st.color }}>{st.label}</span>
-        </h1>
-        <div style={{ display: "flex", gap: 8 }}>
-          {bill.status !== "void" && bill.status !== "settled" && (
-            <button className="btn primary" onClick={onSettle}>核销</button>
-          )}
-          {(bill.status === "settled" || bill.status === "partial") && (
-            <button className="btn" onClick={onUnsettle}>撤销核销</button>
-          )}
-          {!bill.invoice_no && bill.status !== "void" && (
-            <button className="btn" onClick={onInvoice}>开票</button>
-          )}
-          {bill.invoice_no && (
-            <button className="btn" onClick={onClearInvoice}>清票</button>
-          )}
-          {bill.status !== "void" && (
-            <button className="btn danger" onClick={() => updateStatus("void")}>作废</button>
-          )}
-          {bill.status === "void" && (
-            <button className="btn" onClick={() => updateStatus("unsettled")}>恢复</button>
-          )}
-        </div>
-      </div>
+    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
+      <div style={{ background: "#fff", borderRadius: 4, padding: 16,
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
 
-      <div className="page-card">
+        {/* 顶部标题栏 */}
+        <div style={{ display: "flex", justifyContent: "space-between",
+                      alignItems: "center", marginBottom: 12, paddingBottom: 12,
+                      borderBottom: "1px solid #f0f0f0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
+            <span style={{ fontSize: 16, fontWeight: 700 }}>账单详情</span>
+            <span style={{ fontFamily: "Consolas,monospace", color: BRAND, fontWeight: 600, fontSize: 14 }}>
+              {bill.bill_no}
+            </span>
+            <span style={{
+              padding: "2px 10px", fontSize: 11, borderRadius: 3,
+              color: bill.direction === "AR" ? "#1990ff" : "#fa8c16",
+              background: bill.direction === "AR" ? "#e6f7ff" : "#fff7e6",
+              border: `1px solid ${bill.direction === "AR" ? "#91d5ff" : "#ffd591"}`,
+            }}>{bill.direction === "AR" ? "应收 (AR)" : "应付 (AP)"}</span>
+            <span style={{
+              padding: "2px 10px", fontSize: 11, borderRadius: 3,
+              color: st.color, background: st.bg,
+            }}>{st.label}</span>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {bill.status !== "void" && bill.status !== "settled" && (
+              <button onClick={onSettle} style={btnPrimary}>核销</button>
+            )}
+            {(bill.status === "settled" || bill.status === "partial") && (
+              <button onClick={onUnsettle} style={btn}>撤销核销</button>
+            )}
+            {!bill.invoice_no && bill.status !== "void" && (
+              <button onClick={onInvoice} style={btn}>开票</button>
+            )}
+            {bill.invoice_no && (
+              <button onClick={onClearInvoice} style={btn}>清票</button>
+            )}
+            {bill.status !== "void" && (
+              <button onClick={() => updateStatus("void")} style={btnDanger}>作废</button>
+            )}
+            {bill.status === "void" && (
+              <button onClick={() => updateStatus("unsettled")} style={btn}>恢复</button>
+            )}
+          </div>
+        </div>
 
         {/* 基本信息 */}
         <div style={{
@@ -352,7 +367,7 @@ export default function BillDetail({ billId, onBack }) {
         )}
 
       </div>
-    </>
+    </div>
   );
 }
 

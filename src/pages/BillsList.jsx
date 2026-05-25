@@ -283,75 +283,93 @@ export default function BillsList({ onBack }) {
   const selSum = calcSummary(bills.filter(b => selected.has(b.id)));
 
   return (
-    <>
-      <h1 className="page-title">账单管理</h1>
-
-      <div className="page-section-bar">
-        <input className="field-input" placeholder="账单号 / 发票号 / 结算单位 / 凭证号 / 作业号 / 提单号"
-               value={filters.keyword}
-               onChange={e => setFilters({...filters, keyword: e.target.value})}
-               onKeyDown={e => e.key === "Enter" && load()}
-               style={{ width: 280 }} />
-        <select className="field-select" value={filters.direction} onChange={e => setFilters({...filters, direction: e.target.value})} style={{ width: 100 }}>
-          <option value="">全部属性</option>
-          <option value="AR">应收</option>
-          <option value="AP">应付</option>
-        </select>
-        <select className="field-select" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={{ width: 110 }}>
-          <option value="">全部状态</option>
-          <option value="unsettled">未核销</option>
-          <option value="partial">部分核销</option>
-          <option value="settled">已核销</option>
-          <option value="void">作废</option>
-        </select>
-        <input className="field-input" type="date" value={filters.date_from}
-               onChange={e => setFilters({...filters, date_from: e.target.value})} style={{ width: 130 }} />
-        <span style={{ color: "var(--shell-text-3)" }}>~</span>
-        <input className="field-input" type="date" value={filters.date_to}
-               onChange={e => setFilters({...filters, date_to: e.target.value})} style={{ width: 130 }} />
-        <button className="btn" onClick={load}>查询</button>
-        <button className="btn" onClick={() => { setFilters({
-          keyword:"", direction:"", status:"", date_from:"", date_to:"",
-          partner_id:"", source:"", currency:"",
-          amount_min:"", amount_max:"",
-          has_invoice:"", has_voucher:"",
-        }); setTimeout(load, 0); }}>重置</button>
-        <a onClick={() => setShowAdvanced(!showAdvanced)}
-           style={{ color: "var(--shell-primary)", cursor: "pointer", fontSize: 12 }}>
-          {showAdvanced ? "▲ 收起" : "▼ 高级"}
-        </a>
-      </div>
-
-      <div className="page-section-bar" style={{ background: "#fff" }}>
-        <span style={{ flex: 1, color: "var(--shell-text-2)", fontSize: 12 }}>
-          共 <b>{bills.length}</b> 条
-          {selected.size > 0 && <> · 已选 <b style={{ color: "var(--shell-primary)" }}>{selected.size}</b> 条</>}
-        </span>
-        <div style={{ position: "relative" }}>
-          <button className="btn primary" onClick={() => setShowBatchMenu(!showBatchMenu)} disabled={selected.size === 0}>
-            批量操作 ▾
-          </button>
-          {showBatchMenu && selected.size > 0 && (
-            <div style={{
-              position: "absolute", top: "100%", right: 0, marginTop: 4,
-              background: "#fff", border: "1px solid var(--shell-border)", borderRadius: 4,
-              boxShadow: "0 4px 12px rgba(0,0,0,0.12)", width: 140, zIndex: 10,
-              padding: "4px 0",
-            }}>
-              <div onClick={batchInvoice} style={menuItem}>批量开票</div>
-              <div onClick={batchSettle} style={menuItem}>批量核销</div>
-              <div onClick={batchClearInvoice} style={menuItem}>批量清票</div>
-              <div onClick={batchDelete} style={{ ...menuItem, color: "#ef4444" }}>批量删除</div>
+    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
+      <div style={{ background: "#fff", borderRadius: 4, padding: 16,
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+        {/* 顶部 */}
+        <div style={{ display: "flex", justifyContent: "space-between",
+                      alignItems: "center", marginBottom: 12, paddingBottom: 12,
+                      borderBottom: "1px solid #f0f0f0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
+            <span style={{ fontSize: 16, fontWeight: 700 }}>账单管理</span>
+            <span style={{ marginLeft: 4, color: "#888", fontSize: 12 }}>
+              共 {bills.length} 条
+              {selected.size > 0 && <> · 已选 <b style={{ color: "#1990ff" }}>{selected.size}</b> 条</>}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setShowBatchMenu(!showBatchMenu)}
+                      style={{ ...btnPrimary, fontWeight: 600 }}
+                      disabled={selected.size === 0}>
+                批量操作 ▾
+              </button>
+              {showBatchMenu && selected.size > 0 && (
+                <div style={{
+                  position: "absolute", top: "100%", right: 0, marginTop: 4,
+                  background: "#fff", border: "1px solid #d9d9d9", borderRadius: 3,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.12)", width: 140, zIndex: 10,
+                  padding: "4px 0",
+                }}>
+                  <div onClick={batchInvoice} style={menuItem}>批量开票</div>
+                  <div onClick={batchSettle} style={menuItem}>批量核销</div>
+                  <div onClick={batchClearInvoice} style={menuItem}>批量清票</div>
+                  <div onClick={batchDelete} style={{ ...menuItem, color: "#ff4d4f" }}>批量删除</div>
+                </div>
+              )}
             </div>
-          )}
+            <button onClick={() => exportExcel(selected.size > 0 ? "selected" : "all")} style={btn}>
+              导出 {selected.size > 0 ? `选中 (${selected.size})` : "全部"}
+            </button>
+            <a href="#/statements" target="_blank" rel="noreferrer"
+               style={{ ...btn, textDecoration: "none", display: "inline-block" }}>对账单管理</a>
+          </div>
         </div>
-        <button className="btn" onClick={() => exportExcel(selected.size > 0 ? "selected" : "all")}>
-          ↓ 导出 {selected.size > 0 ? `选中 (${selected.size})` : "全部"}
-        </button>
-        <a href="#/statements" target="_blank" rel="noreferrer" className="btn" style={{ textDecoration: "none" }}>
-          对账单管理 →
-        </a>
-      </div>
+
+        {/* 筛选 */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
+          <input placeholder="账单号 / 发票号 / 结算单位 / 凭证号 / 作业号 / 提单号"
+                 value={filters.keyword}
+                 onChange={e => setFilters({...filters, keyword: e.target.value})}
+                 onKeyDown={e => e.key === "Enter" && load()}
+                 style={{ flex: "0 0 280px", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }} />
+          <select value={filters.direction}
+                  onChange={e => setFilters({...filters, direction: e.target.value})}
+                  style={selStyle}>
+            <option value="">全部属性</option>
+            <option value="AR">应收</option>
+            <option value="AP">应付</option>
+          </select>
+          <select value={filters.status}
+                  onChange={e => setFilters({...filters, status: e.target.value})}
+                  style={selStyle}>
+            <option value="">全部状态</option>
+            <option value="unsettled">未核销</option>
+            <option value="partial">部分核销</option>
+            <option value="settled">已核销</option>
+            <option value="void">作废</option>
+          </select>
+          <input type="date" value={filters.date_from}
+                 onChange={e => setFilters({...filters, date_from: e.target.value})}
+                 style={selStyle} />
+          <span>~</span>
+          <input type="date" value={filters.date_to}
+                 onChange={e => setFilters({...filters, date_to: e.target.value})}
+                 style={selStyle} />
+          <button onClick={load} style={btn}>查询</button>
+          <button onClick={() => { setFilters({
+            keyword:"", direction:"", status:"", date_from:"", date_to:"",
+            partner_id:"", source:"", currency:"",
+            amount_min:"", amount_max:"",
+            has_invoice:"", has_voucher:"",
+          }); setTimeout(load, 0); }}
+                  style={btn}>重置</button>
+          <a onClick={() => setShowAdvanced(!showAdvanced)}
+             style={{ marginLeft: "auto", color: "#1990ff", cursor: "pointer", fontSize: 12 }}>
+            {showAdvanced ? "▲ 收起筛选" : "▼ 展开筛选"}
+          </a>
+        </div>
 
         {/* 高级筛选面板 */}
         {showAdvanced && (
@@ -432,15 +450,16 @@ export default function BillsList({ onBack }) {
           </div>
         )}
 
-      <div className="page-card" style={{ padding: 0, overflow: "auto" }}>
+        {/* 列表 */}
+        <div style={{ overflowX: "auto" }}>
           {loading ? (
-            <div className="empty-state empty-text">加载中...</div>
+            <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>
           ) : bills.length === 0 ? (
-            <div className="empty-state empty-text">暂无账单</div>
+            <div style={{ padding: 40, textAlign: "center", color: "#999" }}>暂无账单</div>
           ) : (
-            <table className="tms-table">
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
               <thead>
-                <tr>
+                <tr style={{ background: "#fafafa", color: "#444" }}>
                   <th style={{ ...th, width: 30, textAlign: "center" }}>
                     <input type="checkbox"
                            checked={selected.size === bills.length && bills.length > 0}
@@ -610,6 +629,7 @@ export default function BillsList({ onBack }) {
             </div>
           </div>
         )}
+      </div>
 
       {showSettle && (
         <SettleDialog bill={showSettle}
@@ -626,7 +646,7 @@ export default function BillsList({ onBack }) {
                         onClose={() => setShowVoucher(null)}
                         onDone={async () => { setShowVoucher(null); await load(); }} />
       )}
-    </>
+    </div>
   );
 }
 

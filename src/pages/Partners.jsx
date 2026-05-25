@@ -216,48 +216,58 @@ export function PartnersPage({ user, onBack }) {
   );
 
   return (
-    <>
-      <h1 className="page-title">客商管理</h1>
+    <div className="tms">
+      <TmsTitle title="客商管理 / 海运出口" user={user} role={role} onClose={onBack} />
 
-      {/* partner_type underline tabs */}
-      <div style={{ display: "flex", borderBottom: "1px solid var(--shell-border)", marginBottom: 12, flexWrap: "wrap" }}>
-        {PARTNER_TYPES.map(pt => {
-          const active = tab === pt.key;
-          return (
-            <button key={pt.key} onClick={() => { setTab(pt.key); setPage(0); }} style={{
-              padding: "8px 18px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13,
-              color: active ? "var(--shell-primary)" : "var(--shell-text-2)",
-              fontWeight: active ? 600 : 400,
-              borderBottom: active ? "2px solid var(--shell-primary)" : "2px solid transparent",
-              marginBottom: -1, display: "inline-flex", alignItems: "center", gap: 6,
-            }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: pt.colorFg }} />
-              {pt.key}
-              <span style={{ color: "var(--shell-text-3)", fontSize: 11 }}>({tabCounts[pt.key] || 0})</span>
-            </button>
-          );
-        })}
+      {/* 工具栏 */}
+      <div className="tms-tb">
+        <Mi onClick={onBack}>返回</Mi>
+        <Tbl/>
+        <Mi onClick={() => setShowNew(true)}>新建客商</Mi>
+        <Mi onClick={load}>刷新</Mi>
+        <Tbl/>
+        <Mi onClick={() => exportPartners(filtered, tab, orderCounts)} title="把当前过滤后的客商列表导出 Excel">导出</Mi>
+        <Mi onClick={() => setImportOpen(true)} title="批量导入客商 Excel（支持新增 + 更新）">导入</Mi>
+        <Tbl/>
+        <Mi checked={showInactive} onClick={() => setShowInactive(s => !s)}>显示已停用</Mi>
       </div>
 
-      {/* 工具栏 + 搜索 */}
-      <div className="page-section-bar">
-        <input className="field-input" placeholder="编号 / 名称 / 简称 / 联系人 / 电话 / 邮箱"
-               value={search} onChange={e => { setSearch(e.target.value); setPage(0); }}
-               style={{ width: 320 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--shell-text-2)" }}>
-          <input type="checkbox" checked={showInactive} onChange={() => setShowInactive(s => !s)} />
-          显示已停用
-        </label>
-        <div style={{ flex: 1 }} />
-        <span style={{ color: "var(--shell-text-3)", fontSize: 12 }}>总数 <b>{filtered.length}</b></span>
-        <button className="btn" onClick={load}>刷新</button>
-        <button className="btn" onClick={() => exportPartners(filtered, tab, orderCounts)}>↓ 导出</button>
-        <button className="btn" onClick={() => setImportOpen(true)}>↑ 导入</button>
-        <button className="btn primary" onClick={() => setShowNew(true)}>+ 新建客商</button>
+      {/* partner_type tabs */}
+      <div className="tms-bigtabs">
+        {PARTNER_TYPES.map(pt => (
+          <div
+            key={pt.key}
+            className={"bt " + (tab === pt.key ? "act" : "")}
+            onClick={() => { setTab(pt.key); setPage(0); }}
+            style={tab === pt.key ? {} : {}}
+          >
+            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: pt.colorFg, marginRight: 6 }}></span>
+            {pt.key}
+            <span style={{ marginLeft: 6, color: "#888", fontSize: 11 }}>({tabCounts[pt.key] || 0})</span>
+          </div>
+        ))}
       </div>
+
+      {/* 筛选条 */}
+      <div className="tms-filter-bar" style={{ padding: "8px 14px", background: "#e6f4ff", borderBottom: "1px solid #c8dfff", display: "flex", gap: 12, alignItems: "center", fontSize: 12 }}>
+        <span>搜索:</span>
+        <input
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(0); }}
+          placeholder="编号 / 名称 / 简称 / 联系人 / 电话 / 邮箱"
+          style={{ width: 320, height: 22, padding: "1px 8px", border: "1px solid #c1c1c1", borderRadius: 3, fontSize: 12 }}
+        />
+        {search && <span style={{ color: "#1990FF", cursor: "pointer", textDecoration: "underline" }} onClick={() => { setSearch(""); setPage(0); }}>清除</span>}
+      </div>
+
+      {/* 信息栏 */}
+      <TmsInfoBar scope="分公司">
+        当前: <b>{tab}</b>
+        总数: <b>{filtered.length}</b>
+      </TmsInfoBar>
 
       {/* 表格 */}
-      <div className="page-card tms-list" style={{ padding: 0 }}>
+      <div className="tms-list">
         <table style={{ minWidth: totalW }}>
           <colgroup>
             {cols.map(c => <col key={c.k} style={{ width: c.w }} />)}
@@ -347,7 +357,7 @@ export function PartnersPage({ user, onBack }) {
         onClose={() => setImportOpen(false)}
         onImported={load}
       />
-    </>
+    </div>
   );
 }
 
@@ -462,6 +472,7 @@ function PartnerDetail({ partner, role, user, orderCount, onBack, onReload }) {
 
   return (
     <div className="tms">
+      <TmsTitle title={`客商详情 / ${partner.partner_type}`} user={user} role={role} onClose={onBack} />
 
       <div className="tms-dtb1">
         <Mi onClick={onBack}>返回</Mi>

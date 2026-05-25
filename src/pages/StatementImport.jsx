@@ -210,10 +210,10 @@ export default function StatementImport({ user, onBack }) {
   };
 
   return (
-    <>
-      <h1 className="page-title">导入对账单</h1>
+    <div className="tms">
+      <TmsTitle title="导入对账单 / 财务" user={user} onClose={onBack} />
 
-      <div className="page-card">
+      <div style={{ padding: 16, background: "#fff" }}>
         {/* 设置区 */}
         <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 12, fontSize: 13 }}>
           <label>方向：
@@ -308,7 +308,7 @@ export default function StatementImport({ user, onBack }) {
           </>
         )}
       </div>
-    </>
+    </div>
   );
 }
 

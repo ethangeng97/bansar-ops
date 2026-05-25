@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, useRef, useImperativeHandle 
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
 import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
-import { lifecycleOf } from "../lib/constants.js";
 import PortPicker from "../components/PortPicker.jsx";
 import ContainerEditor from "../components/ContainerEditor.jsx";
 import BLImportModal from "../components/BLImportModal.jsx";
@@ -276,8 +275,6 @@ export function OrdersPage({ user, onBack }) {
       }
       if (filters.etd_from) query = query.gte("etd", filters.etd_from);
       if (filters.etd_to)   query = query.lte("etd", filters.etd_to);
-      if (filters.atd_from) query = query.gte("atd", filters.atd_from);
-      if (filters.atd_to)   query = query.lte("atd", filters.atd_to);
 
       // 标识类过滤字段推到服务端，避免"目标记录在最近 500 条之外就找不到"
       // 这些字段不放进 useCallback deps（见 filtersRef 注释），所以从 ref 读最新值
@@ -398,9 +395,6 @@ export function OrdersPage({ user, onBack }) {
     if (f.hbl_no && !(o.hbl_no || "").toLowerCase().includes(String(f.hbl_no).toLowerCase())) return false;
     if (f.etd_from && o.etd && o.etd < f.etd_from) return false;
     if (f.etd_to && o.etd && o.etd > f.etd_to) return false;
-    if (f.atd_from && o.atd && o.atd < f.atd_from) return false;
-    if (f.atd_to && o.atd && o.atd > f.atd_to) return false;
-    if (f.booking_agent && !(o.booking_agent || "").toLowerCase().includes(String(f.booking_agent).toLowerCase())) return false;
     if (search) {
       const q = search.toLowerCase();
       const pool = [o.po, o.customer_po, o.booking_no, o.mbl_no, o.e_booking_no, o.container_no, o.vessel, o.voyage, o.supplier, o.order_no, o.customer, o.pol, o.pod, o.overseas_agent, o.end_customer];
@@ -651,8 +645,7 @@ export function OrdersPage({ user, onBack }) {
   const totalW = cols.reduce((a, c) => a + c.w, 0);
 
   return (
-    <>
-      <h1 className="page-title">{sopNode ? `${sopNode.zh} 待办` : "海运出口订单"}</h1>
+    <div className="tms">
 
       {/* 类型选择对话框（点"新建作业"按钮触发） */}
       {showTypePicker && (() => {
@@ -733,30 +726,40 @@ export function OrdersPage({ user, onBack }) {
         );
       })()}
 
+      {/* 标题栏 + 顶部菜单（共享组件） */}
+      <TmsTitle title={sopNode ? `海运出口 / ${sopNode.zh} 待办` : "作业 / 海运出口"} user={user} role={role} onClose={onBack} />
 
-      {/* 工具栏 —— portal 风 section-bar */}
-      <div className="page-section-bar">
-        <button className="btn primary" onClick={load} disabled={loading}>
-          {loading ? "搜索中..." : "🔍 搜索"}
-        </button>
-        <button className={"btn" + (showFilter ? " primary" : "")} onClick={() => setShowFilter(p => !p)}>
-          {showFilter ? "▾" : "▸"} 显示明细
-        </button>
-        <button className="btn" onClick={clearF}>清除</button>
-        <button className="btn" onClick={() => setShowTypePicker(true)}>+ 新建作业</button>
-        <button className="btn" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>⟨ 上页</button>
-        <button className="btn" disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>下页 ⟩</button>
-        <button className="btn" onClick={() => exportOrdersList(filtered)} title="把当前过滤后的列表导出 Excel">↓ 导出</button>
-        <div style={{ flex: 1 }} />
-        <input className="field-input" placeholder="列内搜索..."
-               value={search} onChange={e => setSearch(e.target.value)}
-               style={{ width: 160 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--shell-text-2)" }}>
-          最大行数
-          <select className="field-select" value={maxRows} onChange={e => setMaxRows(+e.target.value)} style={{ width: 80 }}>
+      {/* 工具栏 */}
+      <div className="tms-mn">
+        <Mi onClick={clearF}>清除</Mi>
+        <Tbl/>
+        <Mi checked={showFilter} onClick={() => setShowFilter(p => !p)}>显示明细</Mi>
+        <Mi onClick={load} disabled={loading}>{loading ? "搜索中..." : "搜索"}</Mi>
+        <Tbl/>
+        <Mi onClick={() => setShowTypePicker(true)}>新建作业</Mi>
+        <Tbl/>
+        <Mi disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>上页</Mi>
+        <Mi disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>下页</Mi>
+        <Tbl/>
+        <Mi onClick={() => exportOrdersList(filtered)} title="把当前过滤后的列表导出 Excel">导出</Mi>
+        <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接">数据交换</Mi>
+        <Tbl/>
+        <Mi onClick={onBack}>关闭</Mi>
+
+        <div className="tms-mn-r">
+          <label>冻结列</label>
+          <select style={{ width: 50 }}><option>1</option><option>2</option><option>3</option></select>
+          <label>列筛选</label>
+          <input style={{ width: 100 }} value={search} onChange={e => setSearch(e.target.value)} />
+          <label>列布局</label>
+          <select style={{ width: 110 }}><option></option></select>
+          <label>列表表格式模板</label>
+          <select style={{ width: 110 }}><option></option></select>
+          <label>最大行数</label>
+          <select value={maxRows} onChange={e => setMaxRows(+e.target.value)} style={{ width: 60 }}>
             <option>200</option><option>500</option><option>1000</option><option>2000</option><option>5000</option>
           </select>
-        </label>
+        </div>
       </div>
 
       {/* 筛选面板 */}
@@ -767,31 +770,6 @@ export function OrdersPage({ user, onBack }) {
             active={activeTab}
             onChange={setActiveTab}
           />
-
-          {activeTab === "动作" && (
-            <ActionsPanel
-              checkedIds={checkedIds}
-              orders={paged}
-              onReload={load}
-              role={role}
-            />
-          )}
-
-          {activeTab === "打印" && (
-            <PrintPanel checkedIds={checkedIds} orders={paged} />
-          )}
-
-          {activeTab === "通知" && (
-            <div style={{ padding: 24, textAlign: "center", color: "var(--shell-text-3)" }}>
-              🔔 通知功能开发中 —— 计划接入邮件 / 短信 / 微信，给客户/操作员推送订单进度
-            </div>
-          )}
-
-          {activeTab === "查询方案" && (
-            <QueryPlansPanel filters={filters} setFilters={setFilters} />
-          )}
-
-          {activeTab === "过滤" && (
           <div className="tms-fg">
             <Fi label="公司">
               <input className="readonly" readOnly value="BS（NB）GJ" />
@@ -805,12 +783,8 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="至">
               <input type="date" value={filters.etd_to || ""} onChange={e => sf("etd_to", e.target.value)} />
             </Fi>
-            <Fi label="实际开航时间">
-              <input type="date" value={filters.atd_from || ""} onChange={e => sf("atd_from", e.target.value)} />
-            </Fi>
-            <Fi label="至">
-              <input type="date" value={filters.atd_to || ""} onChange={e => sf("atd_to", e.target.value)} />
-            </Fi>
+            <Fi label="实际开航时间"><input disabled /></Fi>
+            <Fi label="至"><input disabled /></Fi>
 
             <Fi label="船东" refLabel>
               <ComboBox value={filters.carrier || ""} onChange={v => sf("carrier", v)} options={refs.carrier} />
@@ -821,9 +795,7 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="航次">
               <ComboBox value={filters.voyage || ""} onChange={v => sf("voyage", v)} options={refs.voyage} />
             </Fi>
-            <Fi label="订舱代理" refLabel>
-              <input value={filters.booking_agent || ""} onChange={e => sf("booking_agent", e.target.value)} placeholder="搜索代理名..." />
-            </Fi>
+            <Fi label="订舱代理" refLabel><input disabled /></Fi>
             <Fi label="船东参考编号"><input disabled /></Fi>
             <Fi label="委托单位" refLabel>
               <ComboBox value={filters.customer || ""} onChange={v => sf("customer", v)} options={refs.customer} />
@@ -876,7 +848,6 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="单证锁定"><input disabled /></Fi>
             <Fi label="商务"><input disabled /></Fi>
           </div>
-          )}
         </div>
       )}
 
@@ -986,7 +957,7 @@ export function OrdersPage({ user, onBack }) {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
       />
-    </>
+    </div>
   );
 }
 
@@ -1416,7 +1387,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   // 创建模式：editing 默认 true，初始 ed 已填默认值
   const [editing, setEditing] = useState(isCreating);
   const [ed, setEd] = useState(isCreating ? { ...order } : {});
-  const [tab, setTab] = useState(isCreating ? "作业" : "概览");
+  const [tab, setTab] = useState("作业");
   const [subtab, setSubtab] = useState("托单信息");
   const [refData, setRefData] = useState({ suppliers: [], customers: [], ports: [], staff: [] });
   const [cargoItems, setCargoItems] = useState([]);  // 旧"货物"tab 用（已弃用，留着兼容）
@@ -1618,7 +1589,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     }
   }, [order.id]);
 
-  const startEdit = () => { setEd({ ...order }); setCargoLinesDraft(cargoLines); setTab("作业"); setEditing(true); };
+  const startEdit = () => { setEd({ ...order }); setCargoLinesDraft(cargoLines); setEditing(true); };
   const cancel = () => { setCargoLinesDraft(cargoLines); setEditing(false); };
 
   // 从解析提单 modal 应用字段：合并到 ed（主字段）+ cargoLinesDraft（货物明细）
@@ -2552,68 +2523,9 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   }, [isMaster, subTickets]);
 
   const cargoFromContainerItems = cargoItems;
-  const fmt = (x, fallback = "—") => (x === null || x === undefined || x === "" ? fallback : x);
-  const staffName = (id, legacy) => {
-    const u = (refData.staff || []).find(s => s.id === id);
-    return u ? (u.display_name || u.full_name || u.email) : fmt(legacy);
-  };
-  const routeText = [order.pol, order.pod || order.destination].filter(Boolean).join(" → ") || "—";
-  const shipText = [order.vessel, order.voyage].filter(Boolean).join(" / ") || "—";
-  const mblNo = order.mbl_no || order.booking_no;
-  const shipmentTypeText = ({ FCL: "整箱", LCL: "拼箱", Console: "自拼" })[order.shipment_type] || fmt(order.shipment_type);
-  const baseReady = !!(order.order_no && (isMaster || order.customer) && (order.pol || order.pod || order.destination));
-  const bookingReady = !!(order.booking_confirmed_at || order.space_status === "已订舱");
-  const partyReady = !!(order.contact || order.phone || order.email) && !!(order.cs || order.documenter || order.operator_id);
-  const missingTips = [
-    !partyReady && "人员 / 联系人信息未补齐",
-    !order.atd && "实际开航未维护",
-    !order.eta && "预计到港未维护",
-    !mblNo && "MB/L No. 未录入",
-  ].filter(Boolean);
-  const overviewTodos = [
-    { title: "订单基础信息已创建", desc: "作业号、航线与客户关键字段用于后续单证和费用流转。", done: baseReady },
-    { title: "确认订舱 / 放舱", desc: "优先确认船公司订舱状态，避免后续截单风险。", done: bookingReady },
-    { title: "补充联系人与单证人员", desc: "客服、单证、联系人信息完整后，协作和通知会更稳。", done: partyReady },
-  ];
-  const openTodoCount = overviewTodos.filter(t => !t.done).length;
-  const isWorkspaceTab = !isCreating && tab !== "概览";
-  const lifecycle = !isCreating ? lifecycleOf(order) : null;
-  const workflowMilestones = [
-    { field: "manifest_confirmed_at", label: "舱单确认", type: "timestamp" },
-    { field: "route_confirmed_at",    label: "航线确认", type: "timestamp" },
-    { field: "booking_confirmed_at",  label: "订舱确认", type: "timestamp" },
-    { field: "space_released_at",     label: "放舱确认", type: "timestamp" },
-    { field: "container_released_at", label: "放箱确认", type: "timestamp" },
-    { field: "atd",                   label: "开船",     type: "date", defaultFrom: "etd" },
-  ];
-  const nextWorkflowIdx = workflowMilestones.findIndex(m => !order[m.field]);
-  const workflowDoneCount = workflowMilestones.filter(m => order[m.field]).length;
-  const nextWorkflowLabel = nextWorkflowIdx === -1 ? "全部完成" : workflowMilestones[nextWorkflowIdx].label;
-  const currentWorkflowLabel = nextWorkflowIdx <= 0
-    ? "待开始"
-    : `${workflowMilestones[nextWorkflowIdx === -1 ? workflowMilestones.length - 1 : nextWorkflowIdx - 1].label.replace("确认", "")} 已确认`;
-  const formatStepDate = (s) => {
-    if (!s) return "";
-    const d = new Date(s);
-    return `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  };
-  const confirmMilestone = (m) => {
-    if (isLocked) return;
-    if (m.type === "date") {
-      const today = new Date().toISOString().slice(0, 10);
-      const def = order?.[m.defaultFrom] || today;
-      const date = prompt(`${m.label}日期 (YYYY-MM-DD)：`, def);
-      if (!date) return;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert("日期格式错误"); return; }
-      updateField(m.field, date);
-    } else {
-      if (!confirm(`确认${m.label}？\n\n会记录当前时间。`)) return;
-      updateField(m.field, new Date().toISOString());
-    }
-  };
 
   return (
-    <div className={"tms" + (isWorkspaceTab ? " od-workbench" : "")}>
+    <div className="tms">
       <BLImportModal
         open={blImportOpen}
         onClose={() => setBlImportOpen(false)}
@@ -2678,195 +2590,62 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           onRemoved={onReload}
         />
       )}
+      <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
-      {!isWorkspaceTab && (
-        <>
-      {/* Linear 风 header：作业号 + 状态 + 元信息 + 主操作 + 更多 + 5 mini-card 摘要 */}
-      <div className="oh-header">
-        <div className="oh-header-row">
-        <button className="oh-back" onClick={onBack} title={isCreating ? "取消并返回列表" : "返回列表"}>←</button>
-        <div className="oh-title-block">
-          <div className="oh-title-row">
-            <span className="oh-title">{order.order_no || (isCreating ? "新建作业" : "—")}</span>
-            {!isCreating && lifecycle && <span className="oh-status" style={{ "--lc-color": lifecycle.color }}>{lifecycle.v}</span>}
-            {isMaster && <span className="oh-tag">主拼</span>}
-            {isSubTicket && <span className="oh-tag">分票</span>}
-          </div>
-          {!isCreating && (
-            <div className="oh-meta">
-              {order.customer && <span>{order.customer}</span>}
-              {(order.vessel || order.voyage) && <><span className="oh-dot">·</span><span>{order.vessel || ""}{order.voyage ? ` / ${order.voyage}` : ""}</span></>}
-              {(order.pol || order.pod) && <><span className="oh-dot">·</span><span>{order.pol || "?"} → {order.pod || "?"}</span></>}
-              {order.etd && <><span className="oh-dot">·</span><span>ETD {order.etd}</span></>}
-              {order.booking_no && <><span className="oh-dot">·</span><span>MB/L {order.booking_no}</span></>}
-            </div>
-          )}
-        </div>
-        <div className="oh-actions">
-          {!isCreating && (
-            <>
-              <button className="oh-iconbtn" disabled={!prevId || !onNavigate} onClick={() => prevId && onNavigate?.(prevId)} title="上一票">↑</button>
-              <button className="oh-iconbtn" disabled={!nextId || !onNavigate} onClick={() => nextId && onNavigate?.(nextId)} title="下一票">↓</button>
-            </>
-          )}
-          {isCreating ? (
-            <>
-              <button className="oh-btn primary" onClick={save}>保存创建</button>
-              <button className="oh-btn" onClick={onBack}>取消</button>
-            </>
-          ) : editing ? (
-            <>
-              <button className="oh-btn primary" onClick={save}>保存</button>
-              <button className="oh-btn" onClick={cancel}>取消</button>
-            </>
-          ) : (
-            <button className="oh-btn primary" disabled={isLocked} onClick={startEdit}>编辑</button>
-          )}
-          {!isCreating && (
-            <>
-              <MiDropdown disabled={!order.id} options={[
-                { label: "委托书",           onClick: () => window.open(`#/docs/booking/${order.id}`, "_blank") },
-                { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}`, "_blank") },
-                { label: "📤 提单确认件 (Excel, 一代版)", onClick: () => exportDraftBLToXlsx(order.id) },
-                { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}`, "_blank") },
-                { label: "电放件",             onClick: () => window.open(`#/docs/telex/${order.id}`, "_blank") },
-                { label: "放舱信息",           onClick: () => window.open(`#/docs/release/${order.id}`, "_blank") },
-                { label: "单票对账单",         onClick: () => window.open(`#/docs/stmt/${order.id}`, "_blank") },
-                { label: "📤 56 舱单 (.xls)",   onClick: exportSino56Manifest, disabled: isCreating },
-              ]}>🖨 打印</MiDropdown>
-              <MiDropdown options={[
-                { label: "+ 新建作业", disabled: isLocked, onClick: () => { window.location.hash = "#/sea_export?action=new"; } },
-                { label: "📋 复制此票", disabled: isLocked, onClick: cloneOrder },
-                ...(isMaster ? [{ label: "+ 添加分票", disabled: isLocked, onClick: createSubTicket }] : []),
-                ...(isSubTicket && masterExists === false ? [{ label: "↶ 补建母单", disabled: isLocked, onClick: createMaster }] : []),
-                { label: "💰 内部利润分析", disabled: !order.id, onClick: () => setProfitOpen(true) },
-                { label: "📜 修改历史", disabled: !order.id, onClick: () => setHistoryOpen(true) },
-                { label: "🔒 单证锁定", disabled: isLocked, onClick: () => {} },
-                ...(order.lifecycle === "已完结" || order.lifecycle === "已关闭"
-                    ? [{ label: "↻ 恢复处理中", onClick: () => setLifecycle("处理中") }]
-                    : [
-                        { label: "✓ 完结作业", onClick: () => { if (confirm("确定完结此作业？完结后只能查看，不能编辑。")) setLifecycle("已完结"); } },
-                        { label: "✕ 关闭作业", onClick: () => { if (confirm("确定关闭此作业？")) setLifecycle("已关闭"); } },
-                      ]
-                ),
-                { label: "🗑 删除此票", disabled: isLocked, onClick: deleteOrder },
-              ]}>更多</MiDropdown>
-            </>
-          )}
-        </div>
-        </div>
-
-        {!isCreating && (() => {
-          // 推算"当前节点 / 下一步"用于摘要
-          const shipmentTypeLabel = ({ FCL: "整箱", LCL: "拼箱", Console: "自拼" })[order.shipment_type] || order.shipment_type || "—";
-          const solicitTypeLabel = order.solicit_type || "—";
-
-          return (
-            <div className="oh-summary">
-              <div className="oh-mini"><div className="oh-mini-label">当前节点</div><div className="oh-mini-value">{currentWorkflowLabel}</div></div>
-              <div className="oh-mini"><div className="oh-mini-label">下一步</div><div className="oh-mini-value oh-mini-accent">{nextWorkflowLabel}</div></div>
-              <div className="oh-mini"><div className="oh-mini-label">客户编号</div><div className="oh-mini-value">{order.po || "—"}</div></div>
-              <div className="oh-mini"><div className="oh-mini-label">海外代理</div><div className="oh-mini-value" title={order.overseas_agent || ""}>{order.overseas_agent || "—"}</div></div>
-              <div className="oh-mini"><div className="oh-mini-label">出运 / 揽货</div><div className="oh-mini-value">{shipmentTypeLabel} · {solicitTypeLabel}</div></div>
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* 状态进度：step 盒子（done/current/pending）+ 顶部 mini 摘要 */}
-      {!isCreating && (() => {
-        return (
-          <div className="oh-progress">
-            <div className="oh-progress-head">
-              <span className="oh-progress-title">状态进度</span>
-              <span className="oh-progress-meta">已完成 {workflowDoneCount} / {workflowMilestones.length} · 下一步：<b>{nextWorkflowLabel}</b></span>
-            </div>
-            <div className="milestone-steps">
-              {workflowMilestones.map((m, i) => {
-                const done = !!order[m.field];
-                const state = done ? "done" : (i === nextWorkflowIdx ? "current" : "pending");
-                return (
-                  <button
-                    key={m.field}
-                    className={`ms-step ${state}`}
-                    onClick={() => !done && confirmMilestone(m)}
-                    disabled={done || isLocked}
-                    title={done ? `已${m.label} ${formatStepDate(order[m.field])}` : (isLocked ? "已锁定" : `点击${m.label}`)}
-                  >
-                    <span className="ms-dot"></span>
-                    <span className="ms-label">{m.label}</span>
-                    {done && <span className="ms-date">{formatStepDate(order[m.field])}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
-        </>
-      )}
-
-      {isWorkspaceTab && (
-        <div className="ow-bar">
-          <button className="ow-back" onClick={onBack} title="返回列表">←</button>
-          <div className="ow-main">
-            <div className="ow-title-line">
-              <span className="ow-title">{order.order_no || "—"}</span>
-              {lifecycle && <span className="oh-status" style={{ "--lc-color": lifecycle.color }}>{lifecycle.v}</span>}
-              {isMaster && <span className="oh-tag">主拼</span>}
-              {isSubTicket && <span className="oh-tag">分票</span>}
-            </div>
-            <div className="ow-meta">
-              <span>{routeText}</span>
-              <span>·</span>
-              <span>{shipText}</span>
-              {order.etd && <><span>·</span><span>ETD {order.etd}</span></>}
-              {mblNo && <><span>·</span><span>MB/L {mblNo}</span></>}
-            </div>
-          </div>
-          <div className="ow-progress-mini">
-            <span>{workflowDoneCount}/{workflowMilestones.length}</span>
-            <b>{nextWorkflowLabel}</b>
-          </div>
-          <div className="ow-actions">
-            <button className="oh-iconbtn" disabled={!prevId || !onNavigate} onClick={() => prevId && onNavigate?.(prevId)} title="上一票">↑</button>
-            <button className="oh-iconbtn" disabled={!nextId || !onNavigate} onClick={() => nextId && onNavigate?.(nextId)} title="下一票">↓</button>
-            {editing ? (
-              <>
-                <button className="oh-btn primary" onClick={save}>保存</button>
-                <button className="oh-btn" onClick={cancel}>取消</button>
-              </>
-            ) : (
-              <button className="oh-btn primary" disabled={isLocked} onClick={startEdit}>编辑</button>
+      {/* 第一行工具栏：主操作（白底） */}
+      <div className="tms-dtb1">
+        <Mi onClick={onBack}>{isCreating ? "取消" : "返回"}</Mi>
+        <Tbl/>
+        {isCreating ? (
+          <>
+            <Mi onClick={save} className="primary">保存创建</Mi>
+            <Tbl/>
+            <Mi onClick={onBack}>关闭</Mi>
+          </>
+        ) : (
+          <>
+            <Mi disabled={isLocked} onClick={() => { window.location.hash = "#/sea_export?action=new"; }}>新建</Mi>
+            <Mi disabled={isLocked} onClick={cloneOrder}>复制</Mi>
+            {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
+            {isSubTicket && masterExists === false && <Mi disabled={isLocked} onClick={createMaster}>补建母单</Mi>}
+            <Mi disabled={isLocked} onClick={deleteOrder}>删除</Mi>
+            <Tbl/>
+            <ConfirmStep field="manifest_confirmed_at" label="舱单" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="route_confirmed_at"     label="航线" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="booking_confirmed_at"   label="订舱" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="space_released_at"      label="放舱" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="container_released_at"  label="放箱" order={order} updateField={updateField} isLocked={isLocked} />
+            <ConfirmStep field="atd" label="开船" type="date" defaultFrom="etd" order={order} updateField={updateField} isLocked={isLocked} />
+            <Mi disabled={isLocked}>单证锁定</Mi>
+            <Tbl/>
+            <Mi disabled={order.lifecycle === "已关闭"} onClick={() => {
+              if (confirm("确定关闭此作业？")) setLifecycle("已关闭");
+            }}>关闭作业</Mi>
+            <Mi disabled={order.lifecycle === "已完结" || order.lifecycle === "已关闭"} onClick={() => {
+              if (confirm("确定完结此作业？完结后只能查看，不能编辑。")) setLifecycle("已完结");
+            }}>完结作业</Mi>
+            {(order.lifecycle === "已完结" || order.lifecycle === "已关闭") && (
+              <Mi onClick={() => setLifecycle("处理中")}>恢复处理中</Mi>
             )}
+            <Tbl/>
+            <Mi disabled={!order.id} onClick={() => setProfitOpen(true)}>内部利润分析</Mi>
             <MiDropdown disabled={!order.id} options={[
-              { label: "委托书", onClick: () => window.open(`#/docs/booking/${order.id}`, "_blank") },
+              { label: "委托书",           onClick: () => window.open(`#/docs/booking/${order.id}`, "_blank") },
               { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}`, "_blank") },
-              { label: "提单确认件 Excel", onClick: () => exportDraftBLToXlsx(order.id) },
-              { label: "提单副本 (Copy)", onClick: () => window.open(`#/docs/bl_copy/${order.id}`, "_blank") },
-              { label: "电放件", onClick: () => window.open(`#/docs/telex/${order.id}`, "_blank") },
-              { label: "放舱信息", onClick: () => window.open(`#/docs/release/${order.id}`, "_blank") },
-              { label: "单票对账单", onClick: () => window.open(`#/docs/stmt/${order.id}`, "_blank") },
+              { label: "📤 提单确认件 (Excel, 一代版)", onClick: () => exportDraftBLToXlsx(order.id) },
+              { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}`, "_blank") },
+              { label: "电放件",             onClick: () => window.open(`#/docs/telex/${order.id}`, "_blank") },
+              { label: "放舱信息",           onClick: () => window.open(`#/docs/release/${order.id}`, "_blank") },
+              { label: "单票对账单",         onClick: () => window.open(`#/docs/stmt/${order.id}`, "_blank") },
+              { label: "📤 56 舱单 (.xls)",   onClick: exportSino56Manifest, disabled: isCreating },
             ]}>打印</MiDropdown>
-            <MiDropdown options={[
-              { label: "+ 新建作业", disabled: isLocked, onClick: () => { window.location.hash = "#/sea_export?action=new"; } },
-              { label: "复制此票", disabled: isLocked, onClick: cloneOrder },
-              ...(isMaster ? [{ label: "+ 添加分票", disabled: isLocked, onClick: createSubTicket }] : []),
-              ...(isSubTicket && masterExists === false ? [{ label: "补建母单", disabled: isLocked, onClick: createMaster }] : []),
-              { label: "内部利润分析", disabled: !order.id, onClick: () => setProfitOpen(true) },
-              { label: "修改历史", disabled: !order.id, onClick: () => setHistoryOpen(true) },
-              ...(order.lifecycle === "已完结" || order.lifecycle === "已关闭"
-                ? [{ label: "恢复处理中", onClick: () => setLifecycle("处理中") }]
-                : [
-                    { label: "完结作业", onClick: () => { if (confirm("确定完结此作业？完结后只能查看，不能编辑。")) setLifecycle("已完结"); } },
-                    { label: "关闭作业", onClick: () => { if (confirm("确定关闭此作业？")) setLifecycle("已关闭"); } },
-                  ]
-              ),
-              { label: "删除此票", disabled: isLocked, onClick: deleteOrder },
-            ]}>更多</MiDropdown>
-          </div>
-        </div>
-      )}
+            <Mi disabled={!prevId || !onNavigate} onClick={() => prevId && onNavigate?.(prevId)}>上行</Mi>
+            <Mi disabled={!nextId || !onNavigate} onClick={() => nextId && onNavigate?.(nextId)}>下行</Mi>
+            <Tbl/>
+            <Mi onClick={onBack}>关闭</Mi>
+          </>
+        )}
+      </div>
 
       {/* 创建模式提示 */}
       {isCreating && (
@@ -2888,8 +2667,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         {(isCreating
           ? ["作业"]
           : isMaster
-            ? ["概览", "作业", "小票", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
-            : ["概览", "作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+            ? ["作业", "小票", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+            : ["作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
         ).map(t => (
           <div key={t} className={"bt " + (tab === t ? "act" : "")} onClick={() => setTab(t)}>
             {t === "SOP 进度" && (
@@ -2906,22 +2685,24 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       {/* 第二行工具栏：按 tab 切换 ─ 作业/装箱/小票 → 作业操作；费用 → 费用操作；其他 tab 隐藏 */}
       {(tab === "作业" || tab === "装箱" || tab === "小票") && (
         <div className="tms-dtb2">
-          <MiDropdown disabled={isLocked} options={[
-            { label: "导入提单", onClick: () => setBlImportOpen(true) },
-            { label: "导入舱单 (56/兴港)", onClick: () => setSino56ImportOpen(true) },
-            { label: "导入 SI (Word/Excel)", onClick: () => setSiDocImportOpen(true) },
-            { label: "导入装箱单", onClick: () => setPackingListImportOpen(true) },
-          ]}>导入</MiDropdown>
-          <MiDropdown disabled={isLocked || isCreating} options={[
-            { label: "导出 56 舱单 (.xls)", onClick: exportSino56Manifest },
-          ]}>导出</MiDropdown>
+          {!editing ? (
+            <Mi disabled={isLocked} onClick={startEdit}>编辑</Mi>
+          ) : (
+            <>
+              <Mi onClick={save}>保存</Mi>
+              <Mi onClick={cancel}>取消</Mi>
+            </>
+          )}
+          <Mi disabled={isLocked} onClick={() => setBlImportOpen(true)}>📋 导入提单</Mi>
+          <Mi disabled={isLocked} onClick={() => setSino56ImportOpen(true)}>📋 导入舱单 (56/兴港)</Mi>
+          <Mi disabled={isLocked} onClick={() => setSiDocImportOpen(true)}>📄 导入 SI (Word/Excel)</Mi>
+          <Mi disabled={isLocked} onClick={() => setPackingListImportOpen(true)}>📦 导入装箱单</Mi>
+          <Mi disabled={isLocked || isCreating} onClick={exportSino56Manifest}>📤 导出56舱单</Mi>
           <Mi arrow onClick={() => setTemplateOpen(true)} title="从模板创建 / 把当前作业存为模板">订舱模板</Mi>
           <Mi onClick={onReload}>刷新</Mi>
-          <MiDropdown options={[
-            { label: "数据交换", disabled: true, onClick: () => {} },
-            { label: "通知", disabled: true, onClick: () => {} },
-            { label: "历史", disabled: !order.id, onClick: () => setHistoryOpen(true) },
-          ]}>更多</MiDropdown>
+          <Mi disabled arrow title="敬请期待：跟船公司 EDI / 海关 56 平台对接入口">数据交换</Mi>
+          <Mi disabled arrow title="敬请期待：自动发邮件/短信给客户（开船/到港/提单可取）">通知</Mi>
+          <Mi disabled={!order.id} onClick={() => setHistoryOpen(true)} title="本票修改历史 audit log">历史</Mi>
         </div>
       )}
       {tab === "费用" && (
@@ -2939,183 +2720,14 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
       {/* 主体 */}
       <div className="tms-detail-body">
-
-        {tab === "概览" && (
-          <div className="od-overview">
-            <div className="od-main">
-              <section className="od-card">
-                <div className="od-card-head">
-                  <div className="od-section-title">委托与人员</div>
-                  <button className="od-edit-link" disabled={isLocked} onClick={startEdit}>编辑</button>
-                </div>
-                <div className="od-card-body">
-                  <div className="od-field-grid">
-                    <div className="od-field"><div className="od-label">作业号</div><div className="od-value">{fmt(order.order_no)}</div></div>
-                    <div className="od-field"><div className="od-label">委托单位</div><div className="od-value">{isMaster ? (order.customer || "多客户拼柜，详见小票") : fmt(order.customer)}</div></div>
-                    <div className="od-field"><div className="od-label">出运类型</div><div className="od-value">{shipmentTypeText}</div></div>
-                    <div className="od-field"><div className="od-label">客户编号</div><div className="od-value">{fmt(order.po)}</div></div>
-                    <div className="od-field"><div className="od-label">操作员</div><div className="od-value">{staffName(order.operator_id, order.operator)}</div></div>
-                    <div className="od-field"><div className="od-label">客服</div><div className="od-value">{fmt(order.cs)}</div></div>
-                    <div className="od-field"><div className="od-label">单证</div><div className="od-value">{fmt(order.documenter)}</div></div>
-                    <div className="od-field"><div className="od-label">商务</div><div className="od-value">{fmt(order.commercial)}</div></div>
-                    <div className="od-field"><div className="od-label">销售员</div><div className="od-value">{staffName(order.salesperson_id, order.salesperson)}</div></div>
-                    <div className="od-field"><div className="od-label">联系人</div><div className="od-value">{fmt(order.contact, "待补充")}</div></div>
-                    <div className="od-field"><div className="od-label">电话</div><div className="od-value">{fmt(order.phone || order.contact_phone, "待补充")}</div></div>
-                    <div className="od-field"><div className="od-label">邮箱</div><div className="od-value">{fmt(order.email, "待补充")}</div></div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="od-card">
-                <div className="od-card-head">
-                  <div className="od-section-title">运输与航线</div>
-                  <button className="od-edit-link" disabled={isLocked} onClick={startEdit}>编辑</button>
-                </div>
-                <div className="od-card-body">
-                  <div className="od-route-box">
-                    <div>
-                      <div className="od-port-name">{fmt(order.pol, "起运港待补")}</div>
-                      <div className="od-port-sub">{fmt(order.carrier, "船东待补")} · {fmt(order.vessel, "船名待补")}</div>
-                    </div>
-                    <div className="od-route-arrow">→</div>
-                    <div>
-                      <div className="od-port-name">{fmt(order.pod || order.destination, "目的港待补")}</div>
-                      <div className="od-port-sub">海外代理 {fmt(order.overseas_agent, "待补充")}</div>
-                    </div>
-                  </div>
-                  <div className="od-field-grid">
-                    <div className="od-field"><div className="od-label">出运状态</div><div className="od-value">{fmt(order.space_status, "未订舱")}</div></div>
-                    <div className="od-field"><div className="od-label">订舱代理</div><div className="od-value">{fmt(order.booking_agent, "待补充")}</div></div>
-                    <div className="od-field"><div className="od-label">揽货类型</div><div className="od-value">{fmt(order.solicit_type)}</div></div>
-                    <div className="od-field"><div className="od-label">状态</div><div className="od-value"><span className="od-pill">{fmt(order.lifecycle || order.status, "处理中")}</span></div></div>
-                    <div className="od-field"><div className="od-label">船东</div><div className="od-value">{fmt(order.carrier)}</div></div>
-                    <div className="od-field"><div className="od-label">船名</div><div className="od-value">{fmt(order.vessel)}</div></div>
-                    <div className="od-field"><div className="od-label">航次</div><div className="od-value">{fmt(order.voyage)}</div></div>
-                    <div className="od-field"><div className="od-label">服务类型</div><div className="od-value">{fmt(order.service_type, "待补充")}</div></div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="od-card">
-                <div className="od-card-head">
-                  <div className="od-section-title">船期</div>
-                  <button className="od-edit-link" disabled={isLocked} onClick={startEdit}>维护船期</button>
-                </div>
-                <div className="od-card-body">
-                  <div className="od-timeline">
-                    <div className="od-date-box"><div className="od-label">预计开航</div><div className="od-value">{fmt(order.etd, "年 / 月 / 日")}</div></div>
-                    <div className="od-date-box"><div className="od-label">实际开航</div><div className="od-value">{fmt(order.atd, "年 / 月 / 日")}</div></div>
-                    <div className="od-date-box"><div className="od-label">预计到港</div><div className="od-value">{fmt(order.eta, "年 / 月 / 日")}</div></div>
-                    <div className="od-date-box"><div className="od-label">清关日期</div><div className="od-value">{fmt(order.customs_clear_date, "年 / 月 / 日")}</div></div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="od-card">
-                <div className="od-card-head">
-                  <div className="od-section-title">提单与单证</div>
-                  <button className="od-edit-link" disabled={isLocked} onClick={startEdit}>编辑</button>
-                </div>
-                <div className="od-card-body">
-                  <table className="od-doc-table">
-                    <thead>
-                      <tr><th>类型</th><th>号码</th><th>状态</th><th>付款方式</th><th>份数</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>M/B/L No.</td>
-                        <td>{fmt(mblNo)}</td>
-                        <td><span className="od-pill">{mblNo ? "已录入" : "待处理"}</span></td>
-                        <td>{fmt(order.freight_terms || order.carrier_payment_term, "待确认")}</td>
-                        <td>{fmt([order.original_count && `正本 ${order.original_count}`, order.copy_count && `副本 ${order.copy_count}`].filter(Boolean).join(" / "), "待补")}</td>
-                      </tr>
-                      <tr>
-                        <td>H/B/L No.</td>
-                        <td>{order.has_hbl ? fmt(order.hbl_no, "待补充") : "未签 HBL"}</td>
-                        <td><span className="od-pill">{order.has_hbl && order.hbl_no ? "已录入" : "待处理"}</span></td>
-                        <td>{fmt(order.freight_terms, "待确认")}</td>
-                        <td>待补</td>
-                      </tr>
-                      <tr>
-                        <td>SI</td>
-                        <td>Word / Excel</td>
-                        <td><span className="od-pill">{order.manifest_confirmed_at ? "已确认" : "待导入"}</span></td>
-                        <td>-</td>
-                        <td>-</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </div>
-
-            <aside className="od-side">
-              <section className="od-card">
-                <div className="od-card-head">
-                  <div className="od-section-title">当前待办</div>
-                  <span className="oh-tag od-warn-tag">{openTodoCount} 项</span>
-                </div>
-                <div className="od-card-body">
-                  {overviewTodos.map(item => (
-                    <div className="od-todo" key={item.title}>
-                      <div className={"od-check " + (item.done ? "done" : "")}>{item.done ? "✓" : ""}</div>
-                      <div>
-                        <div className="od-todo-title">{item.title}</div>
-                        <div className="od-todo-desc">{item.desc}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="od-card">
-                <div className="od-card-head">
-                  <div className="od-section-title">异常提醒</div>
-                </div>
-                <div className="od-card-body">
-                  {missingTips.length > 0 ? (
-                    <>
-                      <div className="od-alert"><b>信息缺失：</b>{missingTips.join("、")}，建议进入编辑模式补齐。</div>
-                      <div className="od-alert"><b>操作建议：</b>导入 / 导出动作已按当前模块收纳，概览页保留判断和查看。</div>
-                    </>
-                  ) : (
-                    <div className="od-alert ok"><b>信息完整：</b>当前概览关键字段已维护，可继续推进后续节点。</div>
-                  )}
-                </div>
-              </section>
-
-              <section className="od-card">
-                <div className="od-card-head">
-                  <div className="od-section-title">最近动态</div>
-                  <button className="od-edit-link" disabled={!order.id} onClick={() => setHistoryOpen(true)}>全部</button>
-                </div>
-                <div className="od-card-body">
-                  <div className="od-activity">
-                    <div className="od-avatar">{(user?.email || user?.profile?.display_name || "U").slice(0, 1).toUpperCase()}</div>
-                    <div className="od-activity-main"><b>{user?.profile?.display_name || user?.email || "OPS"}</b> 查看订单概览<div className="od-time">当前页面</div></div>
-                  </div>
-                  <div className="od-activity">
-                    <div className="od-avatar">S</div>
-                    <div className="od-activity-main"><b>System</b> 标记订单状态为 {fmt(order.lifecycle || order.status, "处理中")}<div className="od-time">{fmt(order.updated_at, "待同步")}</div></div>
-                  </div>
-                  <div className="od-activity">
-                    <div className="od-avatar">O</div>
-                    <div className="od-activity-main"><b>OPS</b> {bookingReady ? "等待后续单证与费用确认" : "等待订舱确认与 SI 资料"}<div className="od-time">{routeText} · {shipText}</div></div>
-                  </div>
-                </div>
-              </section>
-            </aside>
-          </div>
-        )}
+        <LifecycleStamp shipment={order} />
 
         {tab === "作业" && (
           <>
             {/* ─── 基本信息 ─── */}
             <div className="tms-detail-section">基本信息</div>
             <div className="tms-detail-panel">
-              <div className={"tms-detail-grid" + (editing ? " is-editing" : " is-readonly")}>
-                {/* ── 委托与人员 ── */}
-                <div className="tms-grid-subhead">委托与人员</div>
+              <div className="tms-detail-grid">
                 <Df label="作业号"><OrderNoField order={order} editing={editing} onChange={ch} /></Df>
                 <Df label="委托单位" required={!isMaster && !isCreatingMaster}>
                   {(isMaster || isCreatingMaster) ? (
@@ -3134,14 +2746,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                       }} options={refData.customers} />
                     : <input value={v("customer")} disabled className="notnull" />}
                 </Df>
-                <Df label="出运类型">
-                  <select value={v("shipment_type")} onChange={e => ch("shipment_type", e.target.value)} disabled={!editing}>
-                    <option value="FCL">整箱</option>
-                    <option value="LCL">拼箱</option>
-                    <option value="Console">自拼</option>
-                  </select>
-                </Df>
-                <Df label="客户编号"><input value={v("po")} onChange={e => ch("po", e.target.value)} disabled={!editing} /></Df>
+                <Df label="订舱代理"><input value={v("booking_agent")} onChange={e => ch("booking_agent", e.target.value)} disabled={!editing} /></Df>
                 <Df label="操作员">
                   {editing ? (
                     <select value={v("operator_id") || ""} onChange={e => ch("operator_id", e.target.value || null)}>
@@ -3173,22 +2778,47 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                   )}
                 </Df>
                 <Df label="客服"><input value={v("cs")} onChange={e => ch("cs", e.target.value)} disabled={!editing} /></Df>
+
+                <Df label="出运类型">
+                  <select value={v("shipment_type")} onChange={e => ch("shipment_type", e.target.value)} disabled={!editing}>
+                    <option value="FCL">整箱</option>
+                    <option value="LCL">拼箱</option>
+                    <option value="Console">自拼</option>
+                  </select>
+                </Df>
+                <Df label="联系人"><input value={v("contact")} onChange={e => ch("contact", e.target.value)} disabled={!editing} /></Df>
+                <Df label="船东">
+                  {editing
+                    ? <ComboBox value={v("carrier")} onChange={val => ch("carrier", val)} options={refData.suppliers} />
+                    : <input value={v("carrier")} disabled />}
+                </Df>
                 <Df label="单证"><input value={v("documenter")} onChange={e => ch("documenter", e.target.value)} disabled={!editing} /></Df>
                 <Df label="商务"><input value={v("commercial")} onChange={e => ch("commercial", e.target.value)} disabled={!editing} /></Df>
                 <Df label="委托部门"><input value={v("entrust_dept")} onChange={e => ch("entrust_dept", e.target.value)} disabled={!editing} /></Df>
-                <Df label="联系人"><input value={v("contact")} onChange={e => ch("contact", e.target.value)} disabled={!editing} /></Df>
-                <Df label="电话"><input value={v("phone")} onChange={e => ch("phone", e.target.value)} disabled={!editing} /></Df>
-                <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
-                <Df label="邮件"><input value={v("email")} onChange={e => ch("email", e.target.value)} disabled={!editing} /></Df>
 
-                {/* ── 运输与航线 ── */}
-                <div className="tms-grid-subhead">运输与航线</div>
                 <Df label="出运状态">
                   <select value={v("space_status") || "未订舱"} onChange={e => ch("space_status", e.target.value)} disabled={!editing}>
                     <option>未订舱</option><option>已订舱</option>
                   </select>
                 </Df>
-                <Df label="订舱代理"><input value={v("booking_agent")} onChange={e => ch("booking_agent", e.target.value)} disabled={!editing} /></Df>
+                <Df label="电话"><input value={v("phone")} onChange={e => ch("phone", e.target.value)} disabled={!editing} /></Df>
+                <Df label="船名" refLabel>
+                  {editing && !isInheritedFromMaster("vessel")
+                    ? <ComboBox value={v("vessel")} onChange={val => ch("vessel", val ? liveUpper(val) : val)} options={[]} />
+                    : <input value={v("vessel")} disabled className="notnull" title={isInheritedFromMaster("vessel") ? inheritTitle : undefined} />}
+                </Df>
+                <Df label="状态"><input value={v("status") || "处理中"} disabled className="readonly" /></Df>
+                <Df label="贸易条款">
+                  <select value={v("trade_term") || ""} onChange={e => ch("trade_term", e.target.value)} disabled={!editing}>
+                    <option value=""></option>
+                    {TRADE_TERMS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Df>
+                <Df label="航线"><input value={v("route")} onChange={e => ch("route", e.target.value)} disabled={!editing} /></Df>
+
+                <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
+                <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", liveUpper(e.target.value))} disabled={!editing || isInheritedFromMaster("voyage")} className="notnull" title={isInheritedFromMaster("voyage") ? inheritTitle : undefined} /></Df>
                 <Df label="揽货类型">
                   <select value={v("solicit_type") || "代理货"} onChange={e => ch("solicit_type", e.target.value)} disabled={!editing}>
                     <option>自揽货</option>
@@ -3202,45 +2832,17 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                     ? <ComboBox value={v("overseas_agent")} onChange={val => ch("overseas_agent", val)} options={refData.customers} />
                     : <input value={v("overseas_agent")} disabled />}
                 </Df>
-                <Df label="状态"><input value={v("status") || "处理中"} disabled className="readonly" /></Df>
-                <Df label="船东">
-                  {editing
-                    ? <ComboBox value={v("carrier")} onChange={val => ch("carrier", val)} options={refData.suppliers} />
-                    : <input value={v("carrier")} disabled />}
-                </Df>
-                <Df label="船名" refLabel>
-                  {editing && !isInheritedFromMaster("vessel")
-                    ? <ComboBox value={v("vessel")} onChange={val => ch("vessel", val ? liveUpper(val) : val)} options={[]} />
-                    : <input value={v("vessel")} disabled className="notnull" title={isInheritedFromMaster("vessel") ? inheritTitle : undefined} />}
-                </Df>
-                <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", liveUpper(e.target.value))} disabled={!editing || isInheritedFromMaster("voyage")} className="notnull" title={isInheritedFromMaster("voyage") ? inheritTitle : undefined} /></Df>
-                <Df label="航线"><input value={v("route")} onChange={e => ch("route", e.target.value)} disabled={!editing} /></Df>
-                <Df label="贸易条款">
-                  <select value={v("trade_term") || ""} onChange={e => ch("trade_term", e.target.value)} disabled={!editing}>
-                    <option value=""></option>
-                    {TRADE_TERMS.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </Df>
-                <Df label="服务类型">
-                  <select value={v("service_type") || ""} onChange={e => ch("service_type", e.target.value)} disabled={!editing}>
-                    <option value=""></option>
-                    {TRANSPORT_TERMS.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </Df>
 
-                {/* ── 船期 ── */}
-                <div className="tms-grid-subhead">船期</div>
+                <Df label="HB/L No." optional>
+                  <input value={v("hbl_no")} onChange={e => ch("hbl_no", e.target.value)} disabled={!editing} placeholder={!order.has_hbl ? "未签 HBL" : ""} />
+                </Df>
+                <Df label="邮件"><input value={v("email")} onChange={e => ch("email", e.target.value)} disabled={!editing} /></Df>
                 <Df label="预计开航时间"><input type="date" value={v("etd")} onChange={e => ch("etd", e.target.value)} disabled={!editing} /></Df>
                 <Df label="实际开航时间"><input type="date" value={v("atd")} onChange={e => ch("atd", e.target.value)} disabled={!editing} /></Df>
                 <Df label="预计到港时间"><input type="date" value={v("eta")} onChange={e => ch("eta", e.target.value)} disabled={!editing} /></Df>
                 <Df label="清关日期"><input type="date" value={v("customs_clear_date")} onChange={e => ch("customs_clear_date", e.target.value)} disabled={!editing} /></Df>
 
-                {/* ── 提单与单证 ── */}
-                <div className="tms-grid-subhead">提单与单证</div>
-                <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
-                <Df label="HB/L No." optional>
-                  <input value={v("hbl_no")} onChange={e => ch("hbl_no", e.target.value)} disabled={!editing} placeholder={!order.has_hbl ? "未签 HBL" : ""} />
-                </Df>
+                <Df label="客户编号"><input value={v("po")} onChange={e => ch("po", e.target.value)} disabled={!editing} /></Df>
                 <Df label="付款方式">
                   <select value={v("freight_terms") || ""} onChange={e => ch("freight_terms", e.target.value)} disabled={!editing}>
                     <option value=""></option>
@@ -3255,16 +2857,18 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 </Df>
                 <Df label="正本份数"><input type="number" value={v("original_count")} onChange={e => ch("original_count", e.target.value)} disabled={!editing} /></Df>
                 <Df label="副本份数"><input type="number" value={v("copy_count")} onChange={e => ch("copy_count", e.target.value)} disabled={!editing} /></Df>
+                <Df label="服务类型">
+                  <select value={v("service_type") || ""} onChange={e => ch("service_type", e.target.value)} disabled={!editing}>
+                    <option value=""></option>
+                    {TRANSPORT_TERMS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Df>
 
-                {/* ── 备注 ── */}
-                <div className="tms-grid-subhead">备注</div>
                 <Df label="操作备注" span={3}><textarea value={v("operator_note")} onChange={e => ch("operator_note", e.target.value)} disabled={!editing} /></Df>
                 <Df label="内部备注" span={3}><textarea value={v("internal_note")} onChange={e => ch("internal_note", e.target.value)} disabled={!editing} /></Df>
 
                 {isMaster && masterSummary && (
                   <>
-                    {/* ── 拼柜汇总 ── */}
-                    <div className="tms-grid-subhead">拼柜汇总（所有分票合计）</div>
                     <Df label="合计件数" span={1}>
                       <input value={masterSummary.qty_packages || ""} disabled className="calc" title="所有分票汇总" />
                     </Df>
@@ -4252,7 +3856,6 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
       alert("分票货物明细里没有填箱号，无法同步");
       return;
     }
-    // 去重：已经在 shipment_containers 表里的箱号不重复建
     const existingKeys = new Set(
       containers.map(c => `${c.shipment_id}|${c.container_no}`)
     );
@@ -4263,7 +3866,6 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
       alert("所有箱号都已在集装箱表里，无新增");
       return;
     }
-    // 预览 + 确认
     const preview = toInsert.map(r => {
       return `  ${sourceLabel(r.shipment_id)}  ${r.container_no}  ${r.container_size || ""}${r.container_type || ""}  ${r.cargo_qty}件  ${r.cargo_weight}KG`;
     }).join("\n");
@@ -4619,19 +4221,8 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
   const [saveTplOpen, setSaveTplOpen] = useState(false);
 
   const isAdmin = role === "admin" || role === "finance";
-  // 编辑权限（这个角色能不能改）vs 当前是否处于编辑模式（点了「编辑」按钮没）
-  const hasEditPermission = !isLocked ? (isAdmin || role === "operator") : isAdmin;
-  const [editMode, setEditMode] = useState(false);
-  const canEdit = hasEditPermission && editMode;  // 实际可编辑 = 有权限 && 在编辑模式
+  const canEdit = !isLocked ? (isAdmin || role === "operator") : isAdmin;
   const canViewProfit = isAdmin || role === "sales";
-
-  // 进入/退出编辑模式
-  const enterEdit = () => setEditMode(true);
-  const exitEdit  = () => {
-    if (hasUnsaved && !confirm("有未保存的改动，确认放弃？")) return;
-    setEditMode(false);
-    load();  // 重新拉取，丢弃 dirty 状态
-  };
 
   // bill_id → bill 字典，方便行内查
   const billMap = useMemo(() => {
@@ -4838,7 +4429,6 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
 
     setSaving(false);
     await load();
-    setEditMode(false);   // 保存成功后退出编辑模式
     alert("保存成功");
   };
 
@@ -5383,76 +4973,37 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
 
   return (
     <div>
-      {/* 编辑模式开关 + 保存按钮 */}
-      {hasEditPermission && (
+      {/* 顶部全局保存按钮 */}
+      {canEdit && (
         <div style={{
           margin: "12px 12px 0",
           padding: "8px 14px",
-          background: editMode ? (hasUnsaved ? "#fff8e9" : "var(--shell-primary-50)") : "var(--shell-bg)",
-          border: `1px solid ${editMode ? (hasUnsaved ? "#ffd28e" : "var(--shell-primary-100, #bae0ff)") : "var(--shell-border-2)"}`,
-          borderRadius: 6,
+          background: hasUnsaved ? "#fff8e9" : "#f5f5f5",
+          border: `1px solid ${hasUnsaved ? "#ffd28e" : "#ddd"}`,
+          borderRadius: 5,
           display: "flex",
           alignItems: "center",
           gap: 12,
         }}>
-          {!editMode ? (
-            <>
-              <span style={{ fontSize: 12, color: "var(--shell-text-2)" }}>
-                🔒 费用面板只读 —— 点右侧「编辑」开始修改
-              </span>
-              <button
-                onClick={enterEdit}
-                style={{
-                  marginLeft: "auto",
-                  padding: "5px 18px",
-                  background: "var(--shell-primary)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 4,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}>
-                ✎ 编辑
-              </button>
-            </>
-          ) : (
-            <>
-              {hasUnsaved
-                ? <span style={{ fontSize: 12, color: "#c66800", fontWeight: 600 }}>⚠ 编辑中 · 有未保存改动</span>
-                : <span style={{ fontSize: 12, color: "var(--shell-primary)", fontWeight: 600 }}>✎ 编辑中</span>}
-              <button
-                onClick={exitEdit}
-                disabled={saving}
-                style={{
-                  marginLeft: "auto",
-                  padding: "5px 14px",
-                  background: "#fff",
-                  color: "var(--shell-text)",
-                  border: "1px solid var(--shell-border)",
-                  borderRadius: 4,
-                  cursor: saving ? "not-allowed" : "pointer",
-                  fontSize: 12,
-                }}>
-                取消
-              </button>
-              <button
-                onClick={saveAll}
-                disabled={saving || !hasUnsaved}
-                style={{
-                  padding: "5px 18px",
-                  background: saving || !hasUnsaved ? "#ccc" : "var(--shell-primary)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 4,
-                  cursor: saving || !hasUnsaved ? "not-allowed" : "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}>
-                {saving ? "保存中..." : "💾 保存"}
-              </button>
-            </>
-          )}
+          {hasUnsaved
+            ? <span style={{ fontSize: 12, color: "#c66800", fontWeight: "bold" }}>⚠ 有未保存的费用，请点击右侧保存</span>
+            : <span style={{ fontSize: 12, color: "#888" }}>所有费用已保存</span>}
+          <button
+            onClick={saveAll}
+            disabled={saving || !hasUnsaved}
+            style={{
+              marginLeft: "auto",
+              padding: "5px 18px",
+              background: saving || !hasUnsaved ? "#ccc" : "#1990FF",
+              color: "#fff",
+              border: "none",
+              borderRadius: 3,
+              cursor: saving || !hasUnsaved ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontWeight: "bold",
+            }}>
+            {saving ? "保存中..." : "保存所有费用"}
+          </button>
         </div>
       )}
 
@@ -6703,171 +6254,6 @@ function PortRow({ label, required, value, onChange, disabled, title }) {
       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
         <PortPicker value={value} onChange={onChange} disabled={disabled} />
       </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 筛选面板 - 动作 tab
-// ═══════════════════════════════════════════════════════════════
-function ActionsPanel({ checkedIds, orders, onReload, role }) {
-  const [busy, setBusy] = useState(false);
-  const isAdmin = role === "admin";
-  const count = checkedIds.size;
-
-  const apply = async (work) => {
-    if (count === 0) { alert("请先在列表中勾选订单"); return; }
-    setBusy(true);
-    try { await work(); onReload?.(); }
-    catch (e) { alert(e.message || String(e)); }
-    finally { setBusy(false); }
-  };
-
-  const setLifecycle = (lc) => apply(async () => {
-    const ids = [...checkedIds];
-    if (!confirm(`确认把 ${ids.length} 个订单标为「${lc}」？`)) return;
-    const { error } = await supabase.from("shipments").update({ lifecycle: lc }).in("id", ids);
-    if (error) throw error;
-  });
-
-  const setAtdToday = () => apply(async () => {
-    const ids = [...checkedIds];
-    const today = new Date().toISOString().slice(0, 10);
-    if (!confirm(`确认把 ${ids.length} 个订单的「实际开航日」设为今天 (${today})？`)) return;
-    const { error } = await supabase.from("shipments").update({ atd: today }).in("id", ids);
-    if (error) throw error;
-  });
-
-  const doDelete = () => apply(async () => {
-    const ids = [...checkedIds];
-    if (!confirm(`⚠ 不可恢复！确认删除 ${ids.length} 个订单？`)) return;
-    const { error } = await supabase.from("shipments").delete().in("id", ids);
-    if (error) throw error;
-  });
-
-  return (
-    <div style={{ padding: 16 }}>
-      <div style={{ marginBottom: 14, color: "var(--shell-text-2)", fontSize: 12 }}>
-        当前已选 <b style={{ color: "var(--shell-primary)" }}>{count}</b> 个订单，下方操作仅对选中项生效。
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
-        <button className="btn" onClick={() => setLifecycle("处理中")} disabled={busy || !count}>设为「处理中」</button>
-        <button className="btn" onClick={() => setLifecycle("已完结")} disabled={busy || !count}>设为「已完结」</button>
-        <button className="btn" onClick={() => setLifecycle("已关闭")} disabled={busy || !count}>设为「已关闭」</button>
-        <button className="btn" onClick={setAtdToday} disabled={busy || !count}>设实际开航日 = 今天</button>
-        {isAdmin && (
-          <button className="btn danger" onClick={doDelete} disabled={busy || !count}>批量删除</button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 筛选面板 - 打印 tab
-// ═══════════════════════════════════════════════════════════════
-function PrintPanel({ checkedIds, orders }) {
-  const count = checkedIds.size;
-
-  const printEach = (pathFn, name) => {
-    if (count === 0) { alert("请先在列表中勾选订单"); return; }
-    const ids = [...checkedIds];
-    if (ids.length > 10 && !confirm(`将打开 ${ids.length} 个新标签页，确认继续？`)) return;
-    ids.forEach((id, i) => {
-      setTimeout(() => window.open(pathFn(id), "_blank"), i * 80);  // 错开避免被浏览器拦截
-    });
-  };
-
-  return (
-    <div style={{ padding: 16 }}>
-      <div style={{ marginBottom: 14, color: "var(--shell-text-2)", fontSize: 12 }}>
-        当前已选 <b style={{ color: "var(--shell-primary)" }}>{count}</b> 个订单，下方每项会为每个订单单独打开打印页。
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
-        <button className="btn" onClick={() => printEach(id => `#/docs/booking/${id}`, "委托书")} disabled={!count}>批量委托书</button>
-        <button className="btn" onClick={() => printEach(id => `#/docs/draft_bl/${id}`, "Draft BL")} disabled={!count}>批量 Draft BL</button>
-        <button className="btn" onClick={() => printEach(id => `#/docs/bl_copy/${id}`, "BL Copy")} disabled={!count}>批量 BL Copy</button>
-        <button className="btn" onClick={() => printEach(id => `#/docs/telex/${id}`, "电放件")} disabled={!count}>批量电放件</button>
-        <button className="btn" onClick={() => printEach(id => `#/docs/release/${id}`, "放舱信息")} disabled={!count}>批量放舱信息</button>
-        <button className="btn" onClick={() => printEach(id => `#/docs/stmt/${id}`, "单票对账单")} disabled={!count}>批量单票对账单</button>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 筛选面板 - 查询方案 tab
-// ═══════════════════════════════════════════════════════════════
-const QP_KEY = "ops_orders_query_plans";
-
-function QueryPlansPanel({ filters, setFilters }) {
-  const [plans, setPlans] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(QP_KEY) || "[]"); }
-    catch { return []; }
-  });
-  const [name, setName] = useState("");
-
-  const save = (list) => {
-    setPlans(list);
-    try { localStorage.setItem(QP_KEY, JSON.stringify(list)); } catch {}
-  };
-
-  const onSave = () => {
-    const n = name.trim();
-    if (!n) { alert("方案名不能为空"); return; }
-    // 只保存非空字段
-    const data = Object.fromEntries(Object.entries(filters || {}).filter(([_, v]) => v != null && v !== ""));
-    if (Object.keys(data).length === 0) { alert("当前没有任何筛选条件可保存"); return; }
-    const exists = plans.find(p => p.name === n);
-    const next = exists
-      ? plans.map(p => p.name === n ? { ...p, filters: data, savedAt: Date.now() } : p)
-      : [...plans, { name: n, filters: data, savedAt: Date.now() }];
-    save(next);
-    setName("");
-  };
-
-  const onApply = (p) => {
-    setFilters({ ...p.filters });
-  };
-
-  const onDelete = (n) => {
-    if (!confirm(`删除方案「${n}」？`)) return;
-    save(plans.filter(p => p.name !== n));
-  };
-
-  return (
-    <div style={{ padding: 16 }}>
-      <div style={{ marginBottom: 14, display: "flex", gap: 8, alignItems: "center" }}>
-        <input className="field-input" placeholder="给当前筛选条件起个名字..."
-               value={name} onChange={e => setName(e.target.value)}
-               style={{ flex: 1, maxWidth: 280 }} />
-        <button className="btn primary" onClick={onSave}>保存为方案</button>
-      </div>
-      {plans.length === 0 ? (
-        <div style={{ padding: 24, textAlign: "center", color: "var(--shell-text-3)", fontSize: 12 }}>
-          还没保存过查询方案。先在「过滤」tab 设好筛选条件，再回这里命名保存。
-        </div>
-      ) : (
-        <table className="tms-table">
-          <thead>
-            <tr><th>方案名</th><th>条件数</th><th>保存时间</th><th style={{ width: 160 }}>操作</th></tr>
-          </thead>
-          <tbody>
-            {plans.map(p => (
-              <tr key={p.name}>
-                <td style={{ fontWeight: 600 }}>{p.name}</td>
-                <td>{Object.keys(p.filters || {}).length}</td>
-                <td className="muted">{new Date(p.savedAt).toLocaleString()}</td>
-                <td>
-                  <button onClick={() => onApply(p)} style={{ border: "none", background: "none", color: "var(--shell-primary)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>应用</button>
-                  <span style={{ color: "var(--shell-border)", margin: "0 8px" }}>|</span>
-                  <button onClick={() => onDelete(p.name)} style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>删除</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
     </div>
   );
 }

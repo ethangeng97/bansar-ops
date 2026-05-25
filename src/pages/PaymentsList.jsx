@@ -276,73 +276,99 @@ export default function PaymentsList({ onBack }) {
   const totalPages = Math.max(1, Math.ceil(headerSummary.cnt / PAGE_SIZE));
 
   return (
-    <>
-      <h1 className="page-title">收付款记录</h1>
+    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
+      <div style={{ background: "#fff", borderRadius: 4, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
 
-      <div style={{ display: "flex", borderBottom: "1px solid var(--shell-border)", marginBottom: 12 }}>
-        {[["AR", "收款记录(应收)"], ["AP", "付款记录(应付)"]].map(([key, label]) => {
-          const active = direction === key;
-          return (
-            <button key={key} onClick={() => { setDirection(key); setPage(0); }} style={{
-              padding: "8px 18px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13,
-              color: active ? "var(--shell-primary)" : "var(--shell-text-2)",
-              fontWeight: active ? 600 : 400,
-              borderBottom: active ? "2px solid var(--shell-primary)" : "2px solid transparent",
-              marginBottom: -1,
-            }}>{label}</button>
-          );
-        })}
-      </div>
-
-      <div className="page-section-bar">
-        <input className="field-input" placeholder={`单号 / ${direction === "AR" ? "客户" : "供应商"} / 银行 / 备注`}
-               value={filters.keyword}
-               onChange={e => setFilters({...filters, keyword: e.target.value})}
-               onKeyDown={e => e.key === "Enter" && commitFilters()}
-               style={{ width: 260 }} />
-        <input className="field-input" type="date" value={filters.date_from}
-               onChange={e => setFilters({...filters, date_from: e.target.value})} style={{ width: 130 }} />
-        <span style={{ color: "var(--shell-text-3)" }}>~</span>
-        <input className="field-input" type="date" value={filters.date_to}
-               onChange={e => setFilters({...filters, date_to: e.target.value})} style={{ width: 130 }} />
-        <select className="field-select" value={filters.currency} onChange={e => setFilters({...filters, currency: e.target.value})} style={{ width: 110 }}>
-          <option value="">全部币种</option>
-          <option value="CNY">CNY</option><option value="USD">USD</option>
-          <option value="EUR">EUR</option><option value="GBP">GBP</option>
-        </select>
-        <select className="field-select" value={filters.status} onChange={e => { setFilters({...filters, status: e.target.value}); setPage(0); }} style={{ width: 110 }}>
-          <option value="active">仅有效</option>
-          <option value="voided">仅作废</option>
-          <option value="">全部</option>
-        </select>
-        <button className="btn" onClick={commitFilters}>查询</button>
-        <button className="btn" onClick={() => { setFilters({ keyword: "", date_from: "", date_to: "", currency: "", status: "active" }); commitFilters(); }}>重置</button>
-      </div>
-
-      <div className="page-section-bar" style={{ background: "#fff" }}>
-        <span style={{ flex: 1, color: "var(--shell-text-2)", fontSize: 12 }}>
-          共 <b>{headerSummary.cnt}</b> 笔 · 折 CNY <b>¥ {headerSummary.total_cny.toFixed(2)}</b>
-          {headerSummary.by_currency.length > 1 && (
-            <span className="muted" style={{ marginLeft: 8 }}>
-              ({headerSummary.by_currency.map(c => `${c.currency} ${Number(c.total).toFixed(2)}`).join(" / ")})
+        {/* 顶部 */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
+            <span style={{ fontSize: 16, fontWeight: 700 }}>收付款记录</span>
+            <span style={{ marginLeft: 4, color: "#888", fontSize: 12 }}>
+              共 {headerSummary.cnt} 笔 · 折 CNY ¥ {headerSummary.total_cny.toFixed(2)}
+              {headerSummary.by_currency.length > 1 && (
+                <span style={{ color: "#aaa", marginLeft: 8 }}>
+                  ({headerSummary.by_currency.map(c => `${c.currency} ${Number(c.total).toFixed(2)}`).join(" / ")})
+                </span>
+              )}
             </span>
-          )}
-        </span>
-        <button className="btn" onClick={onExportCsv} disabled={exporting || headerSummary.cnt === 0}>
-          {exporting ? "导出中..." : "↓ 导出 CSV"}
-        </button>
-        <button className="btn primary" onClick={() => setEditing({})}>+ 新建{direction === "AR" ? "收款" : "付款"}</button>
-      </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onExportCsv} style={btn}
+                    disabled={exporting || headerSummary.cnt === 0}>
+              {exporting ? "导出中..." : "导出 CSV"}
+            </button>
+            <button onClick={() => setEditing({})}
+                    style={{ ...btn, background: BRAND, color: "#fff", borderColor: BRAND }}>
+              + 新建{direction === "AR" ? "收款" : "付款"}
+            </button>
+          </div>
+        </div>
 
-      <div className="page-card" style={{ padding: 0, overflow: "auto" }}>
+        {/* AR/AP Tab */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
+          {[["AR", "收款记录(应收)"], ["AP", "付款记录(应付)"]].map(([key, label]) => (
+            <div key={key}
+                 onClick={() => { setDirection(key); setPage(0); }}
+                 style={{
+                   padding: "10px 24px", cursor: "pointer",
+                   color: direction === key ? BRAND : "#666",
+                   fontWeight: direction === key ? 700 : 500,
+                   borderBottom: direction === key ? `2px solid ${BRAND}` : "2px solid transparent",
+                   marginBottom: -1,
+                   fontSize: 13,
+                 }}>
+              {label}
+            </div>
+          ))}
+        </div>
+
+        {/* 筛选 */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
+          <input placeholder={`单号 / ${direction === "AR" ? "客户" : "供应商"} / 银行 / 备注`}
+                 value={filters.keyword}
+                 onChange={e => setFilters({...filters, keyword: e.target.value})}
+                 onKeyDown={e => e.key === "Enter" && commitFilters()}
+                 style={{ flex: "0 0 280px", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }} />
+          <span style={{ color: "#888" }}>日期</span>
+          <input type="date" value={filters.date_from}
+                 onChange={e => setFilters({...filters, date_from: e.target.value})}
+                 style={selStyle} />
+          <span>~</span>
+          <input type="date" value={filters.date_to}
+                 onChange={e => setFilters({...filters, date_to: e.target.value})}
+                 style={selStyle} />
+          <select value={filters.currency} onChange={e => setFilters({...filters, currency: e.target.value})} style={selStyle}>
+            <option value="">全部币种</option>
+            <option value="CNY">CNY</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+          </select>
+          <select value={filters.status} onChange={e => { setFilters({...filters, status: e.target.value}); setPage(0); }} style={selStyle}>
+            <option value="active">仅有效</option>
+            <option value="voided">仅作废</option>
+            <option value="">全部</option>
+          </select>
+          <button onClick={commitFilters} style={btn}>查询</button>
+          <button onClick={() => {
+                    setFilters({ keyword: "", date_from: "", date_to: "", currency: "", status: "active" });
+                    commitFilters();
+                  }}
+                  style={btn}>重置</button>
+        </div>
+
+        {/* 列表 */}
         {loading ? (
-          <div className="empty-state empty-text">加载中...</div>
+          <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>
         ) : payments.length === 0 ? (
-          <div className="empty-state empty-text">暂无{direction === "AR" ? "收款" : "付款"}记录</div>
+          <div style={{ padding: 40, textAlign: "center", color: "#999" }}>
+            暂无{direction === "AR" ? "收款" : "付款"}记录
+          </div>
         ) : (
-          <table className="tms-table">
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
-              <tr>
+              <tr style={{ background: "#fafafa", color: "#444" }}>
                 <th style={{ ...th, width: 28 }}></th>
                 <th style={th}>单号</th>
                 <th style={th}>日期</th>
@@ -505,7 +531,7 @@ export default function PaymentsList({ onBack }) {
           onSaved={async () => { setEditing(null); await load(); }}
         />
       )}
-    </>
+    </div>
   );
 }
 

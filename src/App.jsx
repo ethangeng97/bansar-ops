@@ -29,13 +29,10 @@ import ProfitAnalysis from "./pages/ProfitAnalysis.jsx";
 import SettlementsList from "./pages/SettlementsList.jsx";
 import ChargeTypesList from "./pages/ChargeTypesList.jsx";
 import ExchangeRatesList from "./pages/ExchangeRatesList.jsx";
-import SpotBookings from "./pages/SpotBookings.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
-import Shell from "./components/Shell.jsx";
 import "./styles/tms.css";
-import "./styles/shell.css";
 
 // ── 路由表（hash → 页面组件） ──
 const ROUTES = {
@@ -176,45 +173,13 @@ export default function App() {
 
   // 内部分发逻辑保持不变，套一层 Fragment 让横幅在所有子页面都能浮出来
   const page = renderRoute();
-  // 单证打印页 (docs/*, print/*) 走全屏，不套 Shell；其他都套新版 Shell
-  const isFullscreen = route.startsWith("docs/") || route.startsWith("print/");
-  if (isFullscreen) {
-    return <>{expiredBanner}{page}</>;
-  }
-  return (
-    <>
-      {expiredBanner}
-      <Shell user={user} onLogout={logout} currentRoute={route}>
-        {page}
-      </Shell>
-    </>
-  );
+  return <>{expiredBanner}{page}</>;
 
   function renderRoute() {
 
-  // 没有 hash 路由 → 显示简单工作台（试装新 Shell 时用，老 Portal 暂时保留可通过 #/portal_v1 访问）
+  // 没有 hash 路由 → 显示门户首页
   if (!route) {
-    return (
-      <div>
-        <h1 className="page-title">工作台</h1>
-        <div className="page-card">
-          <div className="card-title">欢迎，{user.profile?.name || user.email}</div>
-          <p style={{ color: "var(--shell-text-2)", fontSize: 13 }}>
-            左侧侧栏选择模块。这是新版 shell 试装效果，老门户在 <a href="#/portal_v1" style={{ color: "var(--shell-primary)" }}>#/portal_v1</a>。
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // 老版 Portal（4 阶段流程图）保留访问
-  if (route === "portal_v1") {
     return <Portal user={user} onLogout={logout} />;
-  }
-
-  // 海运出口现舱 #/spot_export
-  if (route === "spot_export") {
-    return <SpotBookings user={user} onBack={() => { window.location.hash = ""; }} />;
   }
 
   // 静态路由：账单管理列表 #/bills

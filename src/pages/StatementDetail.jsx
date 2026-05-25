@@ -147,31 +147,49 @@ export default function StatementDetail({ statementId, onBack }) {
   const totalCny = bills.reduce((sum, b) => sum + Number(b.amount_cny || 0), 0);
 
   return (
-    <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h1 className="page-title" style={{ margin: 0, display: "flex", alignItems: "center", gap: 10 }}>
-          对账单详情
-          <span style={{ fontFamily: "monospace", color: "var(--shell-primary)", fontWeight: 600, fontSize: 14 }}>{stmt.statement_no}</span>
-          <span className={"badge " + (stmt.direction === "AR" ? "info" : "pending")}>{directionLabel}</span>
-          <span className="badge" style={{ background: st.bg, color: st.color }}>{st.label}</span>
-        </h1>
-        <div style={{ display: "flex", gap: 8 }}>
-          <a href={`#/docs/stmt_batch/${statementId}`} target="_blank" rel="noreferrer" className="btn" style={{ textDecoration: "none" }}>
-            查看 PDF
-          </a>
-          {stmt.status !== "settled" && stmt.status !== "void" && (
-            <button className="btn primary" onClick={markSettled}>标{stmt.direction === "AP" ? "已付" : "已收"}</button>
-          )}
-          {stmt.status === "settled" && (
-            <button className="btn" onClick={markUnsettled}>撤销结清</button>
-          )}
-          {stmt.status !== "void" && (
-            <button className="btn danger" onClick={unbindAll}>解绑全部</button>
-          )}
-        </div>
-      </div>
+    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
+      <div style={{ background: "#fff", borderRadius: 4, padding: 16,
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
 
-      <div className="page-card">
+        {/* 顶部标题栏 */}
+        <div style={{ display: "flex", justifyContent: "space-between",
+                      alignItems: "center", marginBottom: 12, paddingBottom: 12,
+                      borderBottom: "1px solid #f0f0f0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
+            <span style={{ fontSize: 16, fontWeight: 700 }}>对账单详情</span>
+            <span style={{ fontFamily: "Consolas,monospace", color: BRAND, fontWeight: 600, fontSize: 14 }}>
+              {stmt.statement_no}
+            </span>
+            <span style={{
+              padding: "2px 10px", fontSize: 11, borderRadius: 3,
+              color: stmt.direction === "AR" ? "#1990ff" : "#fa8c16",
+              background: stmt.direction === "AR" ? "#e6f7ff" : "#fff7e6",
+              border: `1px solid ${stmt.direction === "AR" ? "#91d5ff" : "#ffd591"}`,
+            }}>{directionLabel}</span>
+            <span style={{
+              padding: "2px 10px", fontSize: 11, borderRadius: 3,
+              color: st.color, background: st.bg,
+            }}>{st.label}</span>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <a href={`#/docs/stmt_batch/${statementId}`} target="_blank" rel="noreferrer"
+               style={{ ...btn, textDecoration: "none", display: "inline-block" }}>
+              查看 PDF
+            </a>
+            {stmt.status !== "settled" && stmt.status !== "void" && (
+              <button onClick={markSettled} style={btnPrimary}>
+                标{stmt.direction === "AP" ? "已付" : "已收"}
+              </button>
+            )}
+            {stmt.status === "settled" && (
+              <button onClick={markUnsettled} style={btn}>撤销结清</button>
+            )}
+            {stmt.status !== "void" && (
+              <button onClick={unbindAll} style={btnDanger}>解绑全部</button>
+            )}
+          </div>
+        </div>
 
         {/* 基本信息 */}
         <div style={{
@@ -311,7 +329,7 @@ export default function StatementDetail({ statementId, onBack }) {
           </table>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

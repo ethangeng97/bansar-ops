@@ -25,7 +25,3 @@ public/pdfjs-cmaps
 *.njsproj
 *.sln
 *.sw?
-
-# Codex tooling (local)
-.codex/
-AGENTS.md

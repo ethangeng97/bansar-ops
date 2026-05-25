@@ -129,94 +129,68 @@ export default function StatementsList({ onBack }) {
   };
 
   return (
-    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
-      <div style={{ background: "#fff", borderRadius: 4, padding: 16,
-                    boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
-        {/* 顶部 */}
-        <div style={{ display: "flex", justifyContent: "space-between",
-                      alignItems: "center", marginBottom: 12, paddingBottom: 12,
-                      borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
-            <span style={{ fontSize: 16, fontWeight: 700 }}>对账单管理</span>
-            <span style={{ marginLeft: 4, color: "#888", fontSize: 12 }}>
-              共 {statements.length} 个
-              {selected.size > 0 && <> · 已选 <b style={{ color: "#1990ff" }}>{selected.size}</b> 个</>}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={onBatchInvoice}
-                    style={{ ...btnPrimary }}
-                    disabled={selected.size === 0}>
-              批量{direction === "AR" ? "开票" : "收票"}
-            </button>
-            <a href={`#/statements/new?direction=${direction}`}
-               style={{ padding: "5px 14px", background: BRAND, color: "#fff",
-                        textDecoration: "none", borderRadius: 3, fontWeight: 600,
-                        fontSize: 12, display: "inline-block" }}>
-              + 新建{direction === "AR" ? "应收" : "应付"}对账单
-            </a>
-          </div>
-        </div>
+    <>
+      <h1 className="page-title">对账单管理</h1>
 
-        {/* Tab */}
-        <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
-          {[["AR", "应收对账单"], ["AP", "应付对账单"]].map(([key, label]) => (
-            <div key={key}
-                 onClick={() => setDirection(key)}
-                 style={{
-                   padding: "10px 24px", cursor: "pointer",
-                   color: direction === key ? BRAND : "#666",
-                   fontWeight: direction === key ? 700 : 500,
-                   borderBottom: direction === key ? `2px solid ${BRAND}` : "2px solid transparent",
-                   marginBottom: -1,
-                   fontSize: 13,
-                 }}>
-              {label}
-            </div>
-          ))}
-        </div>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--shell-border)", marginBottom: 12 }}>
+        {[["AR", "应收对账单"], ["AP", "应付对账单"]].map(([key, label]) => {
+          const active = direction === key;
+          return (
+            <button key={key} onClick={() => setDirection(key)} style={{
+              padding: "8px 18px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13,
+              color: active ? "var(--shell-primary)" : "var(--shell-text-2)",
+              fontWeight: active ? 600 : 400,
+              borderBottom: active ? "2px solid var(--shell-primary)" : "2px solid transparent",
+              marginBottom: -1,
+            }}>{label}</button>
+          );
+        })}
+      </div>
 
-        {/* 筛选 */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
-          <input placeholder={direction === "AP" ? "对账单号 / 供应商名" : "对账单号 / 客户名"}
-                 value={filters.keyword}
-                 onChange={e => setFilters({...filters, keyword: e.target.value})}
-                 onKeyDown={e => e.key === "Enter" && load()}
-                 style={{ flex: "0 0 220px", padding: "5px 8px", border: "1px solid #d9d9d9",
-                          borderRadius: 3, fontSize: 12 }} />
-          <select value={filters.status}
-                  onChange={e => setFilters({...filters, status: e.target.value})}
-                  style={{ padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }}>
-            <option value="">全部状态</option>
-            <option value="unsettled">未核销</option>
-            <option value="partial">部分核销</option>
-            <option value="settled">{direction === "AP" ? "已付款" : "已收款"}</option>
-            <option value="void">作废</option>
-          </select>
-          <input type="date" value={filters.date_from}
-                 onChange={e => setFilters({...filters, date_from: e.target.value})}
-                 style={{ padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }} />
-          <span>~</span>
-          <input type="date" value={filters.date_to}
-                 onChange={e => setFilters({...filters, date_to: e.target.value})}
-                 style={{ padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }} />
-          <button onClick={load} style={btn}>查询</button>
-          <button onClick={() => { setFilters({keyword: "", status: "", date_from: "", date_to: ""}); setTimeout(load, 0); }}
-                  style={btn}>重置</button>
-        </div>
+      <div className="page-section-bar">
+        <input className="field-input" placeholder={direction === "AP" ? "对账单号 / 供应商名" : "对账单号 / 客户名"}
+               value={filters.keyword}
+               onChange={e => setFilters({...filters, keyword: e.target.value})}
+               onKeyDown={e => e.key === "Enter" && load()}
+               style={{ width: 220 }} />
+        <select className="field-select" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={{ width: 140 }}>
+          <option value="">全部状态</option>
+          <option value="unsettled">未核销</option>
+          <option value="partial">部分核销</option>
+          <option value="settled">{direction === "AP" ? "已付款" : "已收款"}</option>
+          <option value="void">作废</option>
+        </select>
+        <input className="field-input" type="date" value={filters.date_from}
+               onChange={e => setFilters({...filters, date_from: e.target.value})} style={{ width: 130 }} />
+        <span style={{ color: "var(--shell-text-3)" }}>~</span>
+        <input className="field-input" type="date" value={filters.date_to}
+               onChange={e => setFilters({...filters, date_to: e.target.value})} style={{ width: 130 }} />
+        <button className="btn" onClick={load}>查询</button>
+        <button className="btn" onClick={() => { setFilters({keyword: "", status: "", date_from: "", date_to: ""}); setTimeout(load, 0); }}>重置</button>
+      </div>
 
-        {/* 列表 */}
+      <div className="page-section-bar" style={{ background: "#fff" }}>
+        <span style={{ flex: 1, color: "var(--shell-text-2)", fontSize: 12 }}>
+          共 <b>{statements.length}</b> 个
+          {selected.size > 0 && <> · 已选 <b style={{ color: "var(--shell-primary)" }}>{selected.size}</b> 个</>}
+        </span>
+        <button className="btn" onClick={onBatchInvoice} disabled={selected.size === 0}>
+          批量{direction === "AR" ? "开票" : "收票"}
+        </button>
+        <a href={`#/statements/new?direction=${direction}`} className="btn primary" style={{ textDecoration: "none" }}>
+          + 新建{direction === "AR" ? "应收" : "应付"}对账单
+        </a>
+      </div>
+
+      <div className="page-card" style={{ padding: 0, overflow: "auto" }}>
         {loading ? (
-          <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>
+          <div className="empty-state empty-text">加载中...</div>
         ) : statements.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#999" }}>
-            暂无{direction === "AR" ? "应收" : "应付"}对账单
-          </div>
+          <div className="empty-state empty-text">暂无{direction === "AR" ? "应收" : "应付"}对账单</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table className="tms-table">
             <thead>
-              <tr style={{ background: "#fafafa", color: "#444" }}>
+              <tr>
                 <th style={{ ...th, width: 30, textAlign: "center" }}>
                   <input type="checkbox"
                          checked={selected.size === statements.length && statements.length > 0}
@@ -294,7 +268,7 @@ export default function StatementsList({ onBack }) {
           onDone={() => { setShowInvoice(null); load(); }}
         />
       )}
-    </div>
+    </>
   );
 }
 

@@ -120,35 +120,25 @@ export default function StatementNew({ initialDirection, onBack }) {
   });
 
   return (
-    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
-      <div style={{ background: "#fff", borderRadius: 4, padding: 16,
-                    boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between",
-                      alignItems: "center", marginBottom: 14, paddingBottom: 10,
-                      borderBottom: "1px solid #f0f0f0" }}>
-          <span style={{ fontSize: 16, fontWeight: 700 }}>
-            新建{direction === "AR" ? "应收" : "应付"}对账单
-          </span>
-          <a onClick={onBack || (() => { window.location.hash = "#/statements"; })}
-             style={{ color: "#888", fontSize: 12, cursor: "pointer" }}>← 返回列表</a>
-        </div>
+    <>
+      <h1 className="page-title">新建{direction === "AR" ? "应收" : "应付"}对账单</h1>
 
-        {/* Tab 切换方向 */}
-        <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
-          {[["AR", "应收（发客户）"], ["AP", "应付（核对供应商）"]].map(([key, label]) => (
-            <div key={key}
-                 onClick={() => { setDirection(key); setPartnerId(""); }}
-                 style={{
-                   padding: "10px 24px", cursor: "pointer",
-                   color: direction === key ? BRAND : "#666",
-                   fontWeight: direction === key ? 700 : 500,
-                   borderBottom: direction === key ? `2px solid ${BRAND}` : "2px solid transparent",
-                   marginBottom: -1, fontSize: 13,
-                 }}>
-              {label}
-            </div>
-          ))}
-        </div>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--shell-border)", marginBottom: 12 }}>
+        {[["AR", "应收（发客户）"], ["AP", "应付（核对供应商）"]].map(([key, label]) => {
+          const active = direction === key;
+          return (
+            <button key={key} onClick={() => { setDirection(key); setPartnerId(""); }} style={{
+              padding: "8px 18px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13,
+              color: active ? "var(--shell-primary)" : "var(--shell-text-2)",
+              fontWeight: active ? 600 : 400,
+              borderBottom: active ? "2px solid var(--shell-primary)" : "2px solid transparent",
+              marginBottom: -1,
+            }}>{label}</button>
+          );
+        })}
+      </div>
+
+      <div className="page-card">
 
         {/* 表单 */}
         <div style={{ background: "#f5f8fc", border: "1px solid #cdd9ec", padding: 12, marginBottom: 14 }}>
@@ -279,12 +269,12 @@ export default function StatementNew({ initialDirection, onBack }) {
                   style={btn}>取消</button>
           <button onClick={submit}
                   disabled={submitting || selectedBills.length === 0 || currencies.length > 1}
-                  style={btnPrimary}>
+                  className="btn primary">
             {submitting ? "创建中..." : "创建对账单 →"}
           </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

@@ -1,0 +1,908 @@
+/* ============================================================
+   Shell — TMS-style portal layout
+   White top bar + collapsible left sidebar + multi-tab content
+   ============================================================ */
+
+:root {
+  --shell-primary: #1989ff;
+  --shell-primary-50: #e6f4ff;
+  --shell-primary-100: #bae0ff;
+  --shell-text: #1f2937;
+  --shell-text-2: #6b7280;
+  --shell-text-3: #9ca3af;
+  --shell-border: #e5e7eb;
+  --shell-border-2: #f0f1f5;
+  --shell-bg: #f5f6fa;
+  --shell-sidebar-bg: #ffffff;
+  --shell-header-h: 50px;
+  --shell-sidebar-w: 192px;
+  --shell-sidebar-w-collapsed: 52px;
+  --shell-tabbar-h: 38px;
+}
+
+* { box-sizing: border-box; }
+
+.shell {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+               "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--shell-text);
+  background: var(--shell-bg);
+  min-height: 100vh;
+  font-size: 13px;
+}
+
+/* ── Top bar ───────────────────────────────────────────────── */
+.shell-top {
+  height: var(--shell-header-h);
+  background: #fff;
+  border-bottom: 1px solid var(--shell-border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px 0 0;
+}
+.shell-top .hamburger {
+  width: var(--shell-sidebar-w-collapsed);
+  height: var(--shell-header-h);
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent;
+  cursor: pointer; color: var(--shell-text-2);
+}
+.shell-top .hamburger:hover { background: var(--shell-bg); color: var(--shell-text); }
+.shell-top .brand {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 700; font-size: 15px; color: var(--shell-text); letter-spacing: -0.2px;
+}
+.shell-top .brand .logo-mark {
+  width: 26px; height: 26px; border-radius: 6px;
+  background: #0c1222;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 800; font-size: 14px;
+}
+.shell-top .spacer { flex: 1; }
+.shell-top .top-right {
+  display: flex; align-items: center; gap: 14px; color: var(--shell-text-2);
+}
+.shell-top .top-right .user-info {
+  font-size: 13px; color: var(--shell-text);
+}
+.shell-top .role-pill {
+  padding: 2px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  border-radius: 10px; background: var(--shell-primary-50); color: var(--shell-primary);
+}
+.shell-top button.logout {
+  border: 1px solid var(--shell-border); background: #fff; padding: 4px 10px;
+  border-radius: 4px; font-size: 12px; color: var(--shell-text-2); cursor: pointer;
+}
+.shell-top button.logout:hover { background: var(--shell-bg); color: var(--shell-text); }
+
+/* ── Body wrapper ──────────────────────────────────────────── */
+.shell-body {
+  display: flex; min-height: calc(100vh - var(--shell-header-h));
+}
+
+/* ── Sidebar ───────────────────────────────────────────────── */
+.shell-side {
+  width: var(--shell-sidebar-w);
+  background: var(--shell-sidebar-bg);
+  border-right: 1px solid var(--shell-border);
+  flex-shrink: 0;
+  overflow-y: auto;
+  transition: width .15s ease;
+}
+.shell-side.collapsed { width: var(--shell-sidebar-w-collapsed); }
+
+.shell-side .group-head {
+  padding: 10px 14px 6px;
+  font-size: 11px; font-weight: 600; color: var(--shell-text-3);
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none; letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.shell-side .group-head:hover { color: var(--shell-text-2); }
+.shell-side .group-head .chev {
+  width: 12px; height: 12px; transition: transform .15s; color: var(--shell-text-3);
+}
+.shell-side .group-head.collapsed .chev { transform: rotate(-90deg); }
+
+.shell-side .nav-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 14px; margin: 1px 6px;
+  font-size: 13px; color: var(--shell-text);
+  cursor: pointer; border-radius: 4px;
+  white-space: nowrap; user-select: none;
+}
+.shell-side .nav-item:hover { background: var(--shell-bg); }
+.shell-side .nav-item.active {
+  background: var(--shell-primary-50); color: var(--shell-primary); font-weight: 500;
+}
+.shell-side .nav-item .icon { width: 16px; height: 16px; flex-shrink: 0; }
+.shell-side .nav-item.child { padding-left: 32px; }
+
+.shell-side.collapsed .group-head,
+.shell-side.collapsed .nav-item .label,
+.shell-side.collapsed .nav-item.child { display: none; }
+.shell-side.collapsed .nav-item { justify-content: center; padding: 9px 0; margin: 1px 6px; }
+
+/* ── Main column (tabs + content) ──────────────────────────── */
+.shell-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.shell-tabs {
+  height: var(--shell-tabbar-h);
+  background: #fff;
+  border-bottom: 1px solid var(--shell-border);
+  display: flex; align-items: end;
+  padding: 0 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+}
+.shell-tabs .tab {
+  height: 100%; display: flex; align-items: center; gap: 6px;
+  padding: 0 12px;
+  font-size: 13px; color: var(--shell-text-2);
+  cursor: pointer;
+  border-right: 1px solid var(--shell-border);
+  background: #fafbfc;
+  user-select: none;
+  white-space: nowrap;
+}
+.shell-tabs .tab:first-child { border-left: 1px solid var(--shell-border); }
+.shell-tabs .tab:hover { background: #f0f2f5; }
+.shell-tabs .tab.active {
+  background: #fff;
+  color: var(--shell-primary);
+  border-bottom: 2px solid var(--shell-primary);
+  font-weight: 500;
+}
+.shell-tabs .tab .x {
+  width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--shell-text-3); font-size: 14px; line-height: 1;
+}
+.shell-tabs .tab .x:hover { background: #e5e7eb; color: var(--shell-text); }
+
+.shell-content {
+  flex: 1; overflow: auto; background: var(--shell-bg); position: relative;
+}
+.shell-page {
+  padding: 16px 20px;
+}
+.shell-page.hidden { display: none; }
+
+/* ── Common page chrome ────────────────────────────────────── */
+.page-title {
+  font-size: 18px; font-weight: 600; color: var(--shell-text);
+  margin: 0 0 14px;
+}
+.page-card {
+  background: #fff;
+  border: 1px solid var(--shell-border);
+  border-radius: 6px;
+  padding: 16px 18px;
+}
+.page-card + .page-card { margin-top: 14px; }
+.page-card .card-title {
+  font-size: 13px; font-weight: 600; color: var(--shell-text);
+  padding-bottom: 10px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--shell-border-2);
+}
+.page-section-bar {
+  background: #fafbfc;
+  border: 1px solid var(--shell-border-2);
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-size: 13px; color: var(--shell-text);
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 14px;
+}
+.page-section-bar .sec-title { font-weight: 600; }
+.page-section-bar .sec-link {
+  color: var(--shell-primary); cursor: pointer; font-size: 12px;
+}
+
+/* ── Buttons (TMS style) ───────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 16px; border-radius: 4px; font-size: 13px;
+  cursor: pointer; border: 1px solid var(--shell-border);
+  background: #fff; color: var(--shell-text);
+  transition: all .12s;
+}
+.btn:hover { color: var(--shell-primary); border-color: var(--shell-primary-100); }
+.btn.primary { background: var(--shell-primary); color: #fff; border-color: var(--shell-primary); }
+.btn.primary:hover { background: #0d7ce8; border-color: #0d7ce8; color: #fff; }
+.btn.danger  { color: #dc2626; }
+.btn.danger:hover  { background: #fef2f2; border-color: #fca5a5; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+/* ── Stat cards (Home dashboard) ───────────────────────────── */
+.stat-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-bottom: 16px;
+}
+.stat-card {
+  background: #fff;
+  border: 1px solid var(--shell-border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  cursor: pointer;
+  border-left: 3px solid var(--shell-primary);
+  transition: box-shadow .12s;
+}
+.stat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+.stat-card .stat-label { font-size: 12px; color: var(--shell-text-2); margin-bottom: 6px; }
+.stat-card .stat-value { font-size: 22px; font-weight: 600; color: var(--shell-text); }
+.stat-card .stat-value .unit { font-size: 12px; color: var(--shell-text-3); font-weight: 400; margin-left: 4px; }
+.stat-card.green  { border-left-color: #10b981; }
+.stat-card.amber  { border-left-color: #f59e0b; }
+.stat-card.red    { border-left-color: #ef4444; }
+.stat-card.purple { border-left-color: #8b5cf6; }
+
+/* ── Tables (lightweight, dense) ───────────────────────────── */
+.tms-table { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; }
+.tms-table thead th {
+  background: #fafbfc; color: var(--shell-text-2); font-weight: 500;
+  padding: 8px 10px; text-align: left;
+  border-bottom: 1px solid var(--shell-border);
+}
+.tms-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--shell-border-2);
+  color: var(--shell-text);
+}
+.tms-table tbody tr:hover td { background: #f9fafb; }
+.tms-table .muted { color: var(--shell-text-3); }
+
+/* ── Form controls ─────────────────────────────────────────── */
+.field { margin-bottom: 14px; }
+.field-label {
+  display: block; font-size: 12px; color: var(--shell-text);
+  margin-bottom: 4px; font-weight: 500;
+}
+.field-label .req { color: #dc2626; margin-left: 2px; }
+.field-input, .field-select, .field-textarea {
+  width: 100%; padding: 7px 10px; font-size: 13px;
+  border: 1px solid var(--shell-border); border-radius: 4px;
+  background: #fff; color: var(--shell-text);
+  font-family: inherit; outline: none; transition: border-color .12s;
+}
+.field-input:focus, .field-select:focus, .field-textarea:focus {
+  border-color: var(--shell-primary);
+}
+.field-textarea { min-height: 70px; resize: vertical; }
+.field-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+/* ── Status badges ─────────────────────────────────────────── */
+.badge {
+  display: inline-block; padding: 2px 8px; font-size: 11px; border-radius: 10px;
+  font-weight: 500; background: #f3f4f6; color: var(--shell-text-2);
+}
+.badge.pending  { background: #fef3c7; color: #92400e; }
+.badge.approved { background: #d1fae5; color: #065f46; }
+.badge.rejected { background: #fee2e2; color: #991b1b; }
+.badge.info     { background: var(--shell-primary-50); color: var(--shell-primary); }
+
+/* ── Empty state ───────────────────────────────────────────── */
+.empty-state {
+  padding: 60px 20px; text-align: center; color: var(--shell-text-3);
+}
+.empty-state .empty-icon {
+  width: 80px; height: 80px; margin: 0 auto 12px; opacity: .35;
+}
+.empty-state .empty-text { font-size: 13px; }
+
+/* ── Ops 内嵌 tms-* 中和 ──
+   bansar-ops 部分页面仍用旧 tms.css 的工具栏 / 分页 / 列表
+   套在新 Shell 里时，把 tms 自带的黄底/灰底/旧渐变统一弱化 */
+.shell-page .tms-tb,
+.shell-page .tms-mn,
+.shell-page .tms-pg,
+.shell-page .tms-bigtabs {
+  background: transparent !important;
+  border: none !important;
+}
+.shell-page .tms-pg {
+  border-top: 1px solid var(--shell-border-2) !important;
+  padding: 4px 12px !important;
+}
+.shell-page .tms-info,
+.shell-page .tms-info-bar {
+  background: var(--shell-bg) !important;
+  border-top: 1px solid var(--shell-border-2) !important;
+  border-bottom: 1px solid var(--shell-border-2) !important;
+  color: var(--shell-text-2) !important;
+  font-weight: 400 !important;
+  padding: 4px 12px !important;
+  height: auto !important;
+}
+.shell-page .tms-info b {
+  color: var(--shell-text) !important;
+}
+/* 旧 tms-list 表头去渐变 */
+.shell-page .tms-list thead th {
+  background: #fafbfc !important;
+  border-right: 1px solid var(--shell-border-2) !important;
+  border-bottom: 1px solid var(--shell-border) !important;
+  color: var(--shell-text-2) !important;
+  font-weight: 500 !important;
+}
+.shell-page .page-card.tms-list {
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* 筛选面板：去掉外框 + 圆角 + 灰色 label */
+.shell-page .tms-fp {
+  background: #fff !important;
+  border: 1px solid var(--shell-border) !important;
+  border-radius: 6px !important;
+  margin: 0 0 12px 0 !important;
+  max-width: none !important;
+}
+.shell-page .tms-fg {
+  padding: 10px 14px !important;
+  gap: 0 14px !important;
+}
+.shell-page .tms-fi {
+  height: 26px !important;
+}
+.shell-page .tms-fi label {
+  color: var(--shell-text-2) !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  width: 70px !important;
+}
+.shell-page .tms-fi label.notnull {
+  color: #d46120 !important;
+}
+/* 所有筛选字段统一外观，禁用的看作只读不淡化 */
+.shell-page .tms-df-blk input,
+.shell-page .tms-df-blk select {
+  border: 1px solid var(--shell-border) !important;
+  background: #fff !important;
+  color: var(--shell-text) !important;
+  opacity: 1 !important;
+}
+.shell-page .tms-df-blk input:focus,
+.shell-page .tms-df-blk select:focus {
+  border-color: var(--shell-primary) !important;
+}
+.shell-page .tms-df-blk input:disabled,
+.shell-page .tms-df-blk select:disabled {
+  background: var(--shell-bg) !important;  /* 浅灰底表示只读，不发暗 */
+  color: var(--shell-text-2) !important;
+  cursor: default !important;
+}
+
+/* 筛选 tabs：改成下划线 portal 风 */
+.shell-page .tms-tabs {
+  padding: 0 12px !important;
+  border-bottom: 1px solid var(--shell-border) !important;
+  background: transparent !important;
+}
+.shell-page .tms-tabs li {
+  padding: 8px 16px !important;
+  margin: 0 !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--shell-text-2) !important;
+  font-weight: 400 !important;
+}
+.shell-page .tms-tabs li.active {
+  background: transparent !important;
+  color: var(--shell-primary) !important;
+  font-weight: 600 !important;
+  border-bottom-color: var(--shell-primary) !important;
+  margin-bottom: -1px !important;
+}
+
+/* tms-mn 工具栏间距优化 */
+.shell-page .tms-mn {
+  padding: 4px 0 !important;
+  margin-bottom: 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+}
+.shell-page .tms-mn .tms-tbl { border-color: var(--shell-border) !important; }
+
+/* ── 订单详情页 chrome 中和 ──
+   tms-dtb1（主工具栏）/ tms-dtb2（米色子工具栏）/ tms-bigtabs（米色 active tab）
+   tms-detail-panel（浅蓝面板）等都要去掉米黄/浅蓝旧风 */
+.shell-page .tms-dtb1,
+.shell-page .tms-dtb2 {
+  background: #fff !important;
+  border-bottom: 1px solid var(--shell-border) !important;
+  padding: 6px 8px !important;
+}
+/* 第二行子工具栏（原米色）改成浅灰 */
+.shell-page .tms-dtb2 {
+  background: var(--shell-bg) !important;
+  border-bottom: 1px solid var(--shell-border-2) !important;
+}
+/* 大 tabs（作业/装箱/费用/...）改为 portal 下划线风 */
+.shell-page .tms-bigtabs {
+  background: transparent !important;
+  border-bottom: 1px solid var(--shell-border) !important;
+  padding: 0 12px !important;
+}
+.shell-page .tms-bigtabs .bt {
+  padding: 8px 16px !important;
+  margin: 0 !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--shell-text-2) !important;
+  background: transparent !important;
+  font-weight: 400 !important;
+}
+.shell-page .tms-bigtabs .bt:hover:not(.act) {
+  color: var(--shell-primary) !important;
+}
+.shell-page .tms-bigtabs .bt.act {
+  background: transparent !important;
+  border-bottom-color: var(--shell-primary) !important;
+  color: var(--shell-primary) !important;
+  margin-bottom: -1px !important;
+}
+/* 详情面板（浅蓝/深蓝）改成中性白卡 */
+.shell-page .tms-detail-panel,
+.shell-page .tms-detail-panel-light {
+  background: #fff !important;
+  border: 1px solid var(--shell-border) !important;
+  border-radius: 6px !important;
+  margin: 8px 0 12px !important;
+}
+.shell-page .tms-detail-section {
+  color: var(--shell-text) !important;
+  font-weight: 600 !important;
+  padding: 8px 4px 6px !important;
+  font-size: 13px !important;
+}
+.shell-page .tms-detail-body {
+  background: transparent !important;
+}
+
+/* 详情页业务勾选条（拖车/报关/仓储/保险/AMS/ENS/签 HB/L）
+   原本浅蓝 #c8dfff 太抢眼，改成中性浅灰 */
+.shell-page .tms-detail-cbgroup {
+  background: var(--shell-bg) !important;
+  border: 1px solid var(--shell-border-2) !important;
+  border-radius: 6px !important;
+  margin: 0 0 12px !important;
+  padding: 10px 14px !important;
+}
+
+/* 子 tab（托单/船东舱单/集装箱/MB/L/...）已用 portal 蓝下划线，把整条 padding 调齐 */
+.shell-page .tms-subtabs {
+  padding: 0 !important;
+  margin-top: 8px !important;
+  border-bottom: 1px solid var(--shell-border) !important;
+}
+.shell-page .tms-subtabs .st {
+  padding: 8px 14px !important;
+  color: var(--shell-text-2) !important;
+}
+.shell-page .tms-subtabs .st.act {
+  color: var(--shell-primary) !important;
+  font-weight: 600 !important;
+}
+
+/* 详情页表单字段 label：弱化字号+灰度 */
+.shell-page .tms-detail-grid .tms-fi label,
+.shell-page .tms-detail-panel .tms-fi label,
+.shell-page .tms-detail-panel-light .tms-fi label {
+  color: var(--shell-text-3) !important;
+  font-weight: 400 !important;
+  font-size: 11.5px !important;
+}
+/* 必填红色保留 */
+.shell-page .tms-detail-grid .tms-fi label.notnull,
+.shell-page .tms-detail-panel .tms-fi label.notnull {
+  color: #d46120 !important;
+  font-weight: 500 !important;
+}
+
+/* 详情页输入框统一 portal 风边框 */
+.shell-page .tms-detail-grid .tms-df-blk input,
+.shell-page .tms-detail-grid .tms-df-blk select,
+.shell-page .tms-detail-panel .tms-df-blk input,
+.shell-page .tms-detail-panel .tms-df-blk select {
+  border: 1px solid var(--shell-border) !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  height: 26px !important;
+}
+.shell-page .tms-detail-grid .tms-df-blk input:focus,
+.shell-page .tms-detail-grid .tms-df-blk select:focus {
+  border-color: var(--shell-primary) !important;
+}
+
+/* ── 只读 input/select/textarea：去掉边框、bg，变成纯文本 ────── */
+.shell-page .tms-detail-grid .tms-df-blk input:disabled,
+.shell-page .tms-detail-grid .tms-df-blk select:disabled,
+.shell-page .tms-detail-grid .tms-df-blk textarea:disabled,
+.shell-page .tms-detail-panel .tms-df-blk input:disabled,
+.shell-page .tms-detail-panel .tms-df-blk select:disabled,
+.shell-page .tms-detail-panel .tms-df-blk textarea:disabled {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--shell-text) !important;
+  padding-left: 0 !important;
+  cursor: default !important;
+  opacity: 1 !important;
+}
+.shell-page .tms-detail-grid .tms-df-blk select:disabled,
+.shell-page .tms-detail-panel .tms-df-blk select:disabled {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  background-image: none !important;
+}
+.shell-page .tms-detail-grid .tms-df-blk input[type="date"]:disabled::-webkit-calendar-picker-indicator,
+.shell-page .tms-detail-panel .tms-df-blk input[type="date"]:disabled::-webkit-calendar-picker-indicator {
+  display: none !important;
+}
+
+/* 详情卡片浮起 + 标题装饰 */
+.shell-page .tms-detail-panel,
+.shell-page .tms-detail-panel-light {
+  background: #fff !important;
+  border: 1px solid var(--shell-border) !important;
+  border-radius: 14px !important;
+  padding: 18px 22px !important;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, .04) !important;
+}
+.shell-page .tms-detail-section {
+  margin-top: 4px !important;
+  padding: 14px 4px 6px !important;
+  font-size: 13px !important;
+  color: var(--shell-text) !important;
+  font-weight: 600 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+.shell-page .tms-detail-section::before {
+  content: "" !important;
+  display: inline-block !important;
+  width: 3px !important;
+  height: 12px !important;
+  background: var(--shell-primary) !important;
+  border-radius: 2px !important;
+}
+.shell-page .tms-detail-grid {
+  gap: 14px 24px !important;
+}
+.shell-page .tms-detail-panel .tms-df {
+  min-height: 30px !important;
+  padding: 2px 0 !important;
+}
+.shell-page .tms-detail-grid .tms-df label,
+.shell-page .tms-detail-panel .tms-df label {
+  text-align: left !important;
+  width: 76px !important;
+  color: var(--shell-text-3) !important;
+  font-weight: 400 !important;
+}
+
+/* 子分组 subhead（基本信息内部小标题） */
+.shell-page .tms-grid-subhead {
+  grid-column: 1 / -1 !important;
+  font-size: 13px !important;
+  color: var(--shell-text) !important;
+  padding: 18px 0 8px !important;
+  margin-top: 8px !important;
+  border-top: 1px solid var(--shell-border-2) !important;
+  font-weight: 600 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+.shell-page .tms-grid-subhead::before {
+  content: "" !important;
+  width: 2px !important;
+  height: 13px !important;
+  background: var(--shell-text-2) !important;
+  border-radius: 1px !important;
+  margin-right: 2px !important;
+}
+.shell-page .tms-grid-subhead:first-child {
+  border-top: none !important;
+  padding-top: 4px !important;
+  margin-top: 0 !important;
+}
+.shell-page .tms-detail-grid.is-readonly .tms-grid-subhead:has(+ .tms-grid-subhead) {
+  display: none !important;
+}
+.shell-page .tms-detail-grid.is-readonly .tms-grid-subhead:last-child {
+  display: none !important;
+}
+
+/* 只读模式隐藏空字段（Notion/Linear 做法） */
+.shell-page .tms-detail-grid.is-readonly .tms-df.df-empty:not(.always-show) {
+  display: none !important;
+}
+.shell-page .tms-detail-grid.is-readonly .tms-df.df-empty:has(> label.req) {
+  display: flex !important;
+}
+.shell-page .tms-detail-grid.is-readonly .tms-df.df-empty:has(> label.req) .tms-df-blk::after {
+  content: "— 未填 —";
+  color: #d46120;
+  font-size: 12px;
+  opacity: .6;
+}
+
+/* 老 LifecycleStamp 不再用 */
+.shell-page .tms-stamp { display: none !important; }
+
+/* ── Linear 风订单 header ──────────────────────────────────── */
+.shell-page .oh-header {
+  margin: 16px 20px 0;
+  padding: 16px 20px 18px;
+  background: #fff;
+  border: 1px solid var(--shell-border);
+  border-radius: 14px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, .04);
+}
+.shell-page .oh-header-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.shell-page .oh-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--shell-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--shell-text-2);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.shell-page .oh-back:hover {
+  background: var(--shell-bg);
+  border-color: var(--shell-primary);
+  color: var(--shell-primary);
+}
+.shell-page .oh-title-block { flex: 1; min-width: 0; }
+.shell-page .oh-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.shell-page .oh-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--shell-text);
+  letter-spacing: .3px;
+}
+.shell-page .oh-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--lc-color, var(--shell-primary)) 12%, white);
+  color: var(--lc-color, var(--shell-primary));
+  border: 1px solid color-mix(in srgb, var(--lc-color, var(--shell-primary)) 30%, white);
+}
+.shell-page .oh-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--shell-bg);
+  color: var(--shell-text-3);
+  border: 1px solid var(--shell-border-2);
+}
+.shell-page .oh-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--shell-text-2);
+}
+.shell-page .oh-dot { color: var(--shell-text-3); opacity: .6; }
+.shell-page .oh-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.shell-page .oh-iconbtn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--shell-border);
+  background: #fff;
+  border-radius: 5px;
+  color: var(--shell-text-2);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.shell-page .oh-iconbtn:hover:not(:disabled) {
+  border-color: var(--shell-primary);
+  color: var(--shell-primary);
+}
+.shell-page .oh-iconbtn:disabled { opacity: .35; cursor: not-allowed; }
+.shell-page .oh-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--shell-border);
+  background: #fff;
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: var(--shell-text);
+  cursor: pointer;
+  height: 28px;
+}
+.shell-page .oh-btn:hover:not(:disabled) {
+  border-color: var(--shell-primary);
+  color: var(--shell-primary);
+}
+.shell-page .oh-btn.primary {
+  background: var(--shell-primary);
+  border-color: var(--shell-primary);
+  color: #fff;
+  font-weight: 500;
+}
+.shell-page .oh-btn.primary:hover:not(:disabled) {
+  background: #0d7ce8;
+  border-color: #0d7ce8;
+  color: #fff;
+}
+.shell-page .oh-btn:disabled { opacity: .4; cursor: not-allowed; }
+.shell-page .oh-actions .tms-mi {
+  margin: 0 !important;
+  height: 28px;
+}
+.shell-page .oh-actions .tms-mb {
+  padding: 0 12px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  border: 1px solid var(--shell-border) !important;
+  border-radius: 5px !important;
+  background: #fff !important;
+  font-size: 12.5px !important;
+  color: var(--shell-text) !important;
+}
+.shell-page .oh-actions .tms-mb:hover:not(.disable) {
+  border-color: var(--shell-primary) !important;
+  color: var(--shell-primary) !important;
+}
+
+/* header 内嵌 5 个 mini-card 摘要 */
+.shell-page .oh-summary {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.shell-page .oh-mini {
+  padding: 10px 12px;
+  border: 1px solid var(--shell-border-2);
+  background: var(--shell-bg);
+  border-radius: 10px;
+  min-width: 0;
+}
+.shell-page .oh-mini-label {
+  font-size: 11.5px;
+  color: var(--shell-text-3);
+  margin-bottom: 4px;
+}
+.shell-page .oh-mini-value {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--shell-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shell-page .oh-mini-value.oh-mini-accent {
+  color: var(--shell-primary);
+}
+
+/* 状态进度：visual step 盒子 */
+.shell-page .oh-progress {
+  margin: 12px 20px 0;
+  padding: 14px 18px 16px;
+  background: #fff;
+  border: 1px solid var(--shell-border);
+  border-radius: 14px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, .03);
+}
+.shell-page .oh-progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+.shell-page .oh-progress-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--shell-text);
+}
+.shell-page .oh-progress-meta {
+  font-size: 12px;
+  color: var(--shell-text-2);
+}
+.shell-page .oh-progress-meta b {
+  color: var(--shell-primary);
+  font-weight: 600;
+}
+.shell-page .milestone-steps {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.shell-page .ms-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 12px 10px 30px;
+  border-radius: 10px;
+  background: #fafbfd;
+  border: 1px solid var(--shell-border-2);
+  color: var(--shell-text-3);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 50px;
+  transition: all .12s;
+}
+.shell-page .ms-step:hover:not(:disabled) {
+  border-color: var(--shell-primary);
+  color: var(--shell-primary);
+  background: var(--shell-primary-50);
+}
+.shell-page .ms-step:disabled { cursor: default; }
+.shell-page .ms-step .ms-dot {
+  position: absolute;
+  left: 10px;
+  top: 14px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #d1d5db;
+}
+.shell-page .ms-step .ms-label {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.shell-page .ms-step .ms-date {
+  font-size: 11px;
+  color: var(--shell-text-3);
+  margin-top: 3px;
+  font-weight: 500;
+}
+.shell-page .ms-step.done {
+  background: #eaf8ef;
+  border-color: #c7efd2;
+  color: #166534;
+}
+.shell-page .ms-step.done .ms-dot { background: #16a34a; }
+.shell-page .ms-step.done .ms-date { color: #166534; opacity: .75; }
+.shell-page .ms-step.current {
+  background: var(--shell-primary-50);
+  border-color: var(--shell-primary-100, #bae0ff);
+  color: var(--shell-primary);
+}
+.shell-page .ms-step.current .ms-dot {
+  background: var(--shell-primary);
+  box-shadow: 0 0 0 4px rgba(22, 119, 255, .15);
+}

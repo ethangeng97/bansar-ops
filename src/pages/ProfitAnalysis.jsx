@@ -91,71 +91,66 @@ export default function ProfitAnalysis({ user, role, onBack }) {
   }, [rows]);
 
   return (
-    <div style={{ background: "#f4f5f7", minHeight: "100vh" }}>
-      <TmsTitle title="利润分析" user={user} role={role} onClose={onBack} />
-      {/* 筛选 */}
-      <div style={{ background: "#fff", padding: "12px 20px", borderBottom: "1px solid #e0e0e0",
-                     display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }}>
+    <>
+      <h1 className="page-title">利润分析</h1>
+
+      <div className="page-section-bar" style={{ flexWrap: "wrap", gap: 10 }}>
         <Fi label="维度">
-          <select value={dim} onChange={e => setDim(e.target.value)} style={selStyle}>
+          <select className="field-select" value={dim} onChange={e => setDim(e.target.value)} style={{ width: 130 }}>
             {DIMS.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
           </select>
         </Fi>
         <Fi label="ETD 从">
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={selStyle} />
+          <input className="field-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: 130 }} />
         </Fi>
         <Fi label="到">
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={selStyle} />
+          <input className="field-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: 130 }} />
         </Fi>
-        <Fi label="客户（可选）">
-          <select value={customer} onChange={e => setCustomer(e.target.value)} style={selStyle}>
+        <Fi label="客户">
+          <select className="field-select" value={customer} onChange={e => setCustomer(e.target.value)} style={{ width: 130 }}>
             <option value="">全部</option>
             {customers.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </Fi>
-        <Fi label="销售员（可选）">
-          <select value={salesId} onChange={e => setSalesId(e.target.value)} style={selStyle}>
+        <Fi label="销售员">
+          <select className="field-select" value={salesId} onChange={e => setSalesId(e.target.value)} style={{ width: 130 }}>
             <option value="">全部</option>
             {staff.filter(u => u.role === "sales" || u.role === "admin").map(u => (
               <option key={u.id} value={u.id}>{u.display_name || u.full_name || u.email}</option>
             ))}
           </select>
         </Fi>
-        <Fi label="船公司（可选）">
-          <select value={carrier} onChange={e => setCarrier(e.target.value)} style={selStyle}>
+        <Fi label="船公司">
+          <select className="field-select" value={carrier} onChange={e => setCarrier(e.target.value)} style={{ width: 130 }}>
             <option value="">全部</option>
             {carriers.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </Fi>
       </div>
 
-      {/* 汇总卡 */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, padding: 20 }}>
-        <KpiCard label="票数"   value={totals.n.toLocaleString()}     color="#1990ff" />
-        <KpiCard label="应收 CNY" value={fmt(totals.ar)}              color="#0050b3" />
-        <KpiCard label="应付 CNY" value={fmt(totals.ap)}              color="#ad4e00" />
+      <div className="stat-grid">
+        <KpiCard label="票数"     value={totals.n.toLocaleString()} color="info" />
+        <KpiCard label="应收 CNY" value={fmt(totals.ar)}             color="info" />
+        <KpiCard label="应付 CNY" value={fmt(totals.ap)}             color="amber" />
         <KpiCard label="毛利 CNY" value={(totals.gross >= 0 ? "+" : "") + fmt(totals.gross)}
                  sub={totals.pct !== null ? `毛利率 ${totals.pct.toFixed(1)}%` : ""}
-                 color={totals.gross >= 0 ? "#52c41a" : "#cf1322"} />
+                 color={totals.gross >= 0 ? "green" : "red"} />
       </div>
 
-      {/* 明细表 */}
-      <div style={{ background: "#fff", margin: "0 20px 20px", border: "1px solid #e0e0e0", borderRadius: 4 }}>
-        {loading ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#888" }}>加载中...</div>
-        ) : rows.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#999" }}>该过滤条件下没有数据</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-            <thead style={{ background: "#fafafa" }}>
+      <div className="page-card" style={{ padding: 0 }}>
+        {loading ? <div className="empty-state empty-text">加载中...</div>
+         : rows.length === 0 ? <div className="empty-state empty-text">该过滤条件下没有数据</div>
+         : (
+          <table className="tms-table">
+            <thead>
               <tr>
-                <th style={th}>{DIMS.find(d => d.key === dim)?.label.replace("按", "") || "维度"}</th>
-                <th style={{ ...th, textAlign: "right" }}>票数</th>
-                <th style={{ ...th, textAlign: "right" }}>应收 CNY</th>
-                <th style={{ ...th, textAlign: "right" }}>应付 CNY</th>
-                <th style={{ ...th, textAlign: "right" }}>毛利 CNY</th>
-                <th style={{ ...th, textAlign: "right" }}>毛利率</th>
-                <th style={{ ...th, width: 100 }}>占毛利</th>
+                <th>{DIMS.find(d => d.key === dim)?.label.replace("按", "") || "维度"}</th>
+                <th style={{ textAlign: "right" }}>票数</th>
+                <th style={{ textAlign: "right" }}>应收 CNY</th>
+                <th style={{ textAlign: "right" }}>应付 CNY</th>
+                <th style={{ textAlign: "right" }}>毛利 CNY</th>
+                <th style={{ textAlign: "right" }}>毛利率</th>
+                <th style={{ width: 100 }}>占毛利</th>
               </tr>
             </thead>
             <tbody>
@@ -203,14 +198,14 @@ export default function ProfitAnalysis({ user, role, onBack }) {
           </table>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
 function Fi({ label, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <span style={{ fontSize: 11, color: "#64748b" }}>{label}</span>
+      <span style={{ fontSize: 11, color: "var(--shell-text-3)" }}>{label}</span>
       {children}
     </div>
   );
@@ -218,10 +213,10 @@ function Fi({ label, children }) {
 
 function KpiCard({ label, value, sub, color }) {
   return (
-    <div style={{ background: "#fff", padding: 16, border: "1px solid #e0e0e0", borderRadius: 6 }}>
-      <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{sub}</div>}
+    <div className={"stat-card " + (color || "")}>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "var(--shell-text-3)", marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }

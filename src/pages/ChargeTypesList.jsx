@@ -1,14 +1,7 @@
-// ============================================================================
-// ChargeTypesList.jsx — 费用类型管理（CRUD）
-// 路由：#/charge_types
-// 数据源：charge_items 表（id, code, name_zh, name_en, category, sort, active）
-// 操作：列表筛选 / 新增 / 编辑 / 启用-停用切换
-// ============================================================================
-
+// ChargeTypesList — 费用类型管理（CRUD）
+// 重构：用 shell.css 类
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase.js";
-
-const BRAND = "#1f3864";
 
 export default function ChargeTypesList({ onBack }) {
   const [items, setItems] = useState([]);
@@ -68,75 +61,66 @@ export default function ChargeTypesList({ onBack }) {
   };
 
   return (
-    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
-      <div style={{ background: "#fff", borderRadius: 4, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
-            <span style={{ fontSize: 16, fontWeight: 700 }}>费用类型</span>
-            <span style={{ marginLeft: 4, color: "#888", fontSize: 12 }}>共 {filtered.length} 项</span>
-          </div>
-          <button onClick={() => setEditing({ active: true, sort: items.length + 1 })}
-                  style={{ ...btn, background: BRAND, color: "#fff", borderColor: BRAND }}>
-            + 新增
-          </button>
-        </div>
+    <>
+      <h1 className="page-title">费用类型</h1>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
-          <input placeholder="代码 / 中文名 / 英文名"
-                 value={filters.keyword}
-                 onChange={e => setFilters({ ...filters, keyword: e.target.value })}
-                 style={{ flex: "0 0 240px", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }} />
-          <select value={filters.category} onChange={e => setFilters({ ...filters, category: e.target.value })} style={selStyle}>
-            <option value="">全部分类</option>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })} style={selStyle}>
-            <option value="active">仅启用</option>
-            <option value="inactive">仅停用</option>
-            <option value="">全部</option>
-          </select>
-        </div>
+      <div className="page-section-bar">
+        <input className="field-input" placeholder="代码 / 中文名 / 英文名"
+               value={filters.keyword} onChange={e => setFilters({ ...filters, keyword: e.target.value })}
+               style={{ width: 240 }} />
+        <select className="field-select" value={filters.category}
+                onChange={e => setFilters({ ...filters, category: e.target.value })} style={{ width: 130 }}>
+          <option value="">全部分类</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="field-select" value={filters.status}
+                onChange={e => setFilters({ ...filters, status: e.target.value })} style={{ width: 110 }}>
+          <option value="active">仅启用</option>
+          <option value="inactive">仅停用</option>
+          <option value="">全部</option>
+        </select>
+        <div style={{ flex: 1 }} />
+        <span style={{ color: "var(--shell-text-3)", fontSize: 12 }}>{filtered.length} 项</span>
+        <button className="btn primary" onClick={() => setEditing({ active: true, sort: items.length + 1 })}>
+          + 新增
+        </button>
+      </div>
 
-        {loading ? (
-          <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#999" }}>无费用类型</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <div className="page-card" style={{ padding: 0 }}>
+        {loading ? <div className="empty-state empty-text">加载中...</div>
+         : filtered.length === 0 ? <div className="empty-state empty-text">无费用类型</div>
+         : (
+          <table className="tms-table">
             <thead>
-              <tr style={{ background: "#fafafa", color: "#444" }}>
-                <th style={{ ...th, width: 80 }}>代码</th>
-                <th style={th}>中文名</th>
-                <th style={th}>英文名</th>
-                <th style={{ ...th, width: 90 }}>分类</th>
-                <th style={{ ...th, textAlign: "center", width: 60 }}>排序</th>
-                <th style={{ ...th, textAlign: "center", width: 70 }}>状态</th>
-                <th style={{ ...th, textAlign: "center", width: 110 }}>操作</th>
+              <tr>
+                <th style={{ width: 80 }}>代码</th>
+                <th>中文名</th>
+                <th>英文名</th>
+                <th style={{ width: 100 }}>分类</th>
+                <th style={{ width: 70, textAlign: "center" }}>排序</th>
+                <th style={{ width: 70, textAlign: "center" }}>状态</th>
+                <th style={{ width: 120, textAlign: "center" }}>操作</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(it => (
-                <tr key={it.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{it.code}</td>
-                  <td style={td}>{it.name_zh}</td>
-                  <td style={{ ...td, color: "#666" }}>{it.name_en || "—"}</td>
-                  <td style={td}>{it.category || "—"}</td>
-                  <td style={{ ...td, textAlign: "center" }}>{it.sort ?? 0}</td>
-                  <td style={{ ...td, textAlign: "center" }}>
-                    <span style={{
-                      padding: "2px 8px", fontSize: 11, borderRadius: 2,
-                      background: it.active ? "#f6ffed" : "#fafafa",
-                      color: it.active ? "#52c41a" : "#888",
-                      border: it.active ? "1px solid #b7eb8f" : "1px solid #e8e8e8",
-                    }}>
-                      {it.active ? "启用" : "停用"}
-                    </span>
+                <tr key={it.id}>
+                  <td style={{ fontFamily: "monospace", fontWeight: 600 }}>{it.code}</td>
+                  <td>{it.name_zh}</td>
+                  <td className="muted">{it.name_en || "—"}</td>
+                  <td>{it.category || "—"}</td>
+                  <td style={{ textAlign: "center" }}>{it.sort ?? 0}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <span className={"badge " + (it.active ? "approved" : "")}>{it.active ? "启用" : "停用"}</span>
                   </td>
-                  <td style={{ ...td, textAlign: "center" }}>
-                    <button onClick={() => setEditing(it)} style={linkBtn}>编辑</button>
-                    <span style={{ color: "#ddd", margin: "0 4px" }}>|</span>
-                    <button onClick={() => onToggleActive(it)} style={linkBtn}>
+                  <td style={{ textAlign: "center" }}>
+                    <button onClick={() => setEditing(it)}
+                            style={{ border: "none", background: "none", color: "var(--shell-primary)", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                      编辑
+                    </button>
+                    <span style={{ color: "var(--shell-border)", margin: "0 6px" }}>|</span>
+                    <button onClick={() => onToggleActive(it)}
+                            style={{ border: "none", background: "none", color: it.active ? "#ef4444" : "#10b981", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
                       {it.active ? "停用" : "启用"}
                     </button>
                   </td>
@@ -148,7 +132,7 @@ export default function ChargeTypesList({ onBack }) {
       </div>
 
       {editing && <Editor item={editing} onClose={() => setEditing(null)} onSave={onSave} />}
-    </div>
+    </>
   );
 }
 
@@ -165,42 +149,59 @@ function Editor({ item, onClose, onSave }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   return (
-    <div style={modalBg} onClick={onClose}>
-      <div style={modal} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>
-          {form.id ? "编辑费用类型" : "新增费用类型"}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 10, alignItems: "center", fontSize: 12 }}>
-          <span>代码 *</span>
-          <input value={form.code} onChange={e => set("code", e.target.value.toUpperCase())} style={input} placeholder="如 OF / THC / DOC" maxLength={20} />
-          <span>中文名 *</span>
-          <input value={form.name_zh} onChange={e => set("name_zh", e.target.value)} style={input} placeholder="如 海运费" />
-          <span>英文名</span>
-          <input value={form.name_en} onChange={e => set("name_en", e.target.value)} style={input} placeholder="如 Ocean Freight" />
-          <span>分类</span>
-          <input value={form.category} onChange={e => set("category", e.target.value)} style={input} placeholder="如 海运 / 本地 / 文件" list="cat-suggest" />
-          <span>排序</span>
-          <input type="number" value={form.sort} onChange={e => set("sort", e.target.value)} style={input} />
-          <span>启用</span>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <input type="checkbox" checked={form.active} onChange={e => set("active", e.target.checked)} />
-            <span style={{ color: "#666", fontSize: 12 }}>启用此费用类型</span>
-          </label>
-        </div>
-        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button onClick={onClose} style={btn}>取消</button>
-          <button onClick={() => onSave(form)} style={{ ...btn, background: BRAND, color: "#fff", borderColor: BRAND }}>保存</button>
-        </div>
-      </div>
+    <Modal title={form.id ? "编辑费用类型" : "新增费用类型"} onClose={onClose} footer={
+      <>
+        <button className="btn" onClick={onClose}>取消</button>
+        <button className="btn primary" onClick={() => onSave(form)}>保存</button>
+      </>
+    }>
+      <Field label="代码" req>
+        <input className="field-input" value={form.code} onChange={e => set("code", e.target.value.toUpperCase())}
+               placeholder="如 OF / THC / DOC" maxLength={20} />
+      </Field>
+      <Field label="中文名" req>
+        <input className="field-input" value={form.name_zh} onChange={e => set("name_zh", e.target.value)} placeholder="如 海运费" />
+      </Field>
+      <Field label="英文名">
+        <input className="field-input" value={form.name_en} onChange={e => set("name_en", e.target.value)} placeholder="如 Ocean Freight" />
+      </Field>
+      <Field label="分类">
+        <input className="field-input" value={form.category} onChange={e => set("category", e.target.value)} placeholder="如 海运 / 本地 / 文件" />
+      </Field>
+      <Field label="排序">
+        <input className="field-input" type="number" value={form.sort} onChange={e => set("sort", e.target.value)} />
+      </Field>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+        <input type="checkbox" checked={form.active} onChange={e => set("active", e.target.checked)} />
+        启用此费用类型
+      </label>
+    </Modal>
+  );
+}
+
+function Field({ label, req, children }) {
+  return (
+    <div className="field">
+      <label className="field-label">{label}{req && <span className="req">*</span>}</label>
+      {children}
     </div>
   );
 }
 
-const th = { padding: "7px 6px", textAlign: "left", borderBottom: "1px solid #e8e8e8", fontWeight: 600 };
-const td = { padding: 6 };
-const btn = { padding: "5px 14px", background: "#fff", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, cursor: "pointer" };
-const linkBtn = { background: "none", border: "none", color: "#1990ff", cursor: "pointer", fontSize: 12, padding: 0 };
-const selStyle = { padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 };
-const input = { padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 };
-const modalBg = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" };
-const modal = { background: "#fff", borderRadius: 4, padding: 20, width: 460, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" };
+function Modal({ title, children, footer, onClose }) {
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.35)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 500, maxWidth: "90vw", background: "#fff", borderRadius: 6,
+        boxShadow: "0 10px 30px rgba(0,0,0,.2)",
+      }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--shell-border)", fontSize: 14, fontWeight: 600 }}>{title}</div>
+        <div style={{ padding: 16 }}>{children}</div>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--shell-border)", display: "flex", justifyContent: "flex-end", gap: 8 }}>{footer}</div>
+      </div>
+    </div>
+  );
+}

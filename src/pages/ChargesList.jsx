@@ -179,112 +179,90 @@ export default function ChargesList({ onBack }) {
   };
 
   return (
-    <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
-      <div style={{ background: "#fff", borderRadius: 4, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+    <>
+      <h1 className="page-title">费用记录</h1>
 
-        {/* 顶部 */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
-            <span style={{ fontSize: 16, fontWeight: 700 }}>费用记录</span>
-            <span style={{ marginLeft: 4, color: "#888", fontSize: 12 }}>
-              共 {summary.count} 条 · 折 CNY ¥ {summary.cny.toFixed(2)}
-              {Object.keys(summary.byCcy).length > 1 && (
-                <span style={{ color: "#aaa", marginLeft: 8 }}>
-                  ({Object.entries(summary.byCcy).map(([c, v]) => `${c} ${v.toFixed(2)}`).join(" / ")})
-                </span>
-              )}
+      {/* AR/AP underline tabs */}
+      <div style={{ display: "flex", borderBottom: "1px solid var(--shell-border)", marginBottom: 12 }}>
+        {[["AR", "应收(客户)"], ["AP", "应付(供应商)"]].map(([key, label]) => {
+          const active = direction === key;
+          return (
+            <button key={key} onClick={() => setDirection(key)} style={{
+              padding: "8px 18px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13,
+              color: active ? "var(--shell-primary)" : "var(--shell-text-2)",
+              fontWeight: active ? 600 : 400,
+              borderBottom: active ? "2px solid var(--shell-primary)" : "2px solid transparent",
+              marginBottom: -1,
+            }}>{label}</button>
+          );
+        })}
+      </div>
+
+      {/* 筛选 */}
+      <div className="page-section-bar">
+        <input className="field-input" placeholder="订单号 / 费用类型 / 结算单位 / 账单号 / 备注"
+               value={filters.keyword}
+               onChange={e => setFilters({...filters, keyword: e.target.value})}
+               onKeyDown={e => e.key === "Enter" && load()}
+               style={{ width: 280 }} />
+        <select className="field-select" value={filters.currency} onChange={e => setFilters({...filters, currency: e.target.value})} style={{ width: 120 }}>
+          <option value="">全部币种</option>
+          <option value="CNY">CNY</option><option value="USD">USD</option>
+          <option value="EUR">EUR</option><option value="HKD">HKD</option><option value="JPY">JPY</option>
+        </select>
+        <select className="field-select" value={filters.bill_state} onChange={e => setFilters({...filters, bill_state: e.target.value})} style={{ width: 130 }}>
+          <option value="">全部账单状态</option>
+          <option value="billed">已挂账单</option>
+          <option value="unbilled">未挂账单</option>
+        </select>
+        <select className="field-select" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={{ width: 120 }}>
+          <option value="">全部状态</option>
+          <option value="draft">草稿</option>
+          <option value="confirmed">已确认</option>
+          <option value="settled">已结算</option>
+        </select>
+        <input className="field-input" type="date" value={filters.date_from}
+               onChange={e => setFilters({...filters, date_from: e.target.value})} style={{ width: 130 }} />
+        <span style={{ color: "var(--shell-text-3)" }}>~</span>
+        <input className="field-input" type="date" value={filters.date_to}
+               onChange={e => setFilters({...filters, date_to: e.target.value})} style={{ width: 130 }} />
+        <button className="btn" onClick={load}>查询</button>
+        <button className="btn" onClick={() => setFilters({ keyword: "", currency: "", bill_state: "", status: "", date_from: "", date_to: "" })}>重置</button>
+      </div>
+
+      {/* 汇总 + 导出 */}
+      <div className="page-section-bar" style={{ background: "#fff" }}>
+        <span style={{ flex: 1, color: "var(--shell-text-2)", fontSize: 12 }}>
+          共 <b>{summary.count}</b> 条 · 折 CNY <b>¥ {summary.cny.toFixed(2)}</b>
+          {Object.keys(summary.byCcy).length > 1 && (
+            <span className="muted" style={{ marginLeft: 8 }}>
+              ({Object.entries(summary.byCcy).map(([c, v]) => `${c} ${v.toFixed(2)}`).join(" / ")})
             </span>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: "#aaa" }}>
-              编辑请进入对应订单的费用面板
-            </span>
-            <button onClick={onExportCsv} style={btn} disabled={charges.length === 0}>导出 CSV</button>
-          </div>
-        </div>
+          )}
+        </span>
+        <span style={{ fontSize: 11, color: "var(--shell-text-3)" }}>编辑请进入对应订单的费用面板</span>
+        <button className="btn" onClick={onExportCsv} disabled={charges.length === 0}>↓ 导出 CSV</button>
+      </div>
 
-        {/* AR/AP tab */}
-        <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
-          {[["AR", "应收(客户)"], ["AP", "应付(供应商)"]].map(([key, label]) => (
-            <div key={key}
-                 onClick={() => setDirection(key)}
-                 style={{
-                   padding: "10px 24px", cursor: "pointer",
-                   color: direction === key ? BRAND : "#666",
-                   fontWeight: direction === key ? 700 : 500,
-                   borderBottom: direction === key ? `2px solid ${BRAND}` : "2px solid transparent",
-                   marginBottom: -1,
-                   fontSize: 13,
-                 }}>
-              {label}
-            </div>
-          ))}
-        </div>
-
-        {/* 筛选 */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
-          <input placeholder="订单号 / 费用类型 / 结算单位 / 账单号 / 备注"
-                 value={filters.keyword}
-                 onChange={e => setFilters({...filters, keyword: e.target.value})}
-                 onKeyDown={e => e.key === "Enter" && load()}
-                 style={{ flex: "0 0 320px", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }} />
-          <select value={filters.currency} onChange={e => setFilters({...filters, currency: e.target.value})} style={selStyle}>
-            <option value="">全部币种</option>
-            <option value="CNY">CNY</option>
-            <option value="USD">USD</option>
-            <option value="EUR">EUR</option>
-            <option value="HKD">HKD</option>
-            <option value="JPY">JPY</option>
-          </select>
-          <select value={filters.bill_state} onChange={e => setFilters({...filters, bill_state: e.target.value})} style={selStyle}>
-            <option value="">全部账单状态</option>
-            <option value="billed">已挂账单</option>
-            <option value="unbilled">未挂账单</option>
-          </select>
-          <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={selStyle}>
-            <option value="">全部状态</option>
-            <option value="draft">草稿</option>
-            <option value="confirmed">已确认</option>
-            <option value="settled">已结算</option>
-          </select>
-          <span style={{ color: "#888" }}>创建时间</span>
-          <input type="date" value={filters.date_from}
-                 onChange={e => setFilters({...filters, date_from: e.target.value})}
-                 style={selStyle} />
-          <span>~</span>
-          <input type="date" value={filters.date_to}
-                 onChange={e => setFilters({...filters, date_to: e.target.value})}
-                 style={selStyle} />
-          <button onClick={load} style={btn}>查询</button>
-          <button onClick={() => { setFilters({ keyword: "", currency: "", bill_state: "", status: "", date_from: "", date_to: "" }); }}
-                  style={btn}>重置</button>
-        </div>
-
-        {/* 列表 */}
-        {loading ? (
-          <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>
-        ) : charges.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#999" }}>
-            暂无{direction === "AR" ? "应收" : "应付"}费用
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 1200 }}>
+      <div className="page-card" style={{ padding: 0, overflow: "auto" }}>
+        {loading ? <div className="empty-state empty-text">加载中...</div>
+         : charges.length === 0 ? <div className="empty-state empty-text">暂无{direction === "AR" ? "应收" : "应付"}费用</div>
+         : (
+            <table className="tms-table" style={{ minWidth: 1200 }}>
               <thead>
-                <tr style={{ background: "#fafafa", color: "#444" }}>
-                  <th style={th}>订单号</th>
-                  <th style={th}>提单号</th>
-                  <th style={th}>费用类型</th>
-                  <th style={th}>结算单位</th>
-                  <th style={{ ...th, textAlign: "right", width: 60 }}>数量</th>
-                  <th style={{ ...th, textAlign: "center", width: 50 }}>单位</th>
-                  <th style={{ ...th, textAlign: "right", width: 80 }}>单价</th>
-                  <th style={{ ...th, textAlign: "right", width: 110 }}>金额</th>
-                  <th style={{ ...th, textAlign: "right", width: 90 }}>折 CNY</th>
-                  <th style={th}>账单号</th>
-                  <th style={{ ...th, textAlign: "center", width: 70 }}>状态</th>
-                  <th style={th}>备注</th>
+                <tr>
+                  <th>订单号</th>
+                  <th>提单号</th>
+                  <th>费用类型</th>
+                  <th>结算单位</th>
+                  <th style={{ textAlign: "right", width: 60 }}>数量</th>
+                  <th style={{ textAlign: "center", width: 50 }}>单位</th>
+                  <th style={{ textAlign: "right", width: 80 }}>单价</th>
+                  <th style={{ textAlign: "right", width: 110 }}>金额</th>
+                  <th style={{ textAlign: "right", width: 90 }}>折 CNY</th>
+                  <th>账单号</th>
+                  <th style={{ textAlign: "center", width: 70 }}>状态</th>
+                  <th>备注</th>
                 </tr>
               </thead>
               <tbody>
@@ -349,10 +327,9 @@ export default function ChargesList({ onBack }) {
                 })}
               </tbody>
             </table>
-          </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
 

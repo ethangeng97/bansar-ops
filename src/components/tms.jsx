@@ -3,7 +3,7 @@
 // 配套 src/styles/tms.css 使用，所有组件用 className 而非 inline style
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Children } from "react";
 import { LIFECYCLE, lifecycleOf, SOP_NODES, nodeStatusOf, applicableNodesFor } from "../lib/constants.js";
 
 /* ── 标题栏 ─────────────────────────────────────────────────── */
@@ -234,11 +234,49 @@ export function LifecycleStamp({ shipment }) {
 }
 
 /* ── 详情字段 ───────────────────────────────────────────────── */
-export function Df({ label, required, refLabel, optional, children, span }) {
+// 检测一个 Df 的 children 是不是 "空值"（用于只读模式下隐藏空字段）
+// 规则：递归检查子节点的 value/children；select 只看 value（不递归 options）；
+// 自定义组件（首字母大写的 type）若没 value prop 但有 children 时，递归 children。
+function isDfChildrenEmpty(children) {
+  const kids = Children.toArray(children);
+  if (kids.length === 0) return true;
+  for (const k of kids) {
+    if (typeof k === "string" || typeof k === "number") {
+      if (String(k).trim()) return false;
+      continue;
+    }
+    if (!k || typeof k !== "object" || !k.props) continue;
+
+    const v = k.props.value;
+    if (v !== undefined && v !== null && String(v).trim()) return false;
+    if (k.props.checked) return false;
+
+    const tag = typeof k.type === "string" ? k.type : null;
+    // select：value 已查过，options 不算 "有值"，跳过
+    if (tag === "select") continue;
+    // input/textarea：value 已查过；defaultValue 也算
+    if (tag === "input" || tag === "textarea") {
+      if (k.props.defaultValue && String(k.props.defaultValue).trim()) return false;
+      continue;
+    }
+    // 自定义组件（如 OrderNoField/ComboBox/PortPicker）：保守按"非空"处理
+    // —— 因为它们可能内部包含数据但不暴露 value prop；隐藏会导致主键字段丢失
+    if (typeof k.type === "function" || typeof k.type === "object") {
+      return false; // 自定义组件一律视为有内容
+    }
+    // 普通 DOM 元素（div/span 等）：递归 children
+    if (k.props.children && !isDfChildrenEmpty(k.props.children)) return false;
+  }
+  return true;
+}
+
+export function Df({ label, required, refLabel, optional, children, span, alwaysShow }) {
   const cls = (required ? "req" : refLabel ? "ref" : optional ? "opt" : "");
   const colCls = span === 2 ? "full2" : span === 3 ? "full3" : span === 4 ? "full4" : span === 6 ? "full6" : "";
+  const empty = isDfChildrenEmpty(children);
+  const extra = (empty ? " df-empty" : "") + (alwaysShow ? " always-show" : "");
   return (
-    <div className={"tms-df " + colCls}>
+    <div className={"tms-df " + colCls + extra}>
       <label className={cls}>
         {required && <span style={{ color: "#ff4d4f", marginRight: 2 }}>*</span>}
         {label}

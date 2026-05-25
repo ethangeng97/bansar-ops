@@ -12,6 +12,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
+import SpotBookingImportModal from "../components/SpotBookingImportModal.jsx";
 
 const STATUS_OPTS = ["可售", "部分已售", "全部已售", "已截单", "已取消"];
 const STATUS_BG = {
@@ -66,6 +67,7 @@ export function SpotBookingsPage({ user, onBack }) {
   const [customers, setCustomers] = useState([]);
   const [editing, setEditing] = useState(null);
   const [allocating, setAllocating] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(0);
   const pageSize = 50;
 
@@ -141,6 +143,7 @@ export function SpotBookingsPage({ user, onBack }) {
         <Mi onClick={onBack}>返回</Mi>
         <Tbl/>
         <Mi onClick={() => setEditing("new")}>+ 新增现舱</Mi>
+        <Mi onClick={() => setImportOpen(true)}>📥 批量导入</Mi>
         <Mi onClick={load}>刷新</Mi>
         <Tbl/>
         <Mi onClick={() => setFilters({ keyword: "", carrier: "", pol: "", pod: "", status: "", etd_from: "", etd_to: "" })}>清除筛选</Mi>
@@ -281,6 +284,11 @@ export function SpotBookingsPage({ user, onBack }) {
           onAllocated={() => { setAllocating(null); load(); }}
         />
       )}
+      <SpotBookingImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={load}
+      />
     </div>
   );
 }

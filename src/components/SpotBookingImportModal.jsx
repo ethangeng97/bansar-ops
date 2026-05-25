@@ -8,6 +8,7 @@
 import { useState, useRef } from "react";
 import { supabase } from "../supabase.js";
 import { exportToXlsx, parseXlsx } from "../lib/excel-export.js";
+import { parseMaerskBC } from "../lib/maersk-bc-pdf-parser.js";
 
 // Excel header → DB column + 转换
 const COLS = [
@@ -105,32 +106,50 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
     reset();
     setBusy(true);
     try {
-      const rawRows = await parseXlsx(file);
-      if (!rawRows || rawRows.length === 0) { setErr("文件没读出数据。第一行应该是表头。"); return; }
-      const colByHdr = new Map(COLS.map(c => [c.hdr, c]));
-      const rows = [];
+      const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+      let rows = [];
       const errors = [];
-      rawRows.forEach((r, i) => {
-        const rowNo = i + 2;  // Excel 行号（带表头）
-        const out = {};
-        for (const [hdr, val] of Object.entries(r)) {
-          const c = colByHdr.get(hdr.trim());
-          if (!c) continue;
-          const v = c.parse ? c.parse(val) : (val === "" ? null : String(val).trim());
-          out[c.col] = v;
+
+      if (isPdf) {
+        // PDF 单文件解析（目前只支持 Maersk BC）
+        const r = await parseMaerskBC(file);
+        if (!r.ok) {
+          setErr(r.error || "PDF 解析失败");
+          return;
         }
+        const out = r.data;
         // 校验必填
         const missing = COLS.filter(c => c.required && (out[c.col] == null || out[c.col] === ""))
                             .map(c => c.hdr);
         if (missing.length > 0) {
-          errors.push(`第 ${rowNo} 行缺：${missing.join(" / ")}`);
-          return;
+          errors.push(`PDF 缺：${missing.join(" / ")}（可在导入后手动补）`);
         }
-        // 默认状态
-        if (!out.status) out.status = "可售";
-        if (!out.currency) out.currency = "USD";
-        rows.push({ rowNo, data: out });
-      });
+        rows.push({ rowNo: file.name, data: out });
+      } else {
+        // Excel 模板
+        const rawRows = await parseXlsx(file);
+        if (!rawRows || rawRows.length === 0) { setErr("文件没读出数据。第一行应该是表头。"); return; }
+        const colByHdr = new Map(COLS.map(c => [c.hdr, c]));
+        rawRows.forEach((r, i) => {
+          const rowNo = i + 2;
+          const out = {};
+          for (const [hdr, val] of Object.entries(r)) {
+            const c = colByHdr.get(hdr.trim());
+            if (!c) continue;
+            const v = c.parse ? c.parse(val) : (val === "" ? null : String(val).trim());
+            out[c.col] = v;
+          }
+          const missing = COLS.filter(c => c.required && (out[c.col] == null || out[c.col] === ""))
+                              .map(c => c.hdr);
+          if (missing.length > 0) {
+            errors.push(`第 ${rowNo} 行缺：${missing.join(" / ")}`);
+            return;
+          }
+          if (!out.status) out.status = "可售";
+          if (!out.currency) out.currency = "USD";
+          rows.push({ rowNo, data: out });
+        });
+      }
 
       // 跟现有 spot_bookings 按 booking_no 去重
       const bookingNos = rows.map(r => r.data.booking_no).filter(Boolean);
@@ -199,10 +218,10 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
           {/* 步骤说明 + 模板 */}
           <div style={{ padding: 12, background: "#e6f4ff", border: "1px solid #c8dfff", borderRadius: 4, marginBottom: 14, fontSize: 12, lineHeight: 1.8 }}>
             <b>使用说明：</b>
-            <div>1. <span className="lk" onClick={downloadTemplate} style={{ color: "#1990FF", cursor: "pointer", textDecoration: "underline" }}>下载模板</span>（带 2 行示例）</div>
-            <div>2. 填好后拖入下方框 或 点选文件</div>
+            <div>1. <b>Excel 通用模板</b>：<span className="lk" onClick={downloadTemplate} style={{ color: "#1990FF", cursor: "pointer", textDecoration: "underline" }}>下载模板</span>（带 2 行示例，22 列）</div>
+            <div>2. <b>Maersk 订舱确认 PDF</b>：直接拖入 PDF，自动识别 + 抽字段（船名航次/POL/POD/ETD/ETA/柜型/还箱时间）</div>
             <div>3. 系统按<b>船公司订舱号</b>去重（已存在的跳过），其他全部新增</div>
-            <div>4. 必填：船公司 / POL / POD / 总舱位</div>
+            <div>4. 必填：船公司 / POL / POD / 总舱位（PDF 缺字段可在导入后手动补）</div>
           </div>
 
           {/* 拖入区 */}
@@ -221,9 +240,9 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
             >
               <div style={{ fontSize: 36, color: "#bbb", marginBottom: 8 }}>📋</div>
               <div style={{ fontSize: 13, color: "#666" }}>
-                {busy ? "解析中..." : "拖入 .xlsx 文件，或点击选择"}
+                {busy ? "解析中..." : "拖入 .xlsx 模板 或 Maersk .pdf 订舱确认，或点击选择"}
               </div>
-              <input ref={inputRef} type="file" accept=".xlsx,.xls"
+              <input ref={inputRef} type="file" accept=".xlsx,.xls,.pdf"
                      onChange={e => handleFile(e.target.files?.[0])}
                      style={{ display: "none" }} />
             </div>

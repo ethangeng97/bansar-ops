@@ -44,6 +44,7 @@ const NODES_SEA = {
       { name: "自拼柜", desc: "Console", href: "#/sea_export?action=new&type=Console" },
     ] },
     { name: "作业列表",     icon: "filelist", href: "#/sea_export" },
+    { name: "现舱",         icon: "box",      href: "#/spot_export" },
     { name: "订舱确认",     icon: "check",    href: "#/sea_export" },
     { name: "装箱确认",     icon: "box",      href: "#/sea_export" },
     { name: "提单确认",     icon: "file",     href: "#/sea_export" },

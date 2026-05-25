@@ -29,6 +29,7 @@ import ProfitAnalysis from "./pages/ProfitAnalysis.jsx";
 import SettlementsList from "./pages/SettlementsList.jsx";
 import ChargeTypesList from "./pages/ChargeTypesList.jsx";
 import ExchangeRatesList from "./pages/ExchangeRatesList.jsx";
+import { SpotBookingsPage } from "./pages/SpotBookings.jsx";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -36,8 +37,9 @@ import "./styles/tms.css";
 
 // ── 路由表（hash → 页面组件） ──
 const ROUTES = {
-  "sea_export": { title: "海运出口", component: OrdersPage },
-  "partners":   { title: "客商管理", component: PartnersPage },
+  "sea_export":  { title: "海运出口", component: OrdersPage },
+  "spot_export": { title: "海运出口现舱", component: SpotBookingsPage },
+  "partners":    { title: "客商管理", component: PartnersPage },
 };
 
 // 解析当前 hash → 路由 key

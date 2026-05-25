@@ -113,6 +113,9 @@ export async function exportDraftBLToXlsx(shipmentId) {
     }
   }
   let rowIdx = 40;
+  // 单子级合计（写完所有柜子明细后追加一行"合计/Total"）
+  let sumPkg = 0, sumKgs = 0, sumCbm = 0, rowsWritten = 0;
+  let firstPkgType = null;
   const writeCargoRow = ({ cntrType, cntrNo, seal, pkg, kgs, cbm, hs, commodity, pkgType }) => {
     ws.getCell(rowIdx, 1).value = cntrType || "";
     ws.getCell(rowIdx, 2).value = cntrNo   || "";
@@ -123,6 +126,28 @@ export async function exportDraftBLToXlsx(shipmentId) {
     ws.getCell(rowIdx, 7).value = hs       || "";
     ws.getCell(rowIdx, 8).value = commodity|| "";
     ws.getCell(rowIdx, 9).value = pkgType  || "CARTONS";
+    if (pkg) sumPkg += Number(pkg) || 0;
+    if (kgs) sumKgs += Number(kgs) || 0;
+    if (cbm) sumCbm += Number(cbm) || 0;
+    if (!firstPkgType && pkgType) firstPkgType = pkgType;
+    rowsWritten += 1;
+    rowIdx += 1;
+  };
+  // 写完后追加合计行（只在有 2 条及以上明细时写——单条没必要）
+  const writeSummaryRow = () => {
+    if (rowsWritten < 2) return;
+    if (rowIdx > 49) return; // 留 1 行余地，别压到 50 行外
+    const r = rowIdx;
+    ws.getCell(r, 1).value = "合计 / Total";
+    ws.getCell(r, 4).value = sumPkg || null;
+    ws.getCell(r, 5).value = sumKgs ? Number(sumKgs.toFixed(3)) : null;
+    ws.getCell(r, 6).value = sumCbm ? Number(sumCbm.toFixed(3)) : null;
+    ws.getCell(r, 9).value = firstPkgType || "CARTONS";
+    // 简单加粗（不动 border/fill 以免覆盖模板）
+    for (const col of [1, 4, 5, 6, 9]) {
+      const cell = ws.getCell(r, col);
+      cell.font = { ...(cell.font || {}), bold: true };
+    }
     rowIdx += 1;
   };
   if (cargoItems.length > 0) {
@@ -166,6 +191,7 @@ export async function exportDraftBLToXlsx(shipmentId) {
       pkgType: "CARTONS",
     });
   }
+  writeSummaryRow();
 
   // 备注（模板里 R52 起 4 行合并）
   if (s.bl_remark || s.shipping_instruction) {

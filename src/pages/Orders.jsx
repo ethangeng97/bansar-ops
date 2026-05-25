@@ -3308,6 +3308,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                       subTickets={subTickets}
                       blLabel={order.has_hbl ? "HBL" : "MBL"}
                       customerByShipmentId={customerByShipmentId}
+                      onReload={onReload}
+                      isLocked={isLocked}
                     />
                   ) : (
                     <>
@@ -3716,7 +3718,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                 <td style={cellBody}><input style={cellInput} value={r.package_unit || "CARTONS"} onChange={e => updateRow(i, "package_unit", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInputNum} value={r.gross_weight ?? ""} onChange={e => updateRow(i, "gross_weight", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInputNum} value={r.volume ?? ""} onChange={e => updateRow(i, "volume", e.target.value)} disabled={!editing} /></td>
-                <td style={cellBody}><input style={cellInput} value={r.marks || ""} onChange={e => updateRow(i, "marks", e.target.value)} disabled={!editing} /></td>
+                <td style={{ ...cellBody, whiteSpace: "normal" }}><textarea style={{ ...cellInput, minHeight: 24, resize: "vertical", fontFamily: "Consolas,monospace", whiteSpace: "pre" }} value={r.marks || ""} onChange={e => updateRow(i, "marks", e.target.value)} disabled={!editing} placeholder="可换行" /></td>
                 <td style={cellBody}><input style={cellInput} value={r.un || ""} onChange={e => updateRow(i, "un", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.cl || ""} onChange={e => updateRow(i, "cl", e.target.value)} disabled={!editing} /></td>
                 {editing && <td style={cellBody}><button onClick={() => delRow(i)} style={{ padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>删</button></td>}
@@ -3808,7 +3810,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
 // 把所有分票的 shipment_containers + cargo_items 合并展示。
 // 编辑入口在分票详情页，母单不在此处编辑。
 // ═══════════════════════════════════════════════════════════════
-function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabel, customerByShipmentId }) {
+function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabel, customerByShipmentId, onReload, isLocked }) {
   // 分票 id → 分票尾数（用于"来源"列）
   const subTailById = {};
   for (const s of subTickets) {
@@ -3816,11 +3818,83 @@ function ConsoleMasterContainerView({ containers, cargoLines, subTickets, blLabe
     if (s.id && tail) subTailById[s.id] = tail;
   }
 
+  // 「从分票货物明细同步集装箱」按钮 ——
+  // 扫所有分票 cargo_items，按 (shipment_id, container_no) distinct 出箱号，
+  // 自动建 shipment_containers 行（解析 40HC→size+type，汇总件数/重量/体积）。
+  // 已存在的（按 shipment_id + container_no 去重）跳过。
+  const syncContainersFromCargo = async () => {
+    if (isLocked) { alert("作业已锁定，不能同步"); return; }
+    const groups = new Map(); // key: shipment_id|container_no
+    for (const cl of cargoLines) {
+      if (!cl.container_no || !cl.shipment_id) continue;
+      const key = `${cl.shipment_id}|${cl.container_no}`;
+      if (!groups.has(key)) {
+        const m = (cl.container_type || "").match(/^(\d+)(\D+)$/);
+        groups.set(key, {
+          shipment_id: cl.shipment_id,
+          container_no: cl.container_no,
+          seal_no: cl.seal_no || null,
+          container_size: m ? m[1] : null,
+          container_type: m ? m[2] : (cl.container_type || null),
+          qty: 1,
+          cargo_qty: 0,
+          cargo_weight: 0,
+          cargo_volume: 0,
+        });
+      }
+      const g = groups.get(key);
+      g.cargo_qty    += Number(cl.qty)          || 0;
+      g.cargo_weight += Number(cl.gross_weight) || 0;
+      g.cargo_volume += Number(cl.volume)       || 0;
+    }
+    if (groups.size === 0) {
+      alert("分票货物明细里没有填箱号，无法同步");
+      return;
+    }
+    const existingKeys = new Set(
+      containers.map(c => `${c.shipment_id}|${c.container_no}`)
+    );
+    const toInsert = [...groups.values()].filter(
+      g => !existingKeys.has(`${g.shipment_id}|${g.container_no}`)
+    );
+    if (toInsert.length === 0) {
+      alert("所有箱号都已在集装箱表里，无新增");
+      return;
+    }
+    const preview = toInsert.map(r => {
+      const tail = subTailById[r.shipment_id] ? `-${subTailById[r.shipment_id]}` : "母单";
+      return `  ${tail}  ${r.container_no}  ${r.container_size || ""}${r.container_type || ""}  ${r.cargo_qty}件  ${r.cargo_weight}KG`;
+    }).join("\n");
+    if (!confirm(`将向「集装箱」表新增 ${toInsert.length} 行：\n\n${preview}\n\n继续？`)) return;
+    const { error } = await supabase.from("shipment_containers").insert(toInsert);
+    if (error) { alert("同步失败：" + error.message); return; }
+    alert(`✓ 已同步 ${toInsert.length} 行集装箱`);
+    onReload?.();
+  };
+
   return (
     <div>
       {/* 集装箱聚合（只读） */}
-      <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 6 }}>
-        集装箱（汇总自分票，只读 — 编辑请到对应分票）
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: "bold", color: "#444" }}>
+          集装箱（汇总自分票，只读 — 编辑请到对应分票）
+        </span>
+        <button
+          onClick={syncContainersFromCargo}
+          disabled={isLocked || cargoLines.length === 0}
+          style={{
+            padding: "4px 12px",
+            fontSize: 12,
+            border: "1px solid #1989ff",
+            background: (isLocked || cargoLines.length === 0) ? "#f5f5f5" : "#e6f4ff",
+            color: (isLocked || cargoLines.length === 0) ? "#999" : "#1989ff",
+            borderRadius: 4,
+            cursor: (isLocked || cargoLines.length === 0) ? "not-allowed" : "pointer",
+          }}
+          title="把货物明细里出现过但还没在集装箱表里的箱号，自动建到对应分票"
+        >
+          📥 从分票货物明细同步集装箱
+        </button>
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
         <thead>

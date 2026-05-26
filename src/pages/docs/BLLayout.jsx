@@ -55,10 +55,46 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }
       setShipment(s);
       setCompany(c || {});
-      setContainers(ctn || []);
       const { data: ci } = await supabase
         .from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order");
       setCargo(ci || []);
+      // 集装箱回退：当前票 shipment_containers 没数据 → 从 cargo_items 的 container_no
+      // 抽 distinct 拼成"伪 containers"，让 BL 也能渲染箱号。
+      // 解析 cargo_items.container_type ("45HC") → container_size + container_type
+      let ctns = ctn || [];
+      if (ctns.length === 0 && ci && ci.length > 0) {
+        const seen = new Set();
+        const synth = [];
+        for (const it of ci) {
+          const no = it.container_no;
+          if (!no || seen.has(no)) continue;
+          seen.add(no);
+          const m = (it.container_type || "").match(/^(\d+)(\D+)$/);
+          synth.push({
+            container_no: no,
+            seal_no: it.seal_no || null,
+            container_size: m ? m[1] : null,
+            container_type: m ? m[2] : (it.container_type || null),
+            qty: 1,
+          });
+        }
+        if (synth.length > 0) ctns = synth;
+      }
+      // 再退一步：自拼分票，cargo_items 也没箱 → 借母单的 shipment_containers
+      if (ctns.length === 0 && isSubBill) {
+        const masterOrderNo = (s.order_no || "").replace(/-\d+$/, "");
+        if (masterOrderNo) {
+          const { data: master } = await supabase.from("shipments")
+            .select("id").eq("order_no", masterOrderNo).single();
+          if (master?.id) {
+            const { data: masterCtn } = await supabase
+              .from("shipment_containers").select("*")
+              .eq("shipment_id", master.id).order("sort_order");
+            ctns = masterCtn || [];
+          }
+        }
+      }
+      setContainers(ctns);
       // 默认合并明细（自拼分票场景：客户提单一般只想看汇总）
       setConsolidate(isSubBill);
       setLoading(false);

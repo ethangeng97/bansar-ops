@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, useImperativeHandle 
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
 import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
+import { COMMON_CARRIERS } from "../lib/carriers.js";
 import PortPicker from "../components/PortPicker.jsx";
 import ContainerEditor from "../components/ContainerEditor.jsx";
 import BLImportModal from "../components/BLImportModal.jsx";
@@ -787,7 +788,7 @@ export function OrdersPage({ user, onBack }) {
             <Fi label="至"><input disabled /></Fi>
 
             <Fi label="船东" refLabel>
-              <ComboBox value={filters.carrier || ""} onChange={v => sf("carrier", v)} options={refs.carrier} />
+              <ComboBox value={filters.carrier || ""} onChange={v => sf("carrier", v)} options={COMMON_CARRIERS} />
             </Fi>
             <Fi label="船名" refLabel>
               <ComboBox value={filters.vessel || ""} onChange={v => sf("vessel", v)} options={refs.vessel} />
@@ -2789,7 +2790,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 <Df label="联系人"><input value={v("contact")} onChange={e => ch("contact", e.target.value)} disabled={!editing} /></Df>
                 <Df label="船东">
                   {editing
-                    ? <ComboBox value={v("carrier")} onChange={val => ch("carrier", val)} options={refData.suppliers} />
+                    ? <ComboBox value={v("carrier")} onChange={val => ch("carrier", val)} options={COMMON_CARRIERS} />
                     : <input value={v("carrier")} disabled />}
                 </Df>
                 <Df label="单证"><input value={v("documenter")} onChange={e => ch("documenter", e.target.value)} disabled={!editing} /></Df>

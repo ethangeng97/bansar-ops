@@ -1,0 +1,27 @@
+// 常用集装箱船公司清单（按市场份额 / 出现频率排序）
+// 给 OrderDetail 船东 ComboBox 做建议列表用，用户也能输入新的
+export const COMMON_CARRIERS = [
+  "MSC",
+  "Maersk",
+  "CMA CGM",
+  "COSCO",
+  "Hapag-Lloyd",
+  "ONE",
+  "Evergreen",
+  "HMM",
+  "Yang Ming",
+  "ZIM",
+  "Wan Hai",
+  "OOCL",
+  "PIL",
+  "KMTC",
+  "SITC",
+  "TS Lines",
+  "RCL",
+  "Sealand Maersk",
+  "X-Press Feeders",
+  "Sinotrans",
+  "ESL",
+  "Asyad Line",
+  "IRISL",
+];

@@ -1527,12 +1527,19 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       getCachedRef("customer_party_map"),
     ]).then(([suppliers, customersFull, staff, customerPartyMap]) => {
       // 防御：任何字段为 undefined 时回退到 []
+      // 按 name 去重，把多条同名的 aliases 合并（一条客户可能同时是客户 + 海外代理两条记录）
+      const byName = new Map();
+      for (const c of (customersFull || [])) {
+        const key = (c.name || "").trim();
+        if (!key) continue;
+        if (!byName.has(key)) byName.set(key, { value: key, aliases: new Set() });
+        const e = byName.get(key);
+        for (const a of [c.name_short, c.name_en, c.code]) if (a) e.aliases.add(a);
+      }
+      const customersDeduped = [...byName.values()].map(e => ({ value: e.value, aliases: [...e.aliases] }));
       setRefData({
         suppliers: suppliers || [],
-        customers: (customersFull || []).map(c => ({
-          value: c.name,
-          aliases: [c.name_short, c.name_en, c.code].filter(Boolean),
-        })),
+        customers: customersDeduped,
         ports: [],
         staff: staff || [],
         customerPartyMap: customerPartyMap || {},

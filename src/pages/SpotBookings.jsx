@@ -14,6 +14,7 @@ import { supabase } from "../supabase.js";
 import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
 import SpotBookingImportModal from "../components/SpotBookingImportModal.jsx";
 import { COMMON_CARRIERS } from "../lib/carriers.js";
+import { getCachedRef } from "../lib/ref-cache.js";
 
 const STATUS_OPTS = ["可售", "部分已售", "全部已售", "已截单", "已取消"];
 const STATUS_BG = {
@@ -142,11 +143,14 @@ export function SpotBookingsPage({ user, onBack }) {
   };
 
   useEffect(() => { load(); }, []);
+  const [customerPartyMap, setCustomerPartyMap] = useState({});
   useEffect(() => {
     // 全部 partner_type 都拉（客户 / 海外代理 / 订舱代理...）给现舱关联用
     supabase.from("customers").select("id, name, name_short, partner_type").order("name").then(({ data }) => {
       setCustomers(data || []);
     });
+    // 客户常用 shipper/consignee 记忆 —— 划走时自动带
+    getCachedRef("customer_party_map").then(map => setCustomerPartyMap(map || {}));
   }, []);
 
   const filtered = useMemo(() => rows.filter(r => {
@@ -303,10 +307,15 @@ export function SpotBookingsPage({ user, onBack }) {
                         <span style={{ color: "#bbb", marginRight: 8 }}>已售完</span>
                       )}
                       {soldShips.length > 0 && (
-                        <span title={soldShips.map(s => `${s.order_no} ${s.customer || ""}`).join("\n")}
-                              style={{ fontSize: 11, color: "#999", marginLeft: 8, cursor: "help" }}>
-                          {soldShips.length}单
-                        </span>
+                        <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5 }}>
+                          {soldShips.map(s => (
+                            <a key={s.id} href={`#/sea_export?id=${s.id}`} target="_blank" rel="noopener"
+                               className="lk" style={{ display: "block", color: "#666" }}
+                               title={`${s.order_no} → ${s.customer || "—"} (${s.qty_container || 1}柜)`}>
+                              {s.order_no} <span style={{ color: "#999" }}>· {s.customer || "—"}</span>
+                            </a>
+                          ))}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -332,6 +341,7 @@ export function SpotBookingsPage({ user, onBack }) {
           spot={allocating}
           soldQty={(shipmentsBySpot[allocating.id] || []).reduce((a, s) => a + (s.qty_container || 1), 0)}
           customers={customers}
+          customerPartyMap={customerPartyMap}
           onClose={() => setAllocating(null)}
           onAllocated={() => { setAllocating(null); load(); }}
         />
@@ -487,16 +497,17 @@ function SpotEditor({ spot, customers, onClose, onSaved }) {
 }
 
 // ─── 划给客户 ─────────────────────────────────────────────────
-function AllocateModal({ spot, soldQty, customers, onClose, onAllocated }) {
+function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, onAllocated }) {
   const remaining = Math.max(0, (spot.total_qty || 0) - soldQty);
-  const [customerId, setCustomerId] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [qty, setQty] = useState(1);
-  const [sellPrice, setSellPrice] = useState(spot.sell_price_max || "");
-  const [orderNo, setOrderNo] = useState("");
-  const [notes, setNotes] = useState("");
+  // 分配清单：可加多行，一次划给多个客户
+  const [rows, setRows] = useState([
+    { customerId: "", customerName: "", qty: remaining, sellPrice: spot.sell_price_max || "", orderNo: "", notes: "" },
+  ]);
   const [saving, setSaving] = useState(false);
 
+  // 预生成订单号序列 —— 进 modal 时拉一次当月最大序号
+  const [nextSeqStart, setNextSeqStart] = useState(null);
+  const [orderNoPrefix, setOrderNoPrefix] = useState("");
   useEffect(() => {
     (async () => {
       const now = new Date();
@@ -505,50 +516,88 @@ function AllocateModal({ spot, soldQty, customers, onClose, onAllocated }) {
         .from("shipments").select("order_no")
         .like("order_no", `${prefix}%`)
         .order("order_no", { ascending: false }).limit(1);
-      let nextSeq = 1;
+      let seq = 1;
       if (data && data.length > 0) {
         const m = (data[0].order_no || "").match(/(\d+)(?:-\d+)?$/);
-        if (m) nextSeq = parseInt(m[1], 10) + 1;
+        if (m) seq = parseInt(m[1], 10) + 1;
       }
-      setOrderNo(`${prefix}${String(nextSeq).padStart(5,"0")}`);
+      setOrderNoPrefix(prefix);
+      setNextSeqStart(seq);
+      // 给当前所有空 orderNo 行填上序号
+      setRows(rs => rs.map((r, i) => r.orderNo ? r : { ...r, orderNo: `${prefix}${String(seq + i).padStart(5,"0")}` }));
     })();
   }, []);
 
+  const totalAlloc = rows.reduce((a, r) => a + (parseInt(r.qty, 10) || 0), 0);
+  const overAlloc = totalAlloc > remaining;
+
+  const updateRow = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  const addRow = () => {
+    const nextSeq = (nextSeqStart || 1) + rows.length;
+    setRows(rs => [...rs, {
+      customerId: "", customerName: "", qty: 1, sellPrice: spot.sell_price_max || "",
+      orderNo: orderNoPrefix ? `${orderNoPrefix}${String(nextSeq).padStart(5,"0")}` : "",
+      notes: "",
+    }]);
+  };
+  const removeRow = (i) => setRows(rs => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs);
+
+  const onCustomerChange = (i, name) => {
+    const c = (customers || []).find(c => c.name === name);
+    updateRow(i, { customerName: name, customerId: c?.id || "" });
+  };
+
   const allocate = async () => {
-    if (!customerName.trim()) { alert("请填客户"); return; }
-    const q = parseInt(qty, 10);
-    if (!q || q <= 0) { alert("柜数必须 >= 1"); return; }
-    if (q > remaining) { alert(`只剩 ${remaining} 个柜，不够 ${q}`); return; }
-    if (!orderNo.trim()) { alert("订单号不能为空"); return; }
+    // 校验
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.customerName.trim()) { alert(`第 ${i+1} 行：请填客户`); return; }
+      const q = parseInt(r.qty, 10);
+      if (!q || q <= 0) { alert(`第 ${i+1} 行：柜数必须 >= 1`); return; }
+      if (!r.orderNo.trim()) { alert(`第 ${i+1} 行：订单号不能为空`); return; }
+    }
+    if (overAlloc) { alert(`总分配 ${totalAlloc} 柜超过剩余 ${remaining} 柜`); return; }
+
     setSaving(true);
-    const payload = {
-      business_type: "sea_export",
-      shipment_type: "FCL",
-      order_no: orderNo.trim(),
-      customer: customerName,
-      customer_id: customerId || null,
-      carrier: spot.carrier, vessel: spot.vessel, voyage: spot.voyage,
-      route: spot.route, pol: spot.pol, pod: spot.pod,
-      etd: spot.etd, eta: spot.eta,
-      booking_no: spot.booking_no || null,
-      mbl_no: spot.mbl_no || null,
-      qty_container: q,
-      lifecycle: "处理中", finance_status: "未创建",
-      has_hbl: true, solicit_type: "代理货",
-      spot_booking_id: spot.id,
-      internal_note: notes || null,
-    };
-    const { data, error } = await supabase.from("shipments").insert(payload).select().single();
-    if (error) { setSaving(false); alert("创建订单失败：" + error.message); return; }
-    const newSold = soldQty + q;
+    // 批量构造 + 自动带客户常用 shipper/consignee/notify
+    const payloads = rows.map(r => {
+      const remembered = customerPartyMap?.[r.customerName] || {};
+      return {
+        business_type: "sea_export",
+        shipment_type: "FCL",
+        order_no: r.orderNo.trim(),
+        customer: r.customerName,
+        customer_id: r.customerId || null,
+        carrier: spot.carrier, vessel: spot.vessel, voyage: spot.voyage,
+        route: spot.route, pol: spot.pol, pod: spot.pod,
+        etd: spot.etd, eta: spot.eta,
+        booking_no: spot.booking_no || null,
+        mbl_no: spot.mbl_no || null,
+        qty_container: parseInt(r.qty, 10),
+        lifecycle: "处理中", finance_status: "未创建",
+        has_hbl: true, solicit_type: "代理货",
+        spot_booking_id: spot.id,
+        shipper:       remembered.shipper       || null,
+        consignee:     remembered.consignee     || null,
+        notify_party:  remembered.notify_party  || null,
+        internal_note: r.notes || null,
+      };
+    });
+    const { data, error } = await supabase.from("shipments").insert(payloads).select();
+    if (error) { setSaving(false); alert("批量创建失败：" + error.message); return; }
+    // 更新现舱状态
+    const newSold = soldQty + totalAlloc;
     if (newSold >= (spot.total_qty || 0)) {
       await supabase.from("spot_bookings").update({ status: "全部已售" }).eq("id", spot.id);
     } else if (newSold > 0 && spot.status === "可售") {
       await supabase.from("spot_bookings").update({ status: "部分已售" }).eq("id", spot.id);
     }
     setSaving(false);
-    if (confirm(`✓ 已划给 ${customerName} ${q} 柜，新建订单 ${orderNo}。\n\n马上打开新订单？`)) {
-      window.open(`#/sea_export?id=${data.id}`, "_blank");
+    const orderList = rows.map((r, i) => `  ${i+1}) ${r.orderNo} → ${r.customerName} (${r.qty}柜)`).join("\n");
+    if (rows.length === 1 && confirm(`✓ 已划给 ${rows[0].customerName} ${rows[0].qty} 柜，新建订单 ${rows[0].orderNo}。\n\n马上打开新订单？`)) {
+      window.open(`#/sea_export?id=${data[0].id}`, "_blank");
+    } else if (rows.length > 1) {
+      alert(`✓ 已批量创建 ${rows.length} 个订单：\n\n${orderList}`);
     }
     onAllocated?.();
   };
@@ -557,34 +606,93 @@ function AllocateModal({ spot, soldQty, customers, onClose, onAllocated }) {
     <ModalShell title={`划给客户 — ${spot.carrier} ${spot.vessel || ""} ${spot.voyage || ""}`} onClose={onClose}
                 actions={<>
                   <button onClick={onClose} style={modalBtnSecondary}>取消</button>
-                  <button onClick={allocate} disabled={saving || remaining === 0} style={modalBtnPrimary}>
-                    {saving ? "处理中..." : "划走并建订单"}
+                  <button onClick={allocate} disabled={saving || remaining === 0 || overAlloc} style={modalBtnPrimary}>
+                    {saving ? "处理中..." : `划走并建 ${rows.length} 个订单`}
                   </button>
                 </>}>
-      <div style={{ marginBottom: 16, padding: 12, background: "#e6f4ff", border: "1px solid #c8dfff", borderRadius: 4, fontSize: 13, lineHeight: 1.8 }}>
+      {/* 现舱信息 */}
+      <div style={{ marginBottom: 12, padding: 12, background: "#e6f4ff", border: "1px solid #c8dfff", borderRadius: 4, fontSize: 13, lineHeight: 1.8 }}>
         <div><b>{spot.pol} → {spot.pod}</b> · {spot.container_size}{spot.container_type} · ETD {fmtDate(spot.etd)}</div>
-        <div style={{ color: "#666" }}>总 {spot.total_qty} · 已售 {soldQty} · <b style={{ color: "#1990FF" }}>剩 {remaining}</b></div>
+        <div style={{ color: "#666" }}>
+          总 {spot.total_qty} · 已售 {soldQty} · <b style={{ color: "#1990FF" }}>剩 {remaining}</b> ·
+          本次分配 <b style={{ color: overAlloc ? "#cf1322" : "#52c41a" }}>{totalAlloc}</b>
+          {overAlloc && <span style={{ color: "#cf1322", marginLeft: 8 }}>⚠ 超出剩余</span>}
+        </div>
       </div>
-      <Group title="划分">
-        <Fld label="客户 *" span={2}>
-          <input style={fldInput} list="alloc-customers" value={customerName}
-                 onChange={e => {
-                   setCustomerName(e.target.value);
-                   const c = customers.find(c => c.name === e.target.value);
-                   setCustomerId(c?.id || "");
-                 }}
-                 placeholder="输入客户名" />
-          <datalist id="alloc-customers">
-            {customers.map(c => <option key={c.id} value={c.name}>{c.name_short || ""}</option>)}
-          </datalist>
-        </Fld>
-        <Fld label="柜数 *"><input style={fldInput} type="number" min="1" max={remaining} value={qty} onChange={e => setQty(e.target.value)} /></Fld>
-        <Fld label="售价 / 柜"><input style={fldInput} type="number" step="0.01" value={sellPrice} onChange={e => setSellPrice(e.target.value)} placeholder={spot.currency || "USD"} /></Fld>
-        <Fld label="新订单号 *" span={2}><input style={fldInput} value={orderNo} onChange={e => setOrderNo(e.target.value.toUpperCase())} /></Fld>
-        <Fld label="备注" span={3}><textarea style={{ ...fldInput, minHeight: 50 }} value={notes} onChange={e => setNotes(e.target.value)} placeholder="划分备注（写入新订单内部备注）" /></Fld>
-      </Group>
+
+      {/* 分配清单：可加多行 */}
+      <div style={{ marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#555" }}>分配清单 ({rows.length} 行)</span>
+        <button onClick={addRow} style={{ padding: "3px 12px", fontSize: 12, border: "1px dashed #1990FF", background: "#fff", color: "#1990FF", borderRadius: 3, cursor: "pointer" }}>+ 加一行</button>
+      </div>
+
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+        <thead style={{ background: "#fafafa" }}>
+          <tr>
+            <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8" }}>#</th>
+            <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8" }}>客户 *</th>
+            <th style={{ padding: 6, textAlign: "right", borderBottom: "1px solid #e8e8e8", width: 70 }}>柜数 *</th>
+            <th style={{ padding: 6, textAlign: "right", borderBottom: "1px solid #e8e8e8", width: 100 }}>售价/柜</th>
+            <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8", width: 140 }}>新订单号 *</th>
+            <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8" }}>备注</th>
+            <th style={{ padding: 6, width: 32, borderBottom: "1px solid #e8e8e8" }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const remembered = customerPartyMap?.[r.customerName];
+            return (
+              <tr key={i}>
+                <td style={{ padding: 4, color: "#999" }}>{i + 1}</td>
+                <td style={{ padding: 4 }}>
+                  <input style={{ ...fldInput, fontSize: 11 }} list={`alloc-customers-${i}`}
+                         value={r.customerName}
+                         onChange={e => onCustomerChange(i, e.target.value)}
+                         placeholder="客户名" />
+                  <datalist id={`alloc-customers-${i}`}>
+                    {customers.map(c => <option key={c.id} value={c.name}>{c.name_short || ""}</option>)}
+                  </datalist>
+                  {remembered && (remembered.shipper || remembered.consignee) && (
+                    <div style={{ fontSize: 10, color: "#52c41a", marginTop: 2 }} title={[
+                      remembered.shipper && `SHIPPER: ${remembered.shipper}`,
+                      remembered.consignee && `CONSIGNEE: ${remembered.consignee}`,
+                      remembered.notify_party && `NOTIFY: ${remembered.notify_party}`,
+                    ].filter(Boolean).join("\n")}>
+                      ✓ 自动带 shipper/consignee
+                    </div>
+                  )}
+                </td>
+                <td style={{ padding: 4 }}>
+                  <input style={{ ...fldInput, fontSize: 11, textAlign: "right" }} type="number" min="1" max={remaining}
+                         value={r.qty} onChange={e => updateRow(i, { qty: e.target.value })} />
+                </td>
+                <td style={{ padding: 4 }}>
+                  <input style={{ ...fldInput, fontSize: 11, textAlign: "right" }} type="number" step="0.01"
+                         value={r.sellPrice} onChange={e => updateRow(i, { sellPrice: e.target.value })}
+                         placeholder={spot.currency || "USD"} />
+                </td>
+                <td style={{ padding: 4 }}>
+                  <input style={{ ...fldInput, fontSize: 11, fontFamily: "Consolas,monospace" }}
+                         value={r.orderNo} onChange={e => updateRow(i, { orderNo: e.target.value.toUpperCase() })} />
+                </td>
+                <td style={{ padding: 4 }}>
+                  <input style={{ ...fldInput, fontSize: 11 }} value={r.notes}
+                         onChange={e => updateRow(i, { notes: e.target.value })} placeholder="备注" />
+                </td>
+                <td style={{ padding: 4, textAlign: "center" }}>
+                  {rows.length > 1 && (
+                    <button onClick={() => removeRow(i)} title="删除此行"
+                            style={{ border: "none", background: "transparent", color: "#cf1322", cursor: "pointer", fontSize: 14 }}>✕</button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
       <div style={{ marginTop: 12, padding: 10, background: "#fff7e6", border: "1px solid #ffd28e", borderRadius: 4, fontSize: 12, color: "#c66800" }}>
-        ⓘ 划走会立即建一条海运出口订单（带船期/POL/POD/ETD/订舱号），并关联回此现舱。售价目前不写入费用表，需要去新订单的费用面板录入。
+        ⓘ 一次提交可建多个订单（每行一个），都会继承船公司/POL/POD/ETD/订舱号 + 客户常用 shipper/consignee。售价目前不写入费用表，需要去新订单的费用面板录入。
       </div>
     </ModalShell>
   );

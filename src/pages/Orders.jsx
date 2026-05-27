@@ -1416,6 +1416,16 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [joinSubOpen, setJoinSubOpen] = useState(false);
   const [removeSubOpen, setRemoveSubOpen] = useState(false);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
+  const [spotBooking, setSpotBooking] = useState(null);  // 关联的现舱（若有 spot_booking_id）
+
+  // 加载关联的现舱信息（用于顶部 banner 显示）
+  useEffect(() => {
+    if (!order?.spot_booking_id) { setSpotBooking(null); return; }
+    supabase.from("spot_bookings")
+      .select("id, booking_no, carrier, vessel, voyage, pol, pod, etd, total_qty, status")
+      .eq("id", order.spot_booking_id).single()
+      .then(({ data }) => setSpotBooking(data || null));
+  }, [order?.spot_booking_id]);
   // V5 字典：计件单位 + 货物种类（走全局缓存）
   const [pkgUnits, setPkgUnits] = useState([]);
   const [cargoTypes, setCargoTypes] = useState([]);
@@ -2667,6 +2677,29 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           </>
         )}
       </div>
+
+      {/* 来自现舱 banner */}
+      {!isCreating && spotBooking && (
+        <div style={{
+          padding: "8px 16px",
+          background: "#f6ffed",
+          borderBottom: "1px solid #b7eb8f",
+          color: "#166534",
+          fontSize: 12,
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+        }}>
+          <span>🔗 <b>来自现舱</b></span>
+          <span style={{ fontFamily: "Consolas,monospace" }}>{spotBooking.booking_no}</span>
+          <span>· {spotBooking.carrier} {spotBooking.vessel || ""}{spotBooking.voyage ? ` / ${spotBooking.voyage}` : ""}</span>
+          <span>· {spotBooking.pol} → {spotBooking.pod}</span>
+          <span>· 总 {spotBooking.total_qty} 柜</span>
+          <span>· 状态 {spotBooking.status}</span>
+          <a href={`#/spot_export`} target="_blank" rel="noopener"
+             style={{ marginLeft: "auto", color: "#1990FF", textDecoration: "underline", cursor: "pointer" }}>
+            打开现舱 ↗
+          </a>
+        </div>
+      )}
 
       {/* 创建模式提示 */}
       {isCreating && (

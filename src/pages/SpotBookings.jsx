@@ -62,6 +62,7 @@ const COLS = [
   { k: "etd",        w: 90,  label: "ETD" },
   { k: "days",       w: 80,  label: "离船期" },
   { k: "si",         w: 110, label: "SI 截单" },
+  { k: "booking_agent", w: 120, label: "订舱代理" },
   { k: "partner",    w: 140, label: "关联客户/代理" },
   { k: "price",      w: 130, label: "售价区间" },
   { k: "status",     w: 80,  label: "状态",   center: true },
@@ -181,8 +182,8 @@ export function SpotBookingsPage({ user, onBack }) {
     let total = 0, sold = 0;
     for (const r of filtered) {
       const soldHere = (shipmentsBySpot[r.id] || []).reduce((a, s) => a + numQty(s.qty_container), 0);
-      total += r.total_qty || 0;
-      sold += soldHere;
+      total += Number(r.total_qty) || 0;
+      sold  += Number(soldHere)    || 0;
     }
     return { count: filtered.length, total, sold, left: Math.max(0, total - sold) };
   }, [filtered, shipmentsBySpot]);
@@ -294,6 +295,7 @@ export function SpotBookingsPage({ user, onBack }) {
                       {daysToEtd == null ? "—" : daysToEtd < 0 ? `过 ${-daysToEtd}天` : daysToEtd === 0 ? "今天" : `${daysToEtd}天后`}
                     </td>
                     <td style={{ fontSize: 12 }}>{fmtDateTime(r.si_cutoff)}</td>
+                    <td style={{ fontSize: 12 }} title={r.booking_agent_name || ""}>{r.booking_agent_name || "—"}</td>
                     <td style={{ fontSize: 12 }} title={r.partner_name || ""}>{r.partner_name || "—"}</td>
                     <td style={{ fontSize: 12 }}>
                       {r.sell_price_min || r.sell_price_max
@@ -393,6 +395,7 @@ function SpotEditor({ spot, customers, onClose, onSaved }) {
     purchase_price: null, sell_price_min: null, sell_price_max: null, currency: "USD",
     booking_no: "", mbl_no: "",
     partner_id: null, partner_name: "",
+    booking_agent_id: null, booking_agent_name: "",
     status: "可售", notes: "",
   });
   const [saving, setSaving] = useState(false);
@@ -498,6 +501,21 @@ function SpotEditor({ spot, customers, onClose, onSaved }) {
         <Fld label="MBL"><input style={fldInput} value={form.mbl_no || ""} onChange={e => ch("mbl_no", e.target.value)} /></Fld>
       </Group>
       <Group title="业务">
+        <Fld label="订舱代理（仅 ops 可见）" span={2}>
+          <input style={fldInput} list="spot-booking-agents" value={form.booking_agent_name || ""}
+                 onChange={e => {
+                   const v = e.target.value;
+                   ch("booking_agent_name", v);
+                   const c = (customers || []).find(c => c.name === v);
+                   ch("booking_agent_id", c?.id || null);
+                 }}
+                 placeholder="跟船公司订舱的中间人(可选)" />
+          <datalist id="spot-booking-agents">
+            {(customers || []).filter(c => c.partner_type === "订舱代理").map(c => (
+              <option key={c.id} value={c.name}>{c.name_short || ""}</option>
+            ))}
+          </datalist>
+        </Fld>
         <Fld label="关联客户 / 海外代理" span={2}>
           <input style={fldInput} list="spot-partners" value={form.partner_name || ""}
                  onChange={e => {

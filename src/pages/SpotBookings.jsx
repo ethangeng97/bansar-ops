@@ -577,7 +577,7 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
         customer: r.customerName,
         customer_id: r.customerId || null,
         carrier: spot.carrier, vessel: spot.vessel, voyage: spot.voyage,
-        route: spot.route, pol: spot.pol, pod: spot.pod,
+        pol: spot.pol, pod: spot.pod,
         etd: spot.etd, eta: spot.eta,
         booking_no: spot.booking_no || null,
         mbl_no: spot.mbl_no || null,

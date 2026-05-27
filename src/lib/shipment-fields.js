@@ -41,6 +41,7 @@ export const SHIPMENT_DB_COLUMNS = new Set([
   "salesperson_id", "seal_no", "service_types",
   "settlement_code", "shipment_type", "shipper",
   "si_cutoff", "sku", "solicit_type", "space_status",
+  "spot_booking_id",
   "supplier", "supplier_id", "supplier_order_no",
   "telex_release", "terminal", "transport_terms",
   "tuc", "updated_at",

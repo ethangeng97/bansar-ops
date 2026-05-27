@@ -25,6 +25,14 @@ const STATUS_BG = {
   "已取消":   { bg: "#f5f5f5", fg: "#aaa",    bd: "#ddd"    },
 };
 
+// qty_container 是 text 类型，可能是 "1" / "1x40HC" / ""，统一抽出整数（前缀数字）
+// 没填或不可识别时 fallback 到 1 柜
+const numQty = (v) => {
+  if (v == null) return 1;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+};
+
 const fmtDate = (d) => {
   if (!d) return "—";
   return typeof d === "string" ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10);
@@ -172,7 +180,7 @@ export function SpotBookingsPage({ user, onBack }) {
   const summary = useMemo(() => {
     let total = 0, sold = 0;
     for (const r of filtered) {
-      const soldHere = (shipmentsBySpot[r.id] || []).reduce((a, s) => a + (s.qty_container || 1), 0);
+      const soldHere = (shipmentsBySpot[r.id] || []).reduce((a, s) => a + numQty(s.qty_container), 0);
       total += r.total_qty || 0;
       sold += soldHere;
     }
@@ -264,7 +272,7 @@ export function SpotBookingsPage({ user, onBack }) {
             <tbody>
               {paged.map((r, i) => {
                 const soldShips = shipmentsBySpot[r.id] || [];
-                const soldQty = soldShips.reduce((a, s) => a + (s.qty_container || 1), 0);
+                const soldQty = soldShips.reduce((a, s) => a + numQty(s.qty_container), 0);
                 const remaining = Math.max(0, (r.total_qty || 0) - soldQty);
                 const daysToEtd = daysBetween(today, r.etd);
                 const sc = STATUS_BG[r.status] || STATUS_BG["可售"];
@@ -311,7 +319,7 @@ export function SpotBookingsPage({ user, onBack }) {
                           {soldShips.map(s => (
                             <a key={s.id} href={`#/sea_export?id=${s.id}`} target="_blank" rel="noopener"
                                className="lk" style={{ display: "block", color: "#666" }}
-                               title={`${s.order_no} → ${s.customer || "—"} (${s.qty_container || 1}柜)`}>
+                               title={`${s.order_no} → ${s.customer || "—"} (${numQty(s.qty_container)}柜)`}>
                               {s.order_no} <span style={{ color: "#999" }}>· {s.customer || "—"}</span>
                             </a>
                           ))}
@@ -339,7 +347,7 @@ export function SpotBookingsPage({ user, onBack }) {
       {allocating && (
         <AllocateModal
           spot={allocating}
-          soldQty={(shipmentsBySpot[allocating.id] || []).reduce((a, s) => a + (s.qty_container || 1), 0)}
+          soldQty={(shipmentsBySpot[allocating.id] || []).reduce((a, s) => a + numQty(s.qty_container), 0)}
           customers={customers}
           customerPartyMap={customerPartyMap}
           onClose={() => setAllocating(null)}
@@ -365,7 +373,7 @@ async function recalcSpotStatusInline(spotId) {
   ]);
   if (!spot) return;
   if (["已截单", "已取消"].includes(spot.status)) return;
-  const sold = (ships || []).reduce((a, s) => a + (s.qty_container || 1), 0);
+  const sold = (ships || []).reduce((a, s) => a + numQty(s.qty_container), 0);
   const total = spot.total_qty || 0;
   let next = "可售";
   if (sold >= total && total > 0) next = "全部已售";

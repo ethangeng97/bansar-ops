@@ -111,71 +111,93 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
     });
   };
 
-  const handleFile = async (file) => {
-    if (!file) return;
+  // 多文件批量解析：支持一次拖入 N 个 PDF 或 PDF + Excel 混合
+  const handleFiles = async (files) => {
+    if (!files || files.length === 0) return;
     reset();
     setBusy(true);
     try {
-      const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
-      let rows = [];
+      const rows = [];
       const errors = [];
+      const fileList = [...files];
 
-      if (isPdf) {
-        // PDF 单文件解析（目前只支持 Maersk BC）
-        const r = await parseMaerskBC(file);
-        if (!r.ok) {
-          setErr(r.error || "PDF 解析失败");
-          return;
-        }
-        const out = r.data;
-        // 校验必填
-        const missing = COLS.filter(c => c.required && (out[c.col] == null || out[c.col] === ""))
-                            .map(c => c.hdr);
-        if (missing.length > 0) {
-          errors.push(`PDF 缺：${missing.join(" / ")}（可在导入后手动补）`);
-        }
-        rows.push({ rowNo: file.name, data: out });
-      } else {
-        // Excel 模板
-        const rawRows = await parseXlsx(file);
-        if (!rawRows || rawRows.length === 0) { setErr("文件没读出数据。第一行应该是表头。"); return; }
-        const colByHdr = new Map(COLS.map(c => [c.hdr, c]));
-        rawRows.forEach((r, i) => {
-          const rowNo = i + 2;
-          const out = {};
-          for (const [hdr, val] of Object.entries(r)) {
-            const c = colByHdr.get(hdr.trim());
-            if (!c) continue;
-            const v = c.parse ? c.parse(val) : (val === "" ? null : String(val).trim());
-            out[c.col] = v;
+      for (const file of fileList) {
+        const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+        try {
+          if (isPdf) {
+            const r = await parseMaerskBC(file);
+            if (!r.ok) {
+              errors.push(`${file.name}：${r.error || "PDF 解析失败"}`);
+              continue;
+            }
+            const out = r.data;
+            const missing = COLS.filter(c => c.required && (out[c.col] == null || out[c.col] === ""))
+                                .map(c => c.hdr);
+            if (missing.length > 0) {
+              errors.push(`${file.name} 缺：${missing.join(" / ")}（可在导入后手动补）`);
+            }
+            rows.push({ rowNo: file.name, data: out });
+          } else {
+            // Excel
+            const rawRows = await parseXlsx(file);
+            if (!rawRows || rawRows.length === 0) {
+              errors.push(`${file.name}：没读出数据`);
+              continue;
+            }
+            const colByHdr = new Map(COLS.map(c => [c.hdr, c]));
+            rawRows.forEach((r, i) => {
+              const rowNo = `${file.name}#${i + 2}`;
+              const out = {};
+              for (const [hdr, val] of Object.entries(r)) {
+                const c = colByHdr.get(hdr.trim());
+                if (!c) continue;
+                const v = c.parse ? c.parse(val) : (val === "" ? null : String(val).trim());
+                out[c.col] = v;
+              }
+              const missing = COLS.filter(c => c.required && (out[c.col] == null || out[c.col] === ""))
+                                  .map(c => c.hdr);
+              if (missing.length > 0) {
+                errors.push(`${rowNo} 缺：${missing.join(" / ")}`);
+                return;
+              }
+              if (!out.status) out.status = "可售";
+              if (!out.currency) out.currency = "USD";
+              rows.push({ rowNo, data: out });
+            });
           }
-          const missing = COLS.filter(c => c.required && (out[c.col] == null || out[c.col] === ""))
-                              .map(c => c.hdr);
-          if (missing.length > 0) {
-            errors.push(`第 ${rowNo} 行缺：${missing.join(" / ")}`);
-            return;
-          }
-          if (!out.status) out.status = "可售";
-          if (!out.currency) out.currency = "USD";
-          rows.push({ rowNo, data: out });
-        });
+        } catch (e) {
+          errors.push(`${file.name}：${e.message || String(e)}`);
+        }
       }
 
-      // 跟现有 spot_bookings 按 booking_no 去重
-      const bookingNos = rows.map(r => r.data.booking_no).filter(Boolean);
+      // 文件内部按 booking_no 去重（同一批两份相同的 PDF 只留一份）
+      const dedupedByBn = new Map();
+      const fileSkips = [];
+      for (const r of rows) {
+        const bn = r.data.booking_no;
+        if (bn && dedupedByBn.has(bn)) { fileSkips.push(r); continue; }
+        if (bn) dedupedByBn.set(bn, r);
+      }
+      const uniqueRows = rows.filter(r => {
+        const bn = r.data.booking_no;
+        return !bn || dedupedByBn.get(bn) === r;
+      });
+
+      // 跟现有 DB 按 booking_no 去重
+      const bookingNos = uniqueRows.map(r => r.data.booking_no).filter(Boolean);
       let existingByBn = new Set();
       if (bookingNos.length > 0) {
         const { data: exists } = await supabase.from("spot_bookings")
           .select("booking_no").in("booking_no", bookingNos);
         existingByBn = new Set((exists || []).map(x => x.booking_no));
       }
-      const newRows = [], skipRows = [];
-      for (const r of rows) {
+      const newRows = [], skipRows = [...fileSkips];
+      for (const r of uniqueRows) {
         if (r.data.booking_no && existingByBn.has(r.data.booking_no)) skipRows.push(r);
         else newRows.push(r);
       }
 
-      setParsed({ newRows, skipRows, errors });
+      setParsed({ newRows, skipRows, errors, fileCount: fileList.length });
     } catch (e) {
       console.error(e);
       setErr("解析失败：" + (e.message || String(e)));
@@ -186,7 +208,7 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
 
   const onDrop = (e) => {
     e.preventDefault(); setDragOver(false);
-    handleFile(e.dataTransfer.files?.[0]);
+    handleFiles(e.dataTransfer.files);
   };
 
   const onConfirm = async () => {
@@ -232,9 +254,9 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
           {/* 步骤说明 + 模板 */}
           <div style={{ padding: 12, background: "#e6f4ff", border: "1px solid #c8dfff", borderRadius: 4, marginBottom: 14, fontSize: 12, lineHeight: 1.8 }}>
             <b>使用说明：</b>
-            <div>1. <b>Excel 通用模板</b>：<span className="lk" onClick={downloadTemplate} style={{ color: "#1990FF", cursor: "pointer", textDecoration: "underline" }}>下载模板</span>（带 2 行示例，22 列）</div>
-            <div>2. <b>Maersk 订舱确认 PDF</b>：直接拖入 PDF，自动识别 + 抽字段（船名航次/POL/POD/ETD/ETA/柜型/还箱时间）</div>
-            <div>3. 系统按<b>船公司订舱号</b>去重（已存在的跳过），其他全部新增</div>
+            <div>1. <b>Excel 通用模板</b>：<span className="lk" onClick={downloadTemplate} style={{ color: "#1990FF", cursor: "pointer", textDecoration: "underline" }}>下载模板</span>（22 列，一份 Excel 可含多行现舱）</div>
+            <div>2. <b>Maersk 订舱确认 PDF</b>：可<b>一次拖入多份 PDF</b>（或点选时按住 Cmd/Ctrl 多选），自动批量解析</div>
+            <div>3. 系统按<b>船公司订舱号</b>去重（同批次重复 + 已在 DB 的都跳过），其他全部新增</div>
             <div>4. 必填：船公司 / POL / POD / 总舱位（PDF 缺字段可在导入后手动补）</div>
           </div>
 
@@ -280,10 +302,11 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
             >
               <div style={{ fontSize: 36, color: "#bbb", marginBottom: 8 }}>📋</div>
               <div style={{ fontSize: 13, color: "#666" }}>
-                {busy ? "解析中..." : "拖入 .xlsx 模板 或 Maersk .pdf 订舱确认，或点击选择"}
+                {busy ? "解析中..." : "拖入 .xlsx 或 多份 Maersk .pdf（可一次选多个），点击也行"}
               </div>
               <input ref={inputRef} type="file" accept=".xlsx,.xls,.pdf"
-                     onChange={e => handleFile(e.target.files?.[0])}
+                     multiple
+                     onChange={e => handleFiles(e.target.files)}
                      style={{ display: "none" }} />
             </div>
           )}
@@ -299,9 +322,9 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
           {parsed && (
             <div style={{ marginTop: 4 }}>
               <div style={{ marginBottom: 10, fontSize: 13 }}>
-                解析结果：
+                解析结果（处理了 <b>{parsed.fileCount || 1}</b> 个文件）：
                 <b style={{ color: "#52c41a", margin: "0 6px" }}>{parsed.newRows.length}</b> 条新增 ·
-                <b style={{ color: "#888", margin: "0 6px" }}>{parsed.skipRows.length}</b> 条已存在跳过 ·
+                <b style={{ color: "#888", margin: "0 6px" }}>{parsed.skipRows.length}</b> 条已存在/重复跳过 ·
                 <b style={{ color: "#cf1322", margin: "0 6px" }}>{parsed.errors.length}</b> 条校验错误
               </div>
 

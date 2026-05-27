@@ -43,7 +43,8 @@ const COLS = [
   { k: "booking_no", w: 120, label: "订舱号" },
   { k: "carrier",    w: 80,  label: "船公司" },
   { k: "vessel",     w: 160, label: "船名 / 航次" },
-  { k: "route",      w: 130, label: "POL → POD" },
+  { k: "pol",        w: 100, label: "POL" },
+  { k: "pod",        w: 100, label: "POD" },
   { k: "container",  w: 80,  label: "柜型" },
   { k: "total",      w: 60,  label: "总数",   align: "right" },
   { k: "sold",       w: 60,  label: "已售",   align: "right" },
@@ -269,7 +270,8 @@ export function SpotBookingsPage({ user, onBack }) {
                     <td style={{ fontFamily: "Consolas,monospace", fontSize: 12 }}>{r.booking_no || "—"}</td>
                     <td>{r.carrier || "—"}</td>
                     <td>{r.vessel || "—"}{r.voyage ? ` / ${r.voyage}` : ""}</td>
-                    <td>{r.pol || "—"} → {r.pod || "—"}</td>
+                    <td>{r.pol || "—"}</td>
+                    <td>{r.pod || "—"}</td>
                     <td>{r.container_size || ""}{r.container_type || ""}</td>
                     <td style={{ textAlign: "right" }}><b>{r.total_qty || 0}</b></td>
                     <td style={{ textAlign: "right", color: "#52c41a", fontWeight: 600 }}>{soldQty}</td>

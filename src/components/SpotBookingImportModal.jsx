@@ -183,18 +183,38 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
         return !bn || dedupedByBn.get(bn) === r;
       });
 
-      // 跟现有 DB 按 booking_no 去重
+      // 双向去重：
+      //   1) 已在 spot_bookings 表里 → 跳过（已录过现舱）
+      //   2) 已在 shipments 表里（按 booking_no 或 mbl_no）→ 跳过（已转订单, 不能再当现舱）
       const bookingNos = uniqueRows.map(r => r.data.booking_no).filter(Boolean);
       let existingByBn = new Set();
+      let shipmentBookings = new Set();
+      let shipmentMbls = new Set();
       if (bookingNos.length > 0) {
-        const { data: exists } = await supabase.from("spot_bookings")
-          .select("booking_no").in("booking_no", bookingNos);
-        existingByBn = new Set((exists || []).map(x => x.booking_no));
+        const [{ data: spotExists }, { data: shipExists }] = await Promise.all([
+          supabase.from("spot_bookings").select("booking_no").in("booking_no", bookingNos),
+          supabase.from("shipments")
+            .select("booking_no, mbl_no")
+            .or(`booking_no.in.(${bookingNos.map(b => `"${b}"`).join(",")}),mbl_no.in.(${bookingNos.map(b => `"${b}"`).join(",")})`),
+        ]);
+        existingByBn = new Set((spotExists || []).map(x => x.booking_no));
+        for (const s of (shipExists || [])) {
+          if (s.booking_no) shipmentBookings.add(s.booking_no);
+          if (s.mbl_no) shipmentMbls.add(s.mbl_no);
+        }
       }
       const newRows = [], skipRows = [...fileSkips];
       for (const r of uniqueRows) {
-        if (r.data.booking_no && existingByBn.has(r.data.booking_no)) skipRows.push(r);
-        else newRows.push(r);
+        const bn = r.data.booking_no;
+        if (bn && existingByBn.has(bn)) {
+          r._skipReason = "已在现舱表";
+          skipRows.push(r);
+        } else if (bn && (shipmentBookings.has(bn) || shipmentMbls.has(bn))) {
+          r._skipReason = "已是海运出口订单（互斥）";
+          skipRows.push(r);
+        } else {
+          newRows.push(r);
+        }
       }
 
       setParsed({ newRows, skipRows, errors, fileCount: fileList.length });
@@ -366,7 +386,10 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
 
               {parsed.skipRows.length > 0 && (
                 <div style={{ marginTop: 10, padding: 8, background: "#fafafa", border: "1px solid #eee", borderRadius: 4, fontSize: 11, color: "#888" }}>
-                  跳过的订舱号：{parsed.skipRows.map(r => r.data.booking_no).join(", ")}
+                  <b>跳过明细：</b>
+                  {parsed.skipRows.map((r, i) => (
+                    <div key={i}>· {r.data.booking_no || "(无订舱号)"} —— {r._skipReason || "已存在"}</div>
+                  ))}
                 </div>
               )}
             </div>

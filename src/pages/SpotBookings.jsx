@@ -519,45 +519,20 @@ function SpotEditor({ spot, customers, onClose, onSaved }) {
 // ─── 划给客户 ─────────────────────────────────────────────────
 function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, onAllocated }) {
   const remaining = Math.max(0, (spot.total_qty || 0) - soldQty);
-  // 分配清单：可加多行，一次划给多个客户
+  // 分配清单：可加多行，一次划给多个客户。订单号由系统在提交时生成，不要让用户填
   const [rows, setRows] = useState([
-    { customerId: "", customerName: "", qty: remaining, sellPrice: spot.sell_price_max || "", orderNo: "", notes: "" },
+    { customerId: "", customerName: "", qty: remaining, sellPrice: spot.sell_price_max || "", po: "", notes: "" },
   ]);
   const [saving, setSaving] = useState(false);
-
-  // 预生成订单号序列 —— 进 modal 时拉一次当月最大序号
-  const [nextSeqStart, setNextSeqStart] = useState(null);
-  const [orderNoPrefix, setOrderNoPrefix] = useState("");
-  useEffect(() => {
-    (async () => {
-      const now = new Date();
-      const prefix = `BSOEF${String(now.getFullYear()).slice(2)}${String(now.getMonth()+1).padStart(2,"0")}`;
-      const { data } = await supabase
-        .from("shipments").select("order_no")
-        .like("order_no", `${prefix}%`)
-        .order("order_no", { ascending: false }).limit(1);
-      let seq = 1;
-      if (data && data.length > 0) {
-        const m = (data[0].order_no || "").match(/(\d+)(?:-\d+)?$/);
-        if (m) seq = parseInt(m[1], 10) + 1;
-      }
-      setOrderNoPrefix(prefix);
-      setNextSeqStart(seq);
-      // 给当前所有空 orderNo 行填上序号
-      setRows(rs => rs.map((r, i) => r.orderNo ? r : { ...r, orderNo: `${prefix}${String(seq + i).padStart(5,"0")}` }));
-    })();
-  }, []);
 
   const totalAlloc = rows.reduce((a, r) => a + (parseInt(r.qty, 10) || 0), 0);
   const overAlloc = totalAlloc > remaining;
 
   const updateRow = (i, patch) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   const addRow = () => {
-    const nextSeq = (nextSeqStart || 1) + rows.length;
     setRows(rs => [...rs, {
       customerId: "", customerName: "", qty: 1, sellPrice: spot.sell_price_max || "",
-      orderNo: orderNoPrefix ? `${orderNoPrefix}${String(nextSeq).padStart(5,"0")}` : "",
-      notes: "",
+      po: "", notes: "",
     }]);
   };
   const removeRow = (i) => setRows(rs => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs);
@@ -574,18 +549,31 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
       if (!r.customerName.trim()) { alert(`第 ${i+1} 行：请填客户`); return; }
       const q = parseInt(r.qty, 10);
       if (!q || q <= 0) { alert(`第 ${i+1} 行：柜数必须 >= 1`); return; }
-      if (!r.orderNo.trim()) { alert(`第 ${i+1} 行：订单号不能为空`); return; }
     }
     if (overAlloc) { alert(`总分配 ${totalAlloc} 柜超过剩余 ${remaining} 柜`); return; }
 
     setSaving(true);
+    // 提交时生成订单号序列：BSOEF + YYMM + 5位序号
+    const now = new Date();
+    const prefix = `BSOEF${String(now.getFullYear()).slice(2)}${String(now.getMonth()+1).padStart(2,"0")}`;
+    const { data: existing } = await supabase
+      .from("shipments").select("order_no")
+      .like("order_no", `${prefix}%`)
+      .order("order_no", { ascending: false }).limit(1);
+    let nextSeq = 1;
+    if (existing && existing.length > 0) {
+      const m = (existing[0].order_no || "").match(/(\d+)(?:-\d+)?$/);
+      if (m) nextSeq = parseInt(m[1], 10) + 1;
+    }
     // 批量构造 + 自动带客户常用 shipper/consignee/notify
-    const payloads = rows.map(r => {
+    const payloads = rows.map((r, idx) => {
       const remembered = customerPartyMap?.[r.customerName] || {};
+      const orderNo = `${prefix}${String(nextSeq + idx).padStart(5,"0")}`;
       return {
         business_type: "sea_export",
         shipment_type: "FCL",
-        order_no: r.orderNo.trim(),
+        order_no: orderNo,
+        po: r.po.trim() || null,
         customer: r.customerName,
         customer_id: r.customerId || null,
         carrier: spot.carrier, vessel: spot.vessel, voyage: spot.voyage,
@@ -608,8 +596,8 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
     // 重算现舱状态（统一走 helper，跟订单删除时退柜同套逻辑）
     await recalcSpotStatusInline(spot.id);
     setSaving(false);
-    const orderList = rows.map((r, i) => `  ${i+1}) ${r.orderNo} → ${r.customerName} (${r.qty}柜)`).join("\n");
-    if (rows.length === 1 && confirm(`✓ 已划给 ${rows[0].customerName} ${rows[0].qty} 柜，新建订单 ${rows[0].orderNo}。\n\n马上打开新订单？`)) {
+    const orderList = (data || []).map((d, i) => `  ${i+1}) ${d.order_no} → ${rows[i].customerName} (${rows[i].qty}柜)`).join("\n");
+    if (rows.length === 1 && confirm(`✓ 已划给 ${rows[0].customerName} ${rows[0].qty} 柜，新建订单 ${data?.[0]?.order_no}。\n\n马上打开新订单？`)) {
       window.open(`#/sea_export?id=${data[0].id}`, "_blank");
     } else if (rows.length > 1) {
       alert(`✓ 已批量创建 ${rows.length} 个订单：\n\n${orderList}`);
@@ -648,7 +636,7 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
             <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8" }}>客户 *</th>
             <th style={{ padding: 6, textAlign: "right", borderBottom: "1px solid #e8e8e8", width: 70 }}>柜数 *</th>
             <th style={{ padding: 6, textAlign: "right", borderBottom: "1px solid #e8e8e8", width: 100 }}>售价/柜</th>
-            <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8", width: 140 }}>新订单号 *</th>
+            <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8", width: 140 }}>客户 PO（客户业务编号）</th>
             <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e8e8e8" }}>备注</th>
             <th style={{ padding: 6, width: 32, borderBottom: "1px solid #e8e8e8" }}></th>
           </tr>
@@ -688,7 +676,8 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
                 </td>
                 <td style={{ padding: 4 }}>
                   <input style={{ ...fldInput, fontSize: 11, fontFamily: "Consolas,monospace" }}
-                         value={r.orderNo} onChange={e => updateRow(i, { orderNo: e.target.value.toUpperCase() })} />
+                         value={r.po} onChange={e => updateRow(i, { po: e.target.value })}
+                         placeholder="客户业务编号" />
                 </td>
                 <td style={{ padding: 4 }}>
                   <input style={{ ...fldInput, fontSize: 11 }} value={r.notes}
@@ -707,7 +696,7 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
       </table>
 
       <div style={{ marginTop: 12, padding: 10, background: "#fff7e6", border: "1px solid #ffd28e", borderRadius: 4, fontSize: 12, color: "#c66800" }}>
-        ⓘ 一次提交可建多个订单（每行一个），都会继承船公司/POL/POD/ETD/订舱号 + 客户常用 shipper/consignee。售价目前不写入费用表，需要去新订单的费用面板录入。
+        ⓘ 一次提交可建多个订单（每行一个）。订单号系统自动生成（BSOEF + 年月 + 5位序号），客户 PO 是给客户做业务对账用的（可选）。继承船公司/POL/POD/ETD/订舱号 + 客户常用 shipper/consignee。售价不写入费用表，去新订单的费用面板录入。
       </div>
     </ModalShell>
   );

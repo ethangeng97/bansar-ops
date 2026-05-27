@@ -1438,6 +1438,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [removeSubOpen, setRemoveSubOpen] = useState(false);
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   const [spotBooking, setSpotBooking] = useState(null);  // 关联的现舱（若有 spot_booking_id）
+  const [copyPartiesOpen, setCopyPartiesOpen] = useState(false);  // 抄录历史 modal 开关
 
   // 加载关联的现舱信息（用于顶部 banner 显示）
   useEffect(() => {
@@ -2618,6 +2619,19 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         onClose={() => setHistoryOpen(false)}
         shipmentId={order.id}
       />
+      <CopyPartiesModal
+        open={copyPartiesOpen}
+        onClose={() => setCopyPartiesOpen(false)}
+        currentShipmentId={order.id}
+        customer={v("customer")}
+        overseasAgent={v("overseas_agent")}
+        onPick={(picked) => {
+          if (picked.shipper) ch("shipper", picked.shipper);
+          if (picked.consignee) ch("consignee", picked.consignee);
+          if (picked.notify_party) ch("notify_party", picked.notify_party);
+          setCopyPartiesOpen(false);
+        }}
+      />
       <BookingTemplateModal
         open={templateOpen}
         onClose={() => setTemplateOpen(false)}
@@ -3091,6 +3105,19 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
                     {/* ──── 左列：发货人 / 收货人 / 通知人 ──── */}
                     <div style={tmStyles.col}>
+                      {editing && v("customer") && (
+                        <button
+                          onClick={() => setCopyPartiesOpen(true)}
+                          style={{
+                            marginBottom: 6, padding: "4px 12px", fontSize: 11,
+                            border: "1px dashed #1990FF", background: "#e6f4ff",
+                            color: "#1990FF", borderRadius: 4, cursor: "pointer",
+                          }}
+                          title="抄录同委托单位/同海外代理 历史订单的 shipper/consignee/notify_party"
+                        >
+                          📋 抄录历史（同委托/同代理）
+                        </button>
+                      )}
                       {/* 发货人 */}
                       <div style={tmStyles.subSection}>
                         <div style={tmStyles.row}>
@@ -6352,6 +6379,136 @@ function PortRow({ label, required, value, onChange, disabled, title }) {
       </label>
       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
         <PortPicker value={value} onChange={onChange} disabled={disabled} />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CopyPartiesModal — 抄录历史 shipper/consignee/notify_party
+// 查询：同 customer (+ 同 overseas_agent 优先)的最近订单，按 etd/created_at 倒序
+// ═══════════════════════════════════════════════════════════════
+function CopyPartiesModal({ open, onClose, currentShipmentId, customer, overseasAgent, onPick }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [scope, setScope] = useState("strict");  // strict = 同客户+同代理；loose = 仅同客户
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    (async () => {
+      let q = supabase.from("shipments")
+        .select("id, order_no, etd, created_at, customer, overseas_agent, shipper, consignee, notify_party")
+        .eq("customer", customer || "")
+        .not("shipper", "is", null)
+        .neq("id", currentShipmentId || "00000000-0000-0000-0000-000000000000")
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (scope === "strict" && overseasAgent) {
+        q = q.eq("overseas_agent", overseasAgent);
+      }
+      const { data } = await q;
+      setRows(data || []);
+      setLoading(false);
+    })();
+  }, [open, scope, customer, overseasAgent, currentShipmentId]);
+
+  if (!open) return null;
+
+  const overlay = {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 200,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  };
+  const box = {
+    background: "#fff", borderRadius: 6, width: "min(900px, 95vw)",
+    maxHeight: "85vh", display: "flex", flexDirection: "column",
+    boxShadow: "0 10px 40px rgba(0,0,0,.2)",
+  };
+  const head = {
+    padding: "12px 18px", borderBottom: "1px solid #e8e8e8",
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    background: "linear-gradient(#fafafa,#f0f0f0)",
+  };
+
+  const truncate = (s, n = 60) => {
+    if (!s) return "—";
+    const oneLine = s.replace(/\s+/g, " ").trim();
+    return oneLine.length > n ? oneLine.slice(0, n) + "..." : oneLine;
+  };
+
+  return (
+    <div onClick={onClose} style={overlay}>
+      <div onClick={e => e.stopPropagation()} style={box}>
+        <div style={head}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>📋 抄录 shipper / consignee / notify</span>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#999" }}>×</button>
+        </div>
+
+        <div style={{ padding: "10px 18px", borderBottom: "1px solid #f0f0f0", fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <span>委托单位：<b>{customer || "—"}</b></span>
+          {overseasAgent && <span>· 海外代理：<b>{overseasAgent}</b></span>}
+          <label style={{ marginLeft: "auto" }}>
+            <input type="radio" checked={scope === "strict"} onChange={() => setScope("strict")} />
+            <span style={{ marginLeft: 4 }}>同委托+同代理</span>
+          </label>
+          <label>
+            <input type="radio" checked={scope === "loose"} onChange={() => setScope("loose")} />
+            <span style={{ marginLeft: 4 }}>仅同委托</span>
+          </label>
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {loading ? (
+            <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: 30, textAlign: "center", color: "#888" }}>
+              没找到同{scope === "strict" ? "委托+代理" : "委托"}的历史订单
+              {scope === "strict" && overseasAgent && <div style={{ fontSize: 11, marginTop: 4 }}>试试切换到"仅同委托"</div>}
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead style={{ background: "#fafafa", position: "sticky", top: 0 }}>
+                <tr>
+                  <th style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid #e8e8e8", width: 140 }}>订单号</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid #e8e8e8", width: 90 }}>ETD</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid #e8e8e8" }}>SHIPPER</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid #e8e8e8" }}>CONSIGNEE</th>
+                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e8e8e8", width: 70 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: "8px 10px", fontFamily: "Consolas,monospace" }}>
+                      <a href={`#/sea_export?id=${r.id}`} target="_blank" rel="noopener" className="lk" style={{ color: "#1990FF" }}>
+                        {r.order_no}
+                      </a>
+                    </td>
+                    <td style={{ padding: "8px 10px", color: "#666" }}>{r.etd ? r.etd.slice(0, 10) : "—"}</td>
+                    <td style={{ padding: "8px 10px", fontFamily: "Consolas,monospace", color: "#333" }} title={r.shipper}>
+                      {truncate(r.shipper)}
+                    </td>
+                    <td style={{ padding: "8px 10px", fontFamily: "Consolas,monospace", color: "#333" }} title={r.consignee}>
+                      {truncate(r.consignee)}
+                    </td>
+                    <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                      <button onClick={() => onPick(r)}
+                              style={{
+                                padding: "4px 10px", fontSize: 11, fontWeight: 600,
+                                border: "1px solid #1990FF", background: "#e6f4ff",
+                                color: "#1990FF", borderRadius: 3, cursor: "pointer",
+                              }}>抄录 ↓</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div style={{ padding: "10px 18px", borderTop: "1px solid #e8e8e8", fontSize: 11, color: "#888", textAlign: "center" }}>
+          点「抄录」会把该订单的 shipper / consignee / notify_party 三个字段一起复制到当前订单。点订单号可在新 tab 打开原单。
+        </div>
       </div>
     </div>
   );

@@ -40,20 +40,23 @@ const daysBetween = (from, to) => {
 };
 
 const COLS = [
-  { k: "carrier",  w: 80,  label: "船公司" },
-  { k: "vessel",   w: 160, label: "船名 / 航次" },
-  { k: "route",    w: 130, label: "POL → POD" },
-  { k: "container",w: 80,  label: "柜型" },
-  { k: "total",    w: 60,  label: "总数",   align: "right" },
-  { k: "sold",     w: 60,  label: "已售",   align: "right" },
-  { k: "left",     w: 60,  label: "剩余",   align: "right" },
-  { k: "etd",      w: 90,  label: "ETD" },
-  { k: "days",     w: 80,  label: "离船期" },
-  { k: "si",       w: 110, label: "SI 截单" },
-  { k: "price",    w: 130, label: "售价区间" },
-  { k: "status",   w: 80,  label: "状态",   center: true },
-  { k: "act",      w: 200, label: "操作",   center: true },
+  { k: "booking_no", w: 120, label: "订舱号" },
+  { k: "carrier",    w: 80,  label: "船公司" },
+  { k: "vessel",     w: 160, label: "船名 / 航次" },
+  { k: "route",      w: 130, label: "POL → POD" },
+  { k: "container",  w: 80,  label: "柜型" },
+  { k: "total",      w: 60,  label: "总数",   align: "right" },
+  { k: "sold",       w: 60,  label: "已售",   align: "right" },
+  { k: "left",       w: 60,  label: "剩余",   align: "right" },
+  { k: "etd",        w: 90,  label: "ETD" },
+  { k: "days",       w: 80,  label: "离船期" },
+  { k: "si",         w: 110, label: "SI 截单" },
+  { k: "partner",    w: 140, label: "关联客户/代理" },
+  { k: "price",      w: 130, label: "售价区间" },
+  { k: "status",     w: 80,  label: "状态",   center: true },
+  { k: "act",        w: 180, label: "操作",   center: true },
 ];
+const COL_WIDTHS_KEY = "bansar_spot_col_widths_v1";
 
 export function SpotBookingsPage({ user, onBack }) {
   const role = user?.profile?.role || "operator";
@@ -70,6 +73,44 @@ export function SpotBookingsPage({ user, onBack }) {
   const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(0);
   const pageSize = 50;
+
+  // 列宽：可拖拽 + localStorage 持久化（双击 reset）
+  const [colWidths, setColWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY) || "{}");
+      return Object.fromEntries(COLS.map(c => [c.k, saved[c.k] || c.w]));
+    } catch {
+      return Object.fromEntries(COLS.map(c => [c.k, c.w]));
+    }
+  });
+  const startColResize = (colKey, e) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidths[colKey];
+    const onMove = (ev) => {
+      const newW = Math.max(40, startW + (ev.clientX - startX));
+      setColWidths(p => ({ ...p, [colKey]: newW }));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setColWidths(latest => {
+        try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(latest)); } catch {}
+        return latest;
+      });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+  const resetColWidth = (colKey) => {
+    const def = COLS.find(c => c.k === colKey);
+    if (!def) return;
+    const next = { ...colWidths, [colKey]: def.w };
+    setColWidths(next);
+    try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(next)); } catch {}
+  };
+  const colsWithW = COLS.map(c => ({ ...c, w: colWidths[c.k] }));
+  const totalW = colsWithW.reduce((a, c) => a + c.w, 0);
 
   const load = async () => {
     setLoading(true);
@@ -100,7 +141,8 @@ export function SpotBookingsPage({ user, onBack }) {
 
   useEffect(() => { load(); }, []);
   useEffect(() => {
-    supabase.from("customers").select("id, name, name_short").order("name").then(({ data }) => {
+    // 全部 partner_type 都拉（客户 / 海外代理 / 订舱代理...）给现舱关联用
+    supabase.from("customers").select("id, name, name_short, partner_type").order("name").then(({ data }) => {
       setCustomers(data || []);
     });
   }, []);
@@ -196,15 +238,19 @@ export function SpotBookingsPage({ user, onBack }) {
             暂无现舱，点上方「+ 新增现舱」开始
           </div>
         ) : (
-          <table>
+          <table style={{ minWidth: totalW }}>
             <colgroup>
-              {COLS.map(c => <col key={c.k} style={{ width: c.w }} />)}
+              {colsWithW.map(c => <col key={c.k} style={{ width: c.w }} />)}
             </colgroup>
             <thead>
               <tr>
-                {COLS.map(c => (
-                  <th key={c.k} className={c.center ? "center" : ""}>
+                {colsWithW.map(c => (
+                  <th key={c.k} className={c.center ? "center" : ""} style={{ position: "relative", textAlign: c.align || (c.center ? "center" : "left") }}>
                     <span className="ht">{c.label}</span>
+                    <span className="col-resize"
+                          onMouseDown={e => startColResize(c.k, e)}
+                          onDoubleClick={() => resetColWidth(c.k)}
+                          aria-hidden="true" />
                   </th>
                 ))}
               </tr>
@@ -220,6 +266,7 @@ export function SpotBookingsPage({ user, onBack }) {
                                    ? "#cf1322" : "#666";
                 return (
                   <tr key={r.id} className={i % 2 ? "ev" : ""}>
+                    <td style={{ fontFamily: "Consolas,monospace", fontSize: 12 }}>{r.booking_no || "—"}</td>
                     <td>{r.carrier || "—"}</td>
                     <td>{r.vessel || "—"}{r.voyage ? ` / ${r.voyage}` : ""}</td>
                     <td>{r.pol || "—"} → {r.pod || "—"}</td>
@@ -232,6 +279,7 @@ export function SpotBookingsPage({ user, onBack }) {
                       {daysToEtd == null ? "—" : daysToEtd < 0 ? `过 ${-daysToEtd}天` : daysToEtd === 0 ? "今天" : `${daysToEtd}天后`}
                     </td>
                     <td style={{ fontSize: 12 }}>{fmtDateTime(r.si_cutoff)}</td>
+                    <td style={{ fontSize: 12 }} title={r.partner_name || ""}>{r.partner_name || "—"}</td>
                     <td style={{ fontSize: 12 }}>
                       {r.sell_price_min || r.sell_price_max
                         ? `${r.currency || "USD"} ${r.sell_price_min ?? "?"}~${r.sell_price_max ?? "?"}`
@@ -271,6 +319,7 @@ export function SpotBookingsPage({ user, onBack }) {
       {editing && (
         <SpotEditor
           spot={editing === "new" ? null : editing}
+          customers={customers}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
         />
@@ -294,7 +343,7 @@ export function SpotBookingsPage({ user, onBack }) {
 }
 
 // ─── 新建 / 编辑现舱 ───────────────────────────────────────────
-function SpotEditor({ spot, onClose, onSaved }) {
+function SpotEditor({ spot, customers, onClose, onSaved }) {
   const [form, setForm] = useState(() => spot ? { ...spot } : {
     carrier: "", vessel: "", voyage: "", route: "", pol: "", pod: "",
     etd: "", eta: "",
@@ -302,6 +351,7 @@ function SpotEditor({ spot, onClose, onSaved }) {
     si_cutoff: null, vgm_cutoff: null, customs_cutoff: null, port_cutoff: null,
     purchase_price: null, sell_price_min: null, sell_price_max: null, currency: "USD",
     booking_no: "", mbl_no: "",
+    partner_id: null, partner_name: "",
     status: "可售", notes: "",
   });
   const [saving, setSaving] = useState(false);
@@ -378,10 +428,27 @@ function SpotEditor({ spot, onClose, onSaved }) {
         <Fld label="MBL"><input style={fldInput} value={form.mbl_no || ""} onChange={e => ch("mbl_no", e.target.value)} /></Fld>
       </Group>
       <Group title="业务">
+        <Fld label="关联客户 / 海外代理" span={2}>
+          <input style={fldInput} list="spot-partners" value={form.partner_name || ""}
+                 onChange={e => {
+                   const v = e.target.value;
+                   ch("partner_name", v);
+                   const c = (customers || []).find(c => c.name === v);
+                   ch("partner_id", c?.id || null);
+                 }}
+                 placeholder="输入客户/代理名（可选）" />
+          <datalist id="spot-partners">
+            {(customers || []).map(c => (
+              <option key={c.id} value={c.name}>
+                {c.partner_type || ""} · {c.name_short || ""}
+              </option>
+            ))}
+          </datalist>
+        </Fld>
         <Fld label="状态"><select style={fldInput} value={form.status || "可售"} onChange={e => ch("status", e.target.value)}>
           {STATUS_OPTS.map(s => <option key={s}>{s}</option>)}
         </select></Fld>
-        <Fld label="备注" span={3}><textarea style={{ ...fldInput, minHeight: 60 }} value={form.notes || ""} onChange={e => ch("notes", e.target.value)} /></Fld>
+        <Fld label="备注" span={4}><textarea style={{ ...fldInput, minHeight: 60 }} value={form.notes || ""} onChange={e => ch("notes", e.target.value)} /></Fld>
       </Group>
     </ModalShell>
   );

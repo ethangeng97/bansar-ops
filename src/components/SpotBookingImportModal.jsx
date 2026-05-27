@@ -5,7 +5,7 @@
 // 3. 解析 → 预览（含校验错误） → 确认 → 批量 insert spot_bookings
 // 去重：按 booking_no 匹配，已存在的跳过；没 booking_no 的全部当新增
 // ============================================================================
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { supabase } from "../supabase.js";
 import { exportToXlsx, parseXlsx } from "../lib/excel-export.js";
 import { parseMaerskBC } from "../lib/maersk-bc-pdf-parser.js";
@@ -63,7 +63,17 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [partnerName, setPartnerName] = useState("");
+  const [partnerId, setPartnerId] = useState(null);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    supabase.from("customers").select("id, name, name_short, partner_type").order("name").then(({ data }) => {
+      setCustomers(data || []);
+    });
+  }, [open]);
 
   if (!open) return null;
 
@@ -184,7 +194,11 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
     setBusy(true);
     setErr(null);
     try {
-      const payload = parsed.newRows.map(r => r.data);
+      // 关联客户/海外代理（统一应用到本批所有导入行）
+      const payload = parsed.newRows.map(r => ({
+        ...r.data,
+        ...(partnerName ? { partner_name: partnerName, partner_id: partnerId || null } : {}),
+      }));
       const { error } = await supabase.from("spot_bookings").insert(payload);
       if (error) { setErr("导入失败：" + error.message); setBusy(false); return; }
       alert(`✓ 已导入 ${payload.length} 条现舱（跳过 ${parsed.skipRows.length} 条已存在）`);
@@ -222,6 +236,32 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
             <div>2. <b>Maersk 订舱确认 PDF</b>：直接拖入 PDF，自动识别 + 抽字段（船名航次/POL/POD/ETD/ETA/柜型/还箱时间）</div>
             <div>3. 系统按<b>船公司订舱号</b>去重（已存在的跳过），其他全部新增</div>
             <div>4. 必填：船公司 / POL / POD / 总舱位（PDF 缺字段可在导入后手动补）</div>
+          </div>
+
+          {/* 关联客户 / 海外代理 —— 应用到本批所有导入行 */}
+          <div style={{ marginBottom: 14, padding: 10, background: "#fafafa", border: "1px solid #e8e8e8", borderRadius: 4 }}>
+            <label style={{ fontSize: 12, color: "#555", marginRight: 8, fontWeight: 600 }}>本批关联客户/海外代理（可选）：</label>
+            <input list="import-partners" value={partnerName}
+                   onChange={e => {
+                     const v = e.target.value;
+                     setPartnerName(v);
+                     const c = customers.find(c => c.name === v);
+                     setPartnerId(c?.id || null);
+                   }}
+                   placeholder="输入客户或代理名"
+                   style={{ width: 280, padding: "4px 8px", border: "1px solid #c1c1c1", borderRadius: 3, fontSize: 12 }} />
+            <datalist id="import-partners">
+              {customers.map(c => (
+                <option key={c.id} value={c.name}>{c.partner_type || ""} · {c.name_short || ""}</option>
+              ))}
+            </datalist>
+            {partnerName && (
+              <button onClick={() => { setPartnerName(""); setPartnerId(null); }}
+                      style={{ marginLeft: 6, padding: "2px 8px", fontSize: 11, border: "1px solid #d9d9d9", background: "#fff", borderRadius: 3, cursor: "pointer" }}>清除</button>
+            )}
+            <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>
+              留空就不关联；填了会应用到本次导入的所有现舱
+            </div>
           </div>
 
           {/* 拖入区 */}
@@ -277,7 +317,7 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                     <thead style={{ background: "#fafafa", position: "sticky", top: 0 }}>
                       <tr>
-                        {["#", "船公司", "船名航次", "POL→POD", "ETD", "柜型", "数", "订舱号"].map(h => (
+                        {["#", "订舱号", "船公司", "船名航次", "POL→POD", "ETD", "柜型", "数", "关联"].map(h => (
                           <th key={h} style={{ padding: "6px 8px", borderBottom: "1px solid #e8e8e8", textAlign: "left", color: "#666" }}>{h}</th>
                         ))}
                       </tr>
@@ -286,13 +326,14 @@ export default function SpotBookingImportModal({ open, onClose, onImported }) {
                       {parsed.newRows.map((r, i) => (
                         <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
                           <td style={{ padding: "6px 8px", color: "#999" }}>{r.rowNo}</td>
+                          <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 10 }}>{r.data.booking_no || "—"}</td>
                           <td style={{ padding: "6px 8px" }}>{r.data.carrier}</td>
                           <td style={{ padding: "6px 8px" }}>{r.data.vessel || "—"}{r.data.voyage ? ` / ${r.data.voyage}` : ""}</td>
                           <td style={{ padding: "6px 8px" }}>{r.data.pol} → {r.data.pod}</td>
                           <td style={{ padding: "6px 8px" }}>{r.data.etd || "—"}</td>
                           <td style={{ padding: "6px 8px" }}>{r.data.container_size || ""}{r.data.container_type || ""}</td>
                           <td style={{ padding: "6px 8px", textAlign: "right" }}>{r.data.total_qty}</td>
-                          <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 10 }}>{r.data.booking_no || "—"}</td>
+                          <td style={{ padding: "6px 8px", color: partnerName ? "#1990FF" : "#bbb" }}>{partnerName || "—"}</td>
                         </tr>
                       ))}
                     </tbody>

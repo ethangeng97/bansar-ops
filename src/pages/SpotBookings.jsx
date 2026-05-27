@@ -582,15 +582,22 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
     // 提交时生成订单号序列：BSOEF + YYMM + 5位序号
     const now = new Date();
     const prefix = `BSOEF${String(now.getFullYear()).slice(2)}${String(now.getMonth()+1).padStart(2,"0")}`;
+    // 严格只看 BSOEFYYMM + 5位数字 (允许 -N 分票后缀) 的合法订单号
+    // 不能用旧的 regex /(\d+)(?:-\d+)?$/, 因为 greedy 会把 BSOEFYYMM 里的数字也抓进来
+    const orderNoRe = new RegExp(`^${prefix}(\\d{5})(?:-\\d+)?$`);
     const { data: existing } = await supabase
       .from("shipments").select("order_no")
       .like("order_no", `${prefix}%`)
-      .order("order_no", { ascending: false }).limit(1);
-    let nextSeq = 1;
-    if (existing && existing.length > 0) {
-      const m = (existing[0].order_no || "").match(/(\d+)(?:-\d+)?$/);
-      if (m) nextSeq = parseInt(m[1], 10) + 1;
+      .order("order_no", { ascending: false }).limit(50);
+    let maxSeq = 0;
+    for (const row of (existing || [])) {
+      const m = (row.order_no || "").match(orderNoRe);
+      if (m) {
+        const s = parseInt(m[1], 10);
+        if (s > maxSeq) maxSeq = s;
+      }
     }
+    const nextSeq = maxSeq + 1;
     // 批量构造 + 自动带客户常用 shipper/consignee/notify
     const payloads = rows.map((r, idx) => {
       const remembered = customerPartyMap?.[r.customerName] || {};

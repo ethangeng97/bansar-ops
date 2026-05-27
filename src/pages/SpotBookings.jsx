@@ -364,6 +364,32 @@ function SpotEditor({ spot, customers, onClose, onSaved }) {
   const save = async () => {
     if (!form.carrier || !form.pol || !form.pod) { alert("船公司 / POL / POD 必填"); return; }
     setSaving(true);
+
+    // 互斥校验：新建 / 改 booking_no 时，订舱号不能在另一张表已存在
+    const bn = (form.booking_no || "").trim();
+    if (bn) {
+      const bnChanged = isNew || bn !== (spot?.booking_no || "");
+      if (bnChanged) {
+        // 1) 查 spot_bookings（自己除外）
+        const { data: spotHit } = await supabase.from("spot_bookings")
+          .select("id, booking_no, carrier").eq("booking_no", bn).limit(1);
+        if (spotHit && spotHit.length > 0 && spotHit[0].id !== spot?.id) {
+          setSaving(false);
+          alert(`订舱号 ${bn} 已存在于现舱表（${spotHit[0].carrier}）`);
+          return;
+        }
+        // 2) 查 shipments（booking_no 或 mbl_no）
+        const { data: shipHit } = await supabase.from("shipments")
+          .select("order_no, booking_no, mbl_no")
+          .or(`booking_no.eq."${bn}",mbl_no.eq."${bn}"`).limit(1);
+        if (shipHit && shipHit.length > 0) {
+          setSaving(false);
+          alert(`订舱号 ${bn} 已是海运出口订单 ${shipHit[0].order_no}，跟现舱互斥，不能录入`);
+          return;
+        }
+      }
+    }
+
     const payload = {
       ...form,
       total_qty: Number(form.total_qty) || 0,

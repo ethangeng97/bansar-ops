@@ -2028,6 +2028,19 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           }
           return;
         }
+        // 现舱互斥：该 booking_no 不能同时是"待售现舱"
+        const { data: spotHit } = await supabase.from("spot_bookings")
+          .select("id, booking_no, carrier, status").eq("booking_no", bookingNo).limit(1);
+        if (spotHit && spotHit.length > 0) {
+          const s = spotHit[0];
+          const ok = window.confirm(
+            `订舱号 ${bookingNo} 在「现舱」里已经存在（${s.carrier}，状态: ${s.status}）。\n\n` +
+            `建议从现舱「划给客户」走流程，避免数据脱节。\n\n` +
+            `确定 → 仍要直接创建订单（不推荐）\n` +
+            `取消 → 返回检查`
+          );
+          if (!ok) return;
+        }
       }
 
       const payload = { ...ed };

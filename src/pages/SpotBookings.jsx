@@ -355,6 +355,26 @@ export function SpotBookingsPage({ user, onBack }) {
   );
 }
 
+// 重算现舱状态 = sum(shipments.qty_container WHERE spot_booking_id=X) vs total_qty
+// 用户手动改的"已截单/已取消"不覆盖
+async function recalcSpotStatusInline(spotId) {
+  if (!spotId) return;
+  const [{ data: spot }, { data: ships }] = await Promise.all([
+    supabase.from("spot_bookings").select("total_qty, status").eq("id", spotId).single(),
+    supabase.from("shipments").select("qty_container").eq("spot_booking_id", spotId),
+  ]);
+  if (!spot) return;
+  if (["已截单", "已取消"].includes(spot.status)) return;
+  const sold = (ships || []).reduce((a, s) => a + (s.qty_container || 1), 0);
+  const total = spot.total_qty || 0;
+  let next = "可售";
+  if (sold >= total && total > 0) next = "全部已售";
+  else if (sold > 0) next = "部分已售";
+  if (next !== spot.status) {
+    await supabase.from("spot_bookings").update({ status: next }).eq("id", spotId);
+  }
+}
+
 // ─── 新建 / 编辑现舱 ───────────────────────────────────────────
 function SpotEditor({ spot, customers, onClose, onSaved }) {
   const [form, setForm] = useState(() => spot ? { ...spot } : {
@@ -585,13 +605,8 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
     });
     const { data, error } = await supabase.from("shipments").insert(payloads).select();
     if (error) { setSaving(false); alert("批量创建失败：" + error.message); return; }
-    // 更新现舱状态
-    const newSold = soldQty + totalAlloc;
-    if (newSold >= (spot.total_qty || 0)) {
-      await supabase.from("spot_bookings").update({ status: "全部已售" }).eq("id", spot.id);
-    } else if (newSold > 0 && spot.status === "可售") {
-      await supabase.from("spot_bookings").update({ status: "部分已售" }).eq("id", spot.id);
-    }
+    // 重算现舱状态（统一走 helper，跟订单删除时退柜同套逻辑）
+    await recalcSpotStatusInline(spot.id);
     setSaving(false);
     const orderList = rows.map((r, i) => `  ${i+1}) ${r.orderNo} → ${r.customerName} (${r.qty}柜)`).join("\n");
     if (rows.length === 1 && confirm(`✓ 已划给 ${rows[0].customerName} ${rows[0].qty} 柜，新建订单 ${rows[0].orderNo}。\n\n马上打开新订单？`)) {

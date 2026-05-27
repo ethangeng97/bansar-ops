@@ -1184,6 +1184,27 @@ async function recomputeShipmentTotalsFromCargo(shipmentId) {
   }).eq("id", shipmentId);
 }
 
+// 重算现舱状态 = 根据关联 shipments 的 qty_container 之和算出"可售/部分已售/全部已售"
+// 用于：现舱"划给客户"后 / 订单删除后 / 订单 spot_booking_id 改了后 同步状态
+async function recalcSpotStatus(spotId) {
+  if (!spotId) return;
+  const [{ data: spot }, { data: ships }] = await Promise.all([
+    supabase.from("spot_bookings").select("total_qty, status").eq("id", spotId).single(),
+    supabase.from("shipments").select("qty_container").eq("spot_booking_id", spotId),
+  ]);
+  if (!spot) return;
+  const sold = (ships || []).reduce((a, s) => a + (s.qty_container || 1), 0);
+  const total = spot.total_qty || 0;
+  let next = "可售";
+  if (sold >= total && total > 0) next = "全部已售";
+  else if (sold > 0) next = "部分已售";
+  // 用户手动改的"已截单/已取消"不覆盖
+  if (["已截单", "已取消"].includes(spot.status)) return;
+  if (next !== spot.status) {
+    await supabase.from("spot_bookings").update({ status: next }).eq("id", spotId);
+  }
+}
+
 // 重算母单 qty_packages/weight/volume（= 所有分票之和），写回 DB
 // 让列表/单证/portal 报表都能直接读母单字段拿到合计，无需各自聚合
 async function recomputeMasterTotals(masterOrderNo) {
@@ -2450,6 +2471,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     if (!window.confirm(`确定删除作业 ${ref}？\n\n会一并清理：\n  - 货物明细（cargo_items）\n  - 集装箱（shipment_containers）\n  - portal 装箱明细（container_items）\n\n此操作不可恢复。`)) return;
 
     try {
+      // 关联的现舱（删完后要重算状态 = 退柜）
+      const linkedSpotId = order.spot_booking_id;
       // 显式删 portal container_items（即便 FK on delete set null 也建议清掉）
       await supabase.from("container_items").delete().eq("shipment_id", order.id);
       // shipments 主表删（cargo_items / shipment_containers 有 CASCADE）
@@ -2458,6 +2481,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       // 自拼分票被删 → 重算母单合计
       if (isSubTicket && masterOrderNo) {
         recomputeMasterTotals(masterOrderNo).catch(e => console.error("recompute master totals error:", e));
+      }
+      // 退柜：删除从现舱划走的订单后, 重算现舱状态
+      if (linkedSpotId) {
+        recalcSpotStatus(linkedSpotId).catch(e => console.error("recalc spot status error:", e));
       }
       onBack();
     } catch (e) {
@@ -2870,7 +2897,25 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 </Df>
                 <Df label="航线"><input value={v("route")} onChange={e => ch("route", e.target.value)} disabled={!editing} /></Df>
 
-                <Df label="MB/L No." required><input value={v("booking_no")} onChange={e => ch("booking_no", e.target.value)} disabled={!editing} className="notnull" /></Df>
+                <Df label="MB/L No." required>
+                  <input value={v("booking_no")}
+                         onChange={e => ch("booking_no", e.target.value)}
+                         onBlur={async (e) => {
+                           // 反向关联：booking_no 在 spot_bookings 里有，且当前 shipment 还没 spot_booking_id → 提示绑定
+                           if (!editing) return;
+                           const bn = (e.target.value || "").trim();
+                           if (!bn || v("spot_booking_id")) return;
+                           const { data } = await supabase.from("spot_bookings")
+                             .select("id, carrier, vessel, voyage, status").eq("booking_no", bn).limit(1);
+                           if (data && data.length > 0) {
+                             const s = data[0];
+                             if (confirm(`订舱号 ${bn} 在「现舱」表里已有（${s.carrier} ${s.vessel || ""}/${s.voyage || ""}, ${s.status}）。\n\n要不要把本订单关联到那条现舱？\n\n（关联后, 订单详情顶部会显示「来自现舱」, 也会被算进现舱「已售」数）`)) {
+                               ch("spot_booking_id", s.id);
+                             }
+                           }
+                         }}
+                         disabled={!editing} className="notnull" />
+                </Df>
                 <Df label="委托人手机"><input value={v("contact_phone")} onChange={e => ch("contact_phone", e.target.value)} disabled={!editing} /></Df>
                 <Df label="航次" refLabel><input value={v("voyage")} onChange={e => ch("voyage", liveUpper(e.target.value))} disabled={!editing || isInheritedFromMaster("voyage")} className="notnull" title={isInheritedFromMaster("voyage") ? inheritTitle : undefined} /></Df>
                 <Df label="揽货类型">

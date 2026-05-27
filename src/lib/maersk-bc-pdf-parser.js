@@ -128,7 +128,7 @@ export async function parseMaerskBC(file) {
   }
 
   const out = {
-    carrier: "Maersk",
+    carrier: "MAERSK",
     status: "可售",
     currency: "USD",
   };

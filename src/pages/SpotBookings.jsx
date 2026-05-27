@@ -13,6 +13,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
 import SpotBookingImportModal from "../components/SpotBookingImportModal.jsx";
+import { COMMON_CARRIERS } from "../lib/carriers.js";
 
 const STATUS_OPTS = ["可售", "部分已售", "全部已售", "已截单", "已取消"];
 const STATUS_BG = {
@@ -199,7 +200,7 @@ export function SpotBookingsPage({ user, onBack }) {
                onChange={e => setFilters({ ...filters, keyword: e.target.value })}
                style={{ width: 240, padding: "3px 6px", border: "1px solid #c8dfff", borderRadius: 3 }} />
         <input placeholder="船公司" value={filters.carrier}
-               onChange={e => setFilters({ ...filters, carrier: e.target.value })}
+               onChange={e => setFilters({ ...filters, carrier: e.target.value.toUpperCase() })}
                style={{ width: 100, padding: "3px 6px", border: "1px solid #c8dfff", borderRadius: 3 }} />
         <input placeholder="POL" value={filters.pol}
                onChange={e => setFilters({ ...filters, pol: e.target.value })}
@@ -393,7 +394,10 @@ function SpotEditor({ spot, customers, onClose, onSaved }) {
                   <button onClick={save} disabled={saving} style={modalBtnPrimary}>{saving ? "保存中..." : "保存"}</button>
                 </>}>
       <Group title="船期">
-        <Fld label="船公司 *"><input style={fldInput} value={form.carrier} onChange={e => ch("carrier", e.target.value)} /></Fld>
+        <Fld label="船公司 *">
+          <input style={fldInput} value={form.carrier} list="spot-carriers-dl" onChange={e => ch("carrier", e.target.value.toUpperCase())} />
+          <datalist id="spot-carriers-dl">{COMMON_CARRIERS.map(c => <option key={c} value={c} />)}</datalist>
+        </Fld>
         <Fld label="船名"><input style={fldInput} value={form.vessel} onChange={e => ch("vessel", e.target.value.toUpperCase())} /></Fld>
         <Fld label="航次"><input style={fldInput} value={form.voyage} onChange={e => ch("voyage", e.target.value.toUpperCase())} /></Fld>
         <Fld label="航线"><input style={fldInput} value={form.route} onChange={e => ch("route", e.target.value)} /></Fld>

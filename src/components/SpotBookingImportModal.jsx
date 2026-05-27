@@ -12,7 +12,7 @@ import { parseMaerskBC } from "../lib/maersk-bc-pdf-parser.js";
 
 // Excel header → DB column + 转换
 const COLS = [
-  { hdr: "船公司",       col: "carrier",          required: true },
+  { hdr: "船公司",       col: "carrier",          required: true, parse: v => v ? String(v).trim().toUpperCase() : null },
   { hdr: "船名",         col: "vessel" },
   { hdr: "航次",         col: "voyage" },
   { hdr: "航线",         col: "route" },

@@ -29,6 +29,9 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
   const first = selected[0] || {};
   const [form, setForm] = useState({
     customer: first.customer || "",
+    shipper: "",
+    consignee: "",
+    notify_party: "",
     booking_no: first.booking_no || "",
     mbl_no: first.mbl_no || "",
     vessel: first.vessel || "",
@@ -42,11 +45,26 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
   });
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-  // 委托单位列表（用于 ComboBox）
+  // 委托单位列表 + 委托人→历史 shipper/consignee/notify 抄录映射
   const [customers, setCustomers] = useState([]);
+  const [partyMap, setPartyMap] = useState({});
   useEffect(() => {
     getCachedRef("customers").then(setCustomers).catch(() => {});
+    getCachedRef("customer_party_map").then(m => setPartyMap(m || {})).catch(() => {});
   }, []);
+
+  // 选委托单位时：自动带出该客户常用的 shipper/consignee/notify_party
+  // 仅在对应字段为空时填入（已填的不覆盖）
+  const onCustomerChange = (val) => {
+    setForm(p => {
+      const next = { ...p, customer: val };
+      const remembered = partyMap[val] || {};
+      for (const f of ["shipper", "consignee", "notify_party"]) {
+        if (remembered[f] && !p[f]) next[f] = remembered[f];
+      }
+      return next;
+    });
+  };
 
   // 并入已有 — 搜索状态
   const [q, setQ] = useState("");
@@ -113,6 +131,9 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
       const newRow = {
         shipment_type: "Console",
         customer: form.customer.trim() || null,
+        shipper: form.shipper.trim() || null,
+        consignee: form.consignee.trim() || null,
+        notify_party: form.notify_party.trim() || null,
         booking_no: form.booking_no.trim() || null,
         mbl_no: form.mbl_no.trim() || null,
         vessel: form.vessel.trim() || null,
@@ -226,12 +247,25 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
           <div style={{ gridColumn: "1 / -1", fontSize: 12, padding: "8px 10px", background: "#e6f7ff", border: "1px solid #91d5ff", borderRadius: 4, color: "#0050b3" }}>
             母拼作业号由系统自动生成（格式 <code>BSOEC + YYMM + 5位流水</code>），无需填写。
           </div>
-          <FormField label="委托单位">
-            <ComboBox value={form.customer} onChange={v => setF("customer", v)} options={customers} placeholder="选填，可空" />
+          <FormField label="委托单位（选后自动带出历史 shipper/consignee）">
+            <ComboBox value={form.customer} onChange={onCustomerChange} options={customers} placeholder="选填，可空" />
           </FormField>
           <FormField label="Booking No.">
             <Input value={form.booking_no} onChange={e => setF("booking_no", e.target.value)} />
           </FormField>
+          <FormField label="Shipper">
+            <textarea value={form.shipper} onChange={e => setF("shipper", e.target.value)} rows={3}
+              style={{ width: "100%", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, fontFamily: "inherit", resize: "vertical" }} />
+          </FormField>
+          <FormField label="Consignee">
+            <textarea value={form.consignee} onChange={e => setF("consignee", e.target.value)} rows={3}
+              style={{ width: "100%", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, fontFamily: "inherit", resize: "vertical" }} />
+          </FormField>
+          <FormField label="Notify Party">
+            <textarea value={form.notify_party} onChange={e => setF("notify_party", e.target.value)} rows={3}
+              style={{ width: "100%", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, fontFamily: "inherit", resize: "vertical" }} />
+          </FormField>
+          <div /> {/* 占位，保持 2 列对齐 */}
           <FormField label="MBL No.">
             <Input value={form.mbl_no} onChange={e => setF("mbl_no", e.target.value)} />
           </FormField>

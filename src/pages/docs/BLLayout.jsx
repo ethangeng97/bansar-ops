@@ -281,7 +281,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }),
       { qty: 0, gw: 0, cbm: 0 }
     );
-    const ciProducts = [...new Set(mergedCargo.map(it => it.product_name_en).filter(Boolean))];
+    const ciProducts = dedupProducts(mergedCargo.map(it => it.product_name_en).filter(Boolean));
     const descLine = ciProducts.length > 0
       ? ciProducts.join("\n")
       : (s.desc_en || s.description || s.cargo_type || "GENERAL CARGO");
@@ -353,7 +353,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const totalCbm = rows.reduce((sum, r) => sum + (r.cbm || 0), 0);
   // TOTAL 行里加一行品名汇总（多个不同品名用 " / " 连接）
   const distinctProducts = mergedCargo.length > 0
-    ? [...new Set(mergedCargo.map(it => it.product_name_en).filter(Boolean))]
+    ? dedupProducts(mergedCargo.map(it => it.product_name_en).filter(Boolean))
     : (s.desc_en ? [s.desc_en] : []);
 
   // 分页
@@ -755,13 +755,6 @@ function CargoPage({
                     <span style={{ fontWeight: 600 }}>═══════</span>
                     {"\n"}
                     {r.desc}
-                    {r.cnInfo && (
-                      <>
-                        {"\n"}
-                        {"\n"}
-                        {r.cnInfo}
-                      </>
-                    )}
                   </td>
                   <td style={{ ...tdStyle({ mono: true, align: "right" }) }}>
                     {r.gw ? r.gw.toFixed(3) : "—"}
@@ -771,6 +764,19 @@ function CargoPage({
                   </td>
                 </tr>
               ))}
+              {/* 集装箱明细：跨全部列显示，每只柜一行（参考业内提单格式） */}
+              {rows.length > 0 && rows.some(r => r.cnInfo) && (
+                <tr>
+                  <td colSpan={5} style={{
+                    ...tdStyle({ mono: true, fontSize: 9.5 }),
+                    borderRight: 0,
+                    whiteSpace: "pre-wrap",
+                    padding: "6px 10px",
+                  }}>
+                    {rows.map(r => r.cnInfo).filter(Boolean).join("\n")}
+                  </td>
+                </tr>
+              )}
               {/* 末页底部：TOTAL 合计行（多于 1 条 cargo line 时显示）+ FREIGHT 类型 + Shipped on Board */}
               {isLastCargoPage && rows.length > 1 && (
                 <tr style={{ background: BRAND_BG }}>
@@ -1036,6 +1042,23 @@ const TERMS_LIST = [
 // ============================================================================
 // 工具函数
 // ============================================================================
+// 品名去重：trim + 大小写归一化 + 内部多空格折叠后比较；保留首次出现的原文
+// 进一步：如果某项是另一项的子串（如 "AIR CIRCULATOR" 被 "AIR CIRCULATOR SPARE PARTS" 包含），保留更长的
+function dedupProducts(list) {
+  const norm = (s) => String(s || "").trim().toUpperCase().replace(/\s+/g, " ");
+  // 先按归一化串去重
+  const byNorm = new Map();
+  for (const raw of list) {
+    const n = norm(raw);
+    if (!n) continue;
+    if (!byNorm.has(n)) byNorm.set(n, raw);
+  }
+  // 再剔除被其它项完全包含的子串项
+  const keys = [...byNorm.keys()];
+  const kept = keys.filter(k => !keys.some(other => other !== k && other.includes(k)));
+  return kept.map(k => byNorm.get(k));
+}
+
 function formatDateLong(d) {
   if (!d) return "—";
   const date = new Date(d);

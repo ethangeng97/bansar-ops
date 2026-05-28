@@ -738,7 +738,7 @@ function CargoPage({
               ) : rows.map((r, i) => (
                 <tr key={i}>
                   <td style={tdStyle({ mono: true, fontSize: 9.5 })}>
-                    {r.cnInfo ? `${r.cnInfo}\n\n` : ""}{r.marks}
+                    {r.marks}
                   </td>
                   <td style={tdStyle({ bold: true })}>
                     {r.pkgs ? `${r.pkgs} ${r.unit}` : "—"}
@@ -755,6 +755,13 @@ function CargoPage({
                     <span style={{ fontWeight: 600 }}>═══════</span>
                     {"\n"}
                     {r.desc}
+                    {r.cnInfo && (
+                      <>
+                        {"\n"}
+                        {"\n"}
+                        {r.cnInfo}
+                      </>
+                    )}
                   </td>
                   <td style={{ ...tdStyle({ mono: true, align: "right" }) }}>
                     {r.gw ? r.gw.toFixed(3) : "—"}

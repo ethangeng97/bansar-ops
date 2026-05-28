@@ -2867,8 +2867,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
               <div className="tms-detail-grid">
                 <Df label="作业号"><OrderNoField order={order} editing={editing} onChange={ch} /></Df>
                 <Df label="委托单位" required={!isMaster && !isCreatingMaster}>
-                  {(isMaster || isCreatingMaster) ? (
-                    <input value={isCreatingMaster ? "（自拼主拼，无委托单位）" : (order.customer || "（多客户拼柜，详见小票）")} disabled className="placeholder-italic" />
+                  {isCreatingMaster ? (
+                    <input value="（自拼主拼，无委托单位）" disabled className="placeholder-italic" />
                   ) : editing
                     ? <ComboBox value={v("customer")} onChange={val => {
                         ch("customer", val);
@@ -2881,7 +2881,9 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           }
                         }
                       }} options={refData.customers} />
-                    : <input value={v("customer")} disabled className="notnull" />}
+                    : isMaster
+                      ? <input value={order.customer || "（多客户拼柜，详见小票）"} disabled className="placeholder-italic" />
+                      : <input value={v("customer")} disabled className="notnull" />}
                 </Df>
                 <Df label="订舱代理"><input value={v("booking_agent")} onChange={e => ch("booking_agent", e.target.value)} disabled={!editing} /></Df>
                 <Df label="操作员">

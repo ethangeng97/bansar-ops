@@ -92,14 +92,15 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }
 
       setCargo(ci);
-      // 集装箱回退：当前票 shipment_containers 没数据 → 从 cargo_items 的 container_no
+      // 集装箱回退：当前票 shipment_containers 没数据 / 占位行没填箱号 → 从 cargo_items 的 container_no
       // 抽 distinct 拼成"伪 containers"，让 BL 也能渲染箱号。
-      // 解析 cargo_items.container_type ("45HC") → container_size + container_type
-      if (ctns.length === 0 && ci && ci.length > 0) {
+      // 触发条件改为"没真实箱号"，覆盖 shipment_containers 只填了类型不填箱号的占位场景。
+      const hasRealCtnNo = ctns.some(c => (c.container_no || "").trim());
+      if (!hasRealCtnNo && ci && ci.length > 0) {
         const seen = new Set();
         const synth = [];
         for (const it of ci) {
-          const no = it.container_no;
+          const no = (it.container_no || "").trim();
           if (!no || seen.has(no)) continue;
           seen.add(no);
           const m = (it.container_type || "").match(/^(\d+)(\D+)$/);

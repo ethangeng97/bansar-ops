@@ -289,27 +289,38 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       : (s.desc_en || s.description || s.cargo_type || "GENERAL CARGO");
     const unit = mergedCargo[0]?.package_unit || s.pkg_unit || "CARTONS";
 
-    // 多柜且 cargo 带 container_no → 集装箱块按柜单行附件/毛/体（参考业内格式）
-    //   HLXU8599303/40'HQ/HLK6728323/1096 CARTONS/5370.800KGS/68.000CBM/CY-CY
-    //   HAMU2333094/40'HQ/HLK6728302/1676 CARTONS/5788.900KGS/68.000CBM/CY-CY
+    // 集装箱明细：有 containers 就走"每柜单行斜杠分隔"（参考业内格式）
+    //   单柜:  MSDU8631759/40'HQ/FJ27558173/1092 CARTONS/5350.800KGS/68.000CBM/CY-CY
+    //   多柜:  HLXU8599303/40'HQ/HLK6728323/1096 CARTONS/5370.800KGS/68.000CBM/CY-CY
+    //         HAMU2333094/40'HQ/HLK6728302/1676 CARTONS/5788.900KGS/68.000CBM/CY-CY
     const cargoHasCtnLink = mergedCargo.some(it => (it.container_no || "").trim());
     let cnInfoBlock;
-    if (containers.length >= 2 && cargoHasCtnLink) {
+    if (containers.length === 0) {
+      cnInfoBlock = buildContainerBlock();  // 完全没 containers 才走 legacy 回退
+    } else {
+      const svc = s.service_type || "CY-CY";
       const byCtn = new Map();
       for (const c of containers) {
-        const key = (c.container_no || "").trim();
-        if (!key) continue;
+        const key = (c.container_no || "").trim() || `__noNo${byCtn.size}`;
         byCtn.set(key, { container: c, qty: 0, gw: 0, cbm: 0 });
       }
-      for (const it of mergedCargo) {
-        const key = (it.container_no || "").trim();
-        if (!key || !byCtn.has(key)) continue;
-        const g = byCtn.get(key);
-        g.qty += parseInt(it.qty) || 0;
-        g.gw += parseFloat(it.gross_weight) || 0;
-        g.cbm += parseFloat(it.volume) || 0;
+      if (cargoHasCtnLink) {
+        // 货物明细按 container_no 聚合到对应柜
+        for (const it of mergedCargo) {
+          const key = (it.container_no || "").trim();
+          if (!key || !byCtn.has(key)) continue;
+          const g = byCtn.get(key);
+          g.qty += parseInt(it.qty) || 0;
+          g.gw += parseFloat(it.gross_weight) || 0;
+          g.cbm += parseFloat(it.volume) || 0;
+        }
+      } else if (containers.length === 1) {
+        // 单柜且 cargo 没分配箱号 → 用整票合计
+        const only = [...byCtn.values()][0];
+        only.qty = ciSum.qty || parseInt(s.qty_packages) || 0;
+        only.gw  = ciSum.gw  || parseFloat(s.weight) || 0;
+        only.cbm = ciSum.cbm || parseFloat(s.volume) || 0;
       }
-      const svc = s.service_type || "CY-CY";
       const lines = [];
       for (const { container: c, qty, gw, cbm } of byCtn.values()) {
         const seg = [];
@@ -323,8 +334,6 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         lines.push(seg.join("/"));
       }
       cnInfoBlock = lines.join("\n");
-    } else {
-      cnInfoBlock = buildContainerBlock();
     }
 
     rows = [{

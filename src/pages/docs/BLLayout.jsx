@@ -129,8 +129,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         }
       }
       setContainers(ctns);
-      // 默认合并明细（自拼分票 + 自拼母拼：客户提单一般只想看汇总一行）
-      setConsolidate(isSubBill || isMasterBill);
+      // 提单永远走"汇总单行 + 底部按柜明细行"——业内 BL 标准做法
+      // 之前只在自拼场景开 consolidate，FCL 多柜会被拆成 N 行 cargo_item 显得乱套
+      setConsolidate(true);
       setLoading(false);
     })();
   }, [shipmentId]);

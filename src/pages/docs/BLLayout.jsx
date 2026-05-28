@@ -418,7 +418,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           isFirstPage={pageIdx === 0} isLastCargoPage={pageIdx === totalCargoPages - 1}
           rows={pageRows} totalPkg={totalPkg} totalWt={totalWt} totalCbm={totalCbm}
           distinctProducts={distinctProducts}
-          isDraft={isDraft} isCopy={isCopy} isTelex={isTelex}
+          isDraft={isDraft} isCopy={isCopy} isTelex={isTelex} isOriginal={isOriginal}
           s={s} co={co} blNo={blNo} onBoardDate={onBoardDate} issueDate={issueDate}
           isPrepaid={isPrepaid} isCollect={isCollect}
           numOriginals={numOriginals} blType={blType} carrierName={carrierName}
@@ -437,7 +437,7 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
 function CargoPage({
   pageIdx, totalPages, isFirstPage, isLastCargoPage,
   rows, totalPkg, totalWt, totalCbm, distinctProducts = [],
-  isDraft, isCopy, isTelex,
+  isDraft, isCopy, isTelex, isOriginal,
   s, co, blNo, onBoardDate, issueDate,
   isPrepaid, isCollect, numOriginals, blType, carrierName,
 }) {
@@ -445,6 +445,7 @@ function CargoPage({
     <div className="hbl-page">
       {isDraft && <div className="hbl-watermark">DRAFT</div>}
       {isCopy && <div className="hbl-watermark">COPY</div>}
+      {isOriginal && <div className="hbl-watermark" style={{ color: "rgba(0, 64, 160, 0.08)", letterSpacing: 16 }}>ORIGINAL</div>}
       {isTelex && <div className="hbl-watermark" style={{ fontSize: 70, letterSpacing: 8 }}>TELEX RELEASE</div>}
 
       {/* 顶部抬头 */}

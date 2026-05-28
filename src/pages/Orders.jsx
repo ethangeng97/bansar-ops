@@ -2261,7 +2261,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const isLocked = order.lifecycle === "已完结" || order.lifecycle === "已关闭";
 
   // 主拼判定：自拼柜 且 order_no 不含 -N 后缀
+  // 例外：从现舱划走的单子(spot_booking_id 不为空)即使被误标 Console 也不算 master,
+  //       因为它没有也不应该有分票, 不该锁委托单位字段
   const isMaster = order.shipment_type === "Console"
+    && !order.spot_booking_id
     && order.order_no
     && !/-\d+$/.test(order.order_no);
 

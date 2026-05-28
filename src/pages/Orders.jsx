@@ -22,6 +22,7 @@ import {
   ChargeTemplateSaveModal,
 } from "../components/ChargesToolbarModals.jsx";
 import { JoinSubTicketModal, RemoveSubTicketModal } from "../components/SubTicketModals.jsx";
+import MergeOrdersModal from "../components/MergeOrdersModal.jsx";
 import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
@@ -498,6 +499,26 @@ export function OrdersPage({ user, onBack }) {
     return n;
   });
 
+  // 合并订单弹窗
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  // 勾选的订单（用于合并）— 从 shipments 里挑出来
+  const checkedOrders = useMemo(
+    () => shipments.filter(s => checkedIds.has(s.id)),
+    [shipments, checkedIds]
+  );
+  // 合并资格：≥2 个 + 没有 Console（避免母拼/分票二次嵌套）
+  const canMerge = checkedOrders.length >= 2
+    && checkedOrders.every(s => s.shipment_type !== "Console");
+  const openMerge = () => {
+    if (checkedOrders.length < 2) { alert("请勾选至少 2 个订单"); return; }
+    const consoleOnes = checkedOrders.filter(s => s.shipment_type === "Console");
+    if (consoleOnes.length) {
+      alert(`勾选中有自拼柜订单（${consoleOnes.map(s => s.order_no).join(", ")}），不能再合并。`);
+      return;
+    }
+    setShowMergeModal(true);
+  };
+
   const clearF = () => { setFilters({}); setSearch(""); };
 
   // 列表导出 Excel
@@ -648,6 +669,19 @@ export function OrdersPage({ user, onBack }) {
   return (
     <div className="tms">
 
+      {/* 合并订单弹窗 */}
+      {showMergeModal && (
+        <MergeOrdersModal
+          selected={checkedOrders}
+          onClose={() => setShowMergeModal(false)}
+          onMerged={(master) => {
+            setCheckedIds(new Set());
+            load();
+            if (master?.id) window.open(`#/sea_export?id=${master.id}`, "_blank");
+          }}
+        />
+      )}
+
       {/* 类型选择对话框（点"新建作业"按钮触发） */}
       {showTypePicker && (() => {
         const pickType = (t) => {
@@ -738,6 +772,10 @@ export function OrdersPage({ user, onBack }) {
         <Mi onClick={load} disabled={loading}>{loading ? "搜索中..." : "搜索"}</Mi>
         <Tbl/>
         <Mi onClick={() => setShowTypePicker(true)}>新建作业</Mi>
+        <Mi onClick={openMerge} disabled={!canMerge}
+          title={canMerge ? "把已勾选订单合并为自拼柜" : "先勾选 ≥2 个非自拼订单"}>
+          合并订单{checkedOrders.length >= 2 ? ` (${checkedOrders.length})` : ""}
+        </Mi>
         <Tbl/>
         <Mi disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>上页</Mi>
         <Mi disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>下页</Mi>

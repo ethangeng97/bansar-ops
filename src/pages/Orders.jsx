@@ -4271,6 +4271,7 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
     { key: "draft_bl_xlsx", name: "提单确认件 Excel", en: "Draft B/L (xlsx)", desc: "一代版，关键字段平铺表格",     ready: true,
       action: () => exportDraftBLToXlsx(shipmentId) },
     { key: "bl_copy",  name: "提单 Copy",    en: "B/L Copy",             desc: "提单副本，签发后用",            ready: true },
+    { key: "bl_original", name: "提单正本",  en: "Original B/L",         desc: "正本提单，签发后打印",          ready: true },
     { key: "telex",    name: "电放件",       en: "Telex Release",        desc: "电放票专用，替代正本提单",      ready: true, highlight: isTelex },
     { key: "release",  name: "放舱信息",     en: "Release Notice",       desc: "舱位确认后通知发货方",          ready: true },
     { key: "stmt",     name: "对账单（单票）", en: "Statement (Single)", desc: "本票的费用对账",                ready: true },

@@ -1042,17 +1042,45 @@ const TERMS_LIST = [
 // ============================================================================
 // 工具函数
 // ============================================================================
-// 品名去重：仅做精确去重（trim + 大小写 + 多空格归一化后比较，保留首次出现的原文）
-// 不做子串吞并 —— "AIR CIRCULATOR" 和 "AIR CIRCULATOR SPARE PARTS" 是两种不同产品，都该保留
+// 品名去重 + 公共前后缀提取
+// 输入：[
+//   "SCHALLEN 14INCH FLOOR AIR CIRCULATOR",
+//   "SCHALLEN 14INCH FLOOR AIR CIRCULATOR SPARE PARTS FOR FAN",
+//   "SCHALLEN 18INCH CHROME HIGH VELOCITY FLOOR FAN SPARE PARTS FOR FAN",
+// ]
+// 输出：[
+//   "SCHALLEN 14INCH FLOOR AIR CIRCULATOR",
+//   "SPARE PARTS FOR FAN",
+//   "SCHALLEN 18INCH CHROME HIGH VELOCITY FLOOR FAN",
+// ]
+// 算法：按长度升序处理；每个串依次剥掉已确认原子的前/后缀，剩余部分作为新原子。
 function dedupProducts(list) {
   const norm = (s) => String(s || "").trim().toUpperCase().replace(/\s+/g, " ");
-  const byNorm = new Map();
+  const uniqRaw = [];
+  const seen = new Set();
   for (const raw of list) {
     const n = norm(raw);
-    if (!n) continue;
-    if (!byNorm.has(n)) byNorm.set(n, raw);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    uniqRaw.push(raw.trim().replace(/\s+/g, " "));
   }
-  return [...byNorm.values()];
+  uniqRaw.sort((a, b) => a.length - b.length);
+
+  const atoms = [];
+  for (const p of uniqRaw) {
+    let remaining = p;
+    let changed = true;
+    while (changed && remaining) {
+      changed = false;
+      for (const a of atoms) {
+        if (remaining === a) { remaining = ""; changed = true; break; }
+        if (remaining.startsWith(a + " ")) { remaining = remaining.slice(a.length + 1).trim(); changed = true; break; }
+        if (remaining.endsWith(" " + a))   { remaining = remaining.slice(0, -(a.length + 1)).trim(); changed = true; break; }
+      }
+    }
+    if (remaining && !atoms.includes(remaining)) atoms.push(remaining);
+  }
+  return atoms;
 }
 
 function formatDateLong(d) {

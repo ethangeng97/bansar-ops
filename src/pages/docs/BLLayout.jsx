@@ -105,9 +105,10 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     // 文件名规则: {MBL号}+BL_{DRAFT/COPY/TELEX}
     // 例如: OOLU2168454750+BL_DRAFT
     const blNo = shipment?.mbl_no || shipment?.booking_no || shipment?.hbl_no || shipment?.order_no || "BL";
-    const tag = mode === "draft" ? "DRAFT"
-              : mode === "copy"  ? "COPY"
-              : mode === "telex" ? "TELEX"
+    const tag = mode === "draft"    ? "DRAFT"
+              : mode === "copy"     ? "COPY"
+              : mode === "telex"    ? "TELEX"
+              : mode === "original" ? "ORIGINAL"
               : "DRAFT";
     const filename = `${blNo}+BL_${tag}`;
     const oldTitle = document.title;
@@ -292,13 +293,14 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
 
   const blNo = s.hbl_no || `BSNR${(s.order_no || "").replace(/^BSO/, "")}` || "—";
   const onBoardDate = s.atd ? formatDateLong(s.atd) : (s.etd ? formatDateLong(s.etd) : "—");
-  const issueDate = mode === "copy"
+  const issueDate = (mode === "copy" || mode === "original")
     ? formatDateLong(s.obl_issued_at || s.atd || s.etd || new Date())
     : formatDateLong(new Date());
 
-  const isDraft = mode === "draft";
-  const isCopy  = mode === "copy";
-  const isTelex = mode === "telex";
+  const isDraft    = mode === "draft";
+  const isCopy     = mode === "copy";
+  const isTelex    = mode === "telex";
+  const isOriginal = mode === "original";
 
   const freightTermStr = String(s.freight_terms || "").toUpperCase();
   const isPrepaid = freightTermStr.includes("PREPAID") || (s.freight_terms || "").includes("预付");
@@ -387,8 +389,9 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }}>
         <button onClick={onBack} style={btn}>← 返回</button>
         <span style={{ fontSize: 13, color: "#666" }}>
-          {isDraft ? "提单确认件 Draft B/L" :
-           isTelex ? "电放件 Telex Release" :
+          {isDraft    ? "提单确认件 Draft B/L" :
+           isTelex    ? "电放件 Telex Release" :
+           isOriginal ? "提单正本 Original B/L" :
            "提单副本 B/L Copy"} · {s.order_no} · {blNo}
           <span style={{ marginLeft: 8, color: "#999" }}>· 共 {totalPages} 页</span>
         </span>

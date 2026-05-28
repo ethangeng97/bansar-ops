@@ -14,6 +14,7 @@ import BillsList from "./pages/BillsList.jsx";
 import BookingConfirmation from "./pages/docs/BookingConfirmation.jsx";
 import DraftBL from "./pages/docs/DraftBL.jsx";
 import BLCopy from "./pages/docs/BLCopy.jsx";
+import BLOriginal from "./pages/docs/BLOriginal.jsx";
 import TelexRelease from "./pages/docs/TelexRelease.jsx";
 import ReleaseNotice from "./pages/docs/ReleaseNotice.jsx";
 import Statement from "./pages/docs/Statement.jsx";
@@ -274,6 +275,17 @@ export default function App() {
     const shipmentId = route.slice("docs/bl_copy/".length);
     return (
       <BLCopy
+        shipmentId={shipmentId}
+        onBack={() => { window.history.back(); }}
+      />
+    );
+  }
+
+  // 动态路由：单证 - 提单正本 #/docs/bl_original/:id
+  if (route.startsWith("docs/bl_original/")) {
+    const shipmentId = route.slice("docs/bl_original/".length);
+    return (
+      <BLOriginal
         shipmentId={shipmentId}
         onBack={() => { window.history.back(); }}
       />

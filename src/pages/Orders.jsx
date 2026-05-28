@@ -2709,6 +2709,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
               { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}`, "_blank") },
               { label: "📤 提单确认件 (Excel, 一代版)", onClick: () => exportDraftBLToXlsx(order.id) },
               { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}`, "_blank") },
+              { label: "提单正本 (Original)", onClick: () => window.open(`#/docs/bl_original/${order.id}`, "_blank") },
               { label: "电放件",             onClick: () => window.open(`#/docs/telex/${order.id}`, "_blank") },
               { label: "放舱信息",           onClick: () => window.open(`#/docs/release/${order.id}`, "_blank") },
               { label: "单票对账单",         onClick: () => window.open(`#/docs/stmt/${order.id}`, "_blank") },

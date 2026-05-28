@@ -1042,21 +1042,17 @@ const TERMS_LIST = [
 // ============================================================================
 // 工具函数
 // ============================================================================
-// 品名去重：trim + 大小写归一化 + 内部多空格折叠后比较；保留首次出现的原文
-// 进一步：如果某项是另一项的子串（如 "AIR CIRCULATOR" 被 "AIR CIRCULATOR SPARE PARTS" 包含），保留更长的
+// 品名去重：仅做精确去重（trim + 大小写 + 多空格归一化后比较，保留首次出现的原文）
+// 不做子串吞并 —— "AIR CIRCULATOR" 和 "AIR CIRCULATOR SPARE PARTS" 是两种不同产品，都该保留
 function dedupProducts(list) {
   const norm = (s) => String(s || "").trim().toUpperCase().replace(/\s+/g, " ");
-  // 先按归一化串去重
   const byNorm = new Map();
   for (const raw of list) {
     const n = norm(raw);
     if (!n) continue;
     if (!byNorm.has(n)) byNorm.set(n, raw);
   }
-  // 再剔除被其它项完全包含的子串项
-  const keys = [...byNorm.keys()];
-  const kept = keys.filter(k => !keys.some(other => other !== k && other.includes(k)));
-  return kept.map(k => byNorm.get(k));
+  return [...byNorm.values()];
 }
 
 function formatDateLong(d) {

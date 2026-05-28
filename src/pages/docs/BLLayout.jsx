@@ -697,7 +697,7 @@ function CargoPage({
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: BRAND_BG }}>
-                <th style={thStyle(22, "left")}>Container No. / Seal No. /<br/>Marks and Nos.</th>
+                <th style={thStyle(22, "left")}>Marks and Nos.</th>
                 <th style={thStyle(13, "left")}>No. of Containers<br/>or Packages</th>
                 <th style={thStyle(35, "left")}>Description of Packages and Goods</th>
                 <th style={thStyle(15, "right")}>Gross Weight (KGS)</th>

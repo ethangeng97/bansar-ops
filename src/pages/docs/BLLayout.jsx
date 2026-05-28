@@ -42,6 +42,8 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       if (e1) { alert("加载票号失败: " + e1.message); setLoading(false); return; }
       // 自拼分票（Console + -N 后缀）：atd/etd 没填时借母单的（实际开船日 ops 一般只在母单填）
       const isSubBill = s.shipment_type === "Console" && /-\d+$/.test(s.order_no || "");
+      // 自拼母拼（Console + 不带 -N 后缀）：货物 / 集装箱 全部从分票聚合
+      const isMasterBill = s.shipment_type === "Console" && !/-\d+$/.test(s.order_no || "");
       if (isSubBill && (!s.atd || !s.etd)) {
         const masterOrderNo = (s.order_no || "").replace(/-\d+$/, "");
         if (masterOrderNo) {
@@ -55,13 +57,44 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }
       setShipment(s);
       setCompany(c || {});
-      const { data: ci } = await supabase
+      let { data: ci } = await supabase
         .from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order");
-      setCargo(ci || []);
+      ci = ci || [];
+      let ctns = ctn || [];
+
+      // 自拼母拼：cargo_items 和 shipment_containers 都从所有分票聚合
+      // （ops 把货物明细放在分票上，每个货主一条；箱子可能挂母拼也可能挂分票）
+      if (isMasterBill) {
+        const { data: subs } = await supabase.from("shipments")
+          .select("id").like("order_no", s.order_no + "-%");
+        const subIds = (subs || []).map(x => x.id);
+        if (subIds.length > 0) {
+          // 货物明细：分票合集（母拼通常没自己的 cargo_items）
+          const { data: subCargo } = await supabase
+            .from("cargo_items").select("*")
+            .in("shipment_id", subIds).order("sort_order");
+          if (ci.length === 0) ci = subCargo || [];
+          // 集装箱：母拼 + 所有分票（取并集，避免重复显示同一只箱）
+          const { data: subCtn } = await supabase
+            .from("shipment_containers").select("*")
+            .in("shipment_id", [shipmentId, ...subIds]).order("sort_order");
+          if (subCtn && subCtn.length) {
+            const seen = new Set();
+            ctns = [];
+            for (const c of subCtn) {
+              const key = c.container_no || `${c.id}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              ctns.push(c);
+            }
+          }
+        }
+      }
+
+      setCargo(ci);
       // 集装箱回退：当前票 shipment_containers 没数据 → 从 cargo_items 的 container_no
       // 抽 distinct 拼成"伪 containers"，让 BL 也能渲染箱号。
       // 解析 cargo_items.container_type ("45HC") → container_size + container_type
-      let ctns = ctn || [];
       if (ctns.length === 0 && ci && ci.length > 0) {
         const seen = new Set();
         const synth = [];
@@ -95,8 +128,8 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
         }
       }
       setContainers(ctns);
-      // 默认合并明细（自拼分票场景：客户提单一般只想看汇总）
-      setConsolidate(isSubBill);
+      // 默认合并明细（自拼分票 + 自拼母拼：客户提单一般只想看汇总一行）
+      setConsolidate(isSubBill || isMasterBill);
       setLoading(false);
     })();
   }, [shipmentId]);

@@ -24,9 +24,9 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
   const [mode, setMode] = useState("new");
 
   // 新建母拼 — form 状态，默认从第一票带
+  // order_no 不在 form 里：交给 DB 触发器 gen_order_no_main('Console') 自动生成 (BSOEC+YYMM+5位流水)
   const first = selected[0] || {};
   const [form, setForm] = useState({
-    order_no: suggestMasterOrderNo(first.order_no),
     booking_no: first.booking_no || "",
     mbl_no: first.mbl_no || "",
     vessel: first.vessel || "",
@@ -70,16 +70,17 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
   }, [q, mode]);
 
   // 预览：每个被选订单合并后的新 order_no
+  // 新建母拼模式下 base 未知（DB 触发器生成），不做 from→to 预览
   const preview = useMemo(() => {
-    const base = mode === "new" ? form.order_no.trim() : (picked?.order_no || "");
-    if (!base) return selected.map(s => ({ id: s.id, from: s.order_no || "(无号)", to: "" }));
-    // 并入已有时，要避开 master 当前已有分票的尾数
+    if (mode === "new") return [];
+    const base = picked?.order_no || "";
+    if (!base) return [];
     return selected.map((s, i) => ({
       id: s.id,
       from: s.order_no || "(无号)",
       to: `${base}-${i + 1}`,  // 简化版：1..N。下面 submit 时再做实际避让
     }));
-  }, [mode, form.order_no, picked, selected]);
+  }, [mode, picked, selected]);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -90,30 +91,18 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
     let isNew = false;
 
     if (mode === "new") {
-      const orderNo = form.order_no.trim();
-      if (!orderNo) { alert("请填母拼作业号"); return; }
-      // 校验：order_no 唯一
-      const { data: clash } = await supabase.from("shipments")
-        .select("id").eq("order_no", orderNo).limit(1);
-      if (clash && clash.length) { alert(`作业号 ${orderNo} 已存在`); return; }
-      // 校验：勾选的订单 order_no 不能跟新母拼一样
-      if (selected.some(s => s.order_no === orderNo)) {
-        alert("母拼作业号不能跟被合并的某个订单一样");
-        return;
-      }
-
       if (!window.confirm(
         `确认合并 ${selected.length} 个订单为自拼柜？\n\n` +
-        `· 新建母拼: ${orderNo}\n` +
-        `· 每个订单 order_no 变为 ${orderNo}-1, -2, ...\n` +
+        `· 新建一张母拼（作业号系统自动生成，格式 BSOEC+YYMM+5位流水）\n` +
+        `· 每个订单 order_no 变为 母拼号-1, -2, ...\n` +
         `· shipment_type → Console\n` +
         `· booking_no/船名/航次/POL/POD/ETD/承运人/海外代理 跟母拼对齐\n\n` +
         `customer/shipper/consignee/HBL/费用/货物 全部保留不变。`
       )) return;
 
       setSubmitting(true);
+      // 不传 order_no，触发器 trg_shipments_auto_order_no 会自动生成
       const newRow = {
-        order_no: orderNo,
         shipment_type: "Console",
         booking_no: form.booking_no.trim() || null,
         mbl_no: form.mbl_no.trim() || null,
@@ -130,6 +119,7 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
       const { data: created, error } = await supabase.from("shipments")
         .insert(filterShipmentPayload(newRow)).select().single();
       if (error) { setSubmitting(false); alert("新建母拼失败：" + error.message); return; }
+      if (!created?.order_no) { setSubmitting(false); alert("母拼已建但读取作业号失败"); return; }
       master = created;
       isNew = true;
     } else {
@@ -224,9 +214,9 @@ export default function MergeOrdersModal({ selected, onClose, onMerged }) {
 
       {mode === "new" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <FormField label="母拼作业号 *" required>
-            <Input value={form.order_no} onChange={e => setF("order_no", e.target.value)} placeholder="如 CONS-2026-001" />
-          </FormField>
+          <div style={{ gridColumn: "1 / -1", fontSize: 12, padding: "8px 10px", background: "#e6f7ff", border: "1px solid #91d5ff", borderRadius: 4, color: "#0050b3" }}>
+            母拼作业号由系统自动生成（格式 <code>BSOEC + YYMM + 5位流水</code>），无需填写。
+          </div>
           <FormField label="Booking No.">
             <Input value={form.booking_no} onChange={e => setF("booking_no", e.target.value)} />
           </FormField>
@@ -349,10 +339,3 @@ function FormField({ label, children }) {
   );
 }
 
-// 从第一票 order_no 推荐一个母拼号
-// 简单规则：若第一票本身已有 -N 后缀（异常情况），去掉后缀返回；否则加 -CONS 后缀
-function suggestMasterOrderNo(firstOrderNo) {
-  if (!firstOrderNo) return "";
-  const stripped = firstOrderNo.replace(/-\d+$/, "");
-  return stripped + "-CONS";
-}

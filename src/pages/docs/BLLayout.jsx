@@ -267,91 +267,73 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
     return lines.join("\n");
   };
 
-  // consolidate 模式：
-  //   - 多柜且 cargo_items 带 container_no → 按柜分组渲染（每柜一行件/毛/体）
-  //   - 单柜或 cargo 无柜分配 → 单行汇总
-  // 件/毛/体优先用 cargo_items 合计，没合计再回退到票级字段
+  // consolidate 模式：单行汇总
+  //   - 多柜且 cargo_items 带 container_no：在第一列(集装箱块)里每只柜附 件/毛/体 行
+  //   - 单柜或 cargo 无柜分配：保留原朴素集装箱块
+  // 件/毛/体票级合计还是放表底 TOTAL 那一行
   let rows;
   if (consolidate || mergedCargo.length === 0) {
-    // 通用描述/单位/唛头（多柜场景所有行共用，避免 PO/品名重复污染表面）
+    const ciSum = mergedCargo.reduce(
+      (acc, it) => ({
+        qty:  acc.qty  + (parseInt(it.qty) || 0),
+        gw:   acc.gw   + (parseFloat(it.gross_weight) || 0),
+        cbm:  acc.cbm  + (parseFloat(it.volume) || 0),
+      }),
+      { qty: 0, gw: 0, cbm: 0 }
+    );
     const ciProducts = [...new Set(mergedCargo.map(it => it.product_name_en).filter(Boolean))];
     const descLine = ciProducts.length > 0
       ? ciProducts.join("\n")
       : (s.desc_en || s.description || s.cargo_type || "GENERAL CARGO");
     const unit = mergedCargo[0]?.package_unit || s.pkg_unit || "CARTONS";
-    const masterMarks = s.marks || mergedCargo.find(it => it.marks)?.marks || "N/M";
-    const masterDesc = [descLine, s.po ? `PO-${s.po}` : null].filter(Boolean).join("\n");
 
-    // 够不够按柜分组：>=2 个柜 + cargo_items 至少有一条带 container_no
+    // 多柜且 cargo 带 container_no → 集装箱块按柜单行附件/毛/体（参考业内格式）
+    //   HLXU8599303/40'HQ/HLK6728323/1096 CARTONS/5370.800KGS/68.000CBM/CY-CY
+    //   HAMU2333094/40'HQ/HLK6728302/1676 CARTONS/5788.900KGS/68.000CBM/CY-CY
     const cargoHasCtnLink = mergedCargo.some(it => (it.container_no || "").trim());
-    const canSplitByCtn = containers.length >= 2 && cargoHasCtnLink;
-
-    if (canSplitByCtn) {
-      // 按柜聚合
+    let cnInfoBlock;
+    if (containers.length >= 2 && cargoHasCtnLink) {
       const byCtn = new Map();
       for (const c of containers) {
         const key = (c.container_no || "").trim();
         if (!key) continue;
         byCtn.set(key, { container: c, qty: 0, gw: 0, cbm: 0 });
       }
-      let unalloc = null;
       for (const it of mergedCargo) {
         const key = (it.container_no || "").trim();
-        const bucket = (key && byCtn.has(key)) ? byCtn.get(key) : (unalloc = unalloc || { qty: 0, gw: 0, cbm: 0 });
-        bucket.qty += parseInt(it.qty) || 0;
-        bucket.gw += parseFloat(it.gross_weight) || 0;
-        bucket.cbm += parseFloat(it.volume) || 0;
+        if (!key || !byCtn.has(key)) continue;
+        const g = byCtn.get(key);
+        g.qty += parseInt(it.qty) || 0;
+        g.gw += parseFloat(it.gross_weight) || 0;
+        g.cbm += parseFloat(it.volume) || 0;
       }
-      const entries = [...byCtn.values()];
-      const lastIdx = entries.length - 1 + (unalloc ? 1 : 0);
-      rows = entries.map(({ container: c, qty, gw, cbm }, i) => {
-        const isLast = i === lastIdx;
-        const lines = [];
-        if (c.container_no) lines.push(c.container_no);
-        lines.push(`${c.qty || 1}x${c.container_size}'${c.container_type}`);
-        if (c.seal_no) lines.push(c.seal_no);
-        if (isLast) lines.push(`${fclTag}${s.service_type || "CY-CY"}`);
-        return {
-          cnInfo: lines.join("\n"),
-          marks: masterMarks,
-          pkgs: qty,
-          unit,
-          desc: i === 0 ? masterDesc : "",  // desc 只在第一行显示，避免 PO/品名重复
-          gw,
-          cbm,
-        };
-      });
-      if (unalloc) {
-        rows.push({
-          cnInfo: `(未指定柜)\n${fclTag}${s.service_type || "CY-CY"}`,
-          marks: masterMarks,
-          pkgs: unalloc.qty,
-          unit,
-          desc: "",
-          gw: unalloc.gw,
-          cbm: unalloc.cbm,
-        });
+      const svc = s.service_type || "CY-CY";
+      const lines = [];
+      for (const { container: c, qty, gw, cbm } of byCtn.values()) {
+        const seg = [];
+        if (c.container_no) seg.push(c.container_no);
+        seg.push(`${c.container_size}'${c.container_type}`);
+        if (c.seal_no) seg.push(c.seal_no);
+        if (qty) seg.push(`${qty} ${unit}`);
+        if (gw)  seg.push(`${gw.toFixed(3)}KGS`);
+        if (cbm) seg.push(`${cbm.toFixed(3)}CBM`);
+        seg.push(svc);
+        lines.push(seg.join("/"));
       }
+      cnInfoBlock = lines.join("\n");
     } else {
-      // 单柜或无柜分配：保留原单行汇总
-      const ciSum = mergedCargo.reduce(
-        (acc, it) => ({
-          qty:  acc.qty  + (parseInt(it.qty) || 0),
-          gw:   acc.gw   + (parseFloat(it.gross_weight) || 0),
-          cbm:  acc.cbm  + (parseFloat(it.volume) || 0),
-        }),
-        { qty: 0, gw: 0, cbm: 0 }
-      );
-      rows = [{
-        cnInfo: buildContainerBlock(),
-        marks: masterMarks,
-        pkgs: ciSum.qty || parseInt(s.qty_packages) || 0,
-        unit,
-        desc: masterDesc,
-        gw:  ciSum.gw  || parseFloat(s.weight) || 0,
-        cbm: ciSum.cbm || parseFloat(s.volume) || 0,
-      }];
+      cnInfoBlock = buildContainerBlock();
     }
+
+    rows = [{
+      cnInfo: cnInfoBlock,
+      marks: s.marks || mergedCargo.find(it => it.marks)?.marks || "N/M",
+      pkgs: ciSum.qty || parseInt(s.qty_packages) || 0,
+      unit,
+      desc: [descLine, s.po ? `PO-${s.po}` : null].filter(Boolean).join("\n"),
+      gw:  ciSum.gw  || parseFloat(s.weight) || 0,
+      cbm: ciSum.cbm || parseFloat(s.volume) || 0,
+    }];
   } else {
     rows = mergedCargo.map((it, i) => ({
       cnInfo: buildSingleCtnBlock(it.container_no, i === mergedCargo.length - 1),

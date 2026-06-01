@@ -10,7 +10,8 @@
 // ============================================================================
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../supabase.js";
-import { Modal, Button, Input } from "./ui.jsx";
+import { Modal, Button, Input, ComboBox } from "./ui.jsx";
+import { filterShipmentPayload } from "../lib/shipment-fields.js";
 
 // ── 加入分票 ─────────────────────────────────────────────────────────
 export function JoinSubTicketModal({ master, existingSubTickets, onClose, onJoined }) {
@@ -157,6 +158,188 @@ export function JoinSubTicketModal({ master, existingSubTickets, onClose, onJoin
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
         <Button variant="secondary" onClick={onClose}>取消</Button>
         <Button onClick={submit} disabled={!picked || !tail}>加入</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── 拆分母单货物到小票 ───────────────────────────────────────────────
+// 把直接挂在母单上的 cargo_items 按 HBL 分组，一组生成（或并入）一个小票，
+// 把这些 cargo_items 的 shipment_id 改到对应小票 —— 免手动重录。
+// 箱子(shipment_containers)仍归母单共用，不动。
+export function SplitCargoToSubsModal({ master, existingSubTickets, customers = [], onClose, onDone }) {
+  const [loading, setLoading] = useState(true);
+  const [groups, setGroups] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const { data } = await supabase.from("cargo_items")
+        .select("id, hbl_no, product_name_en, qty, package_unit, gross_weight, volume, sort_order")
+        .eq("shipment_id", master.id)
+        .order("sort_order", { ascending: true });
+      if (cancel) return;
+      // 按 hbl_no 分组（空 HBL 归一组）
+      const map = new Map();
+      (data || []).forEach(r => {
+        const key = (r.hbl_no || "").trim();
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(r);
+      });
+      const used = new Set(existingSubTickets.map(s => {
+        const m = (s.order_no || "").match(/-(\d+)$/); return m ? parseInt(m[1]) : null;
+      }).filter(Boolean));
+      let next = 1;
+      const grps = [...map.entries()].map(([hbl, lines]) => {
+        while (used.has(next)) next++;
+        const tail = String(next); used.add(next);
+        const sum = lines.reduce((a, l) => ({
+          qty: a.qty + Number(l.qty || 0),
+          gw: a.gw + Number(l.gross_weight || 0),
+          vol: a.vol + Number(l.volume || 0),
+        }), { qty: 0, gw: 0, vol: 0 });
+        return {
+          hbl, lineIds: lines.map(l => l.id),
+          n: lines.length, ...sum, unit: lines[0]?.package_unit || "",
+          include: true, mode: "new", tail, subId: "",
+          // 单组时默认带上母单委托单位，多组留空让用户填
+          customer: (map.size === 1 && master.customer) ? master.customer : "",
+        };
+      });
+      setGroups(grps);
+      setLoading(false);
+    })();
+    return () => { cancel = true; };
+  }, [master.id]);
+
+  const upd = (i, patch) => setGroups(prev => prev.map((g, idx) => idx === i ? { ...g, ...patch } : g));
+
+  const submit = async () => {
+    const picked = groups.filter(g => g.include);
+    if (picked.length === 0) { alert("没有勾选任何分组"); return; }
+    const tails = [];
+    for (const g of picked) {
+      if (g.mode === "new") {
+        if (!/^\d+$/.test(String(g.tail))) { alert(`HBL「${g.hbl || "无"}」的分票尾数必须是数字`); return; }
+        const no = master.order_no + "-" + g.tail;
+        if (existingSubTickets.some(s => s.order_no === no)) { alert(`${no} 已存在，请换尾数`); return; }
+        if (tails.includes(g.tail)) { alert(`尾数 ${g.tail} 在本次里重复了`); return; }
+        tails.push(g.tail);
+      } else if (!g.subId) { alert(`HBL「${g.hbl || "无"}」选了"并入已有小票"但没选具体小票`); return; }
+    }
+
+    if (!confirm(
+      `把母单 ${master.order_no} 上的货物按 HBL 拆到 ${picked.length} 个小票：\n\n` +
+      picked.map(g => {
+        const tgt = g.mode === "new" ? `新建 ${master.order_no}-${g.tail}`
+          : (existingSubTickets.find(s => s.id === g.subId)?.order_no || "已有小票");
+        return `· HBL ${g.hbl || "（无）"}：${g.n} 条货 → ${tgt}${g.customer ? "（" + g.customer + "）" : ""}`;
+      }).join("\n") +
+      `\n\n箱子仍归母单。确认拆分？`
+    )) return;
+
+    setSubmitting(true);
+    try {
+      for (const g of picked) {
+        let targetId = g.subId;
+        if (g.mode === "new") {
+          const payload = filterShipmentPayload({
+            order_no: master.order_no + "-" + g.tail,
+            shipment_type: "Console",
+            booking_no: master.booking_no,
+            vessel: master.vessel, voyage: master.voyage,
+            pol: master.pol, pol_code: master.pol_code,
+            pod: master.pod, pod_code: master.pod_code,
+            destination: master.destination, destination_code: master.destination_code,
+            etd: master.etd, carrier: master.carrier,
+            overseas_agent: master.overseas_agent,
+            solicit_type: master.solicit_type,
+            lifecycle: "处理中",
+            hbl_no: g.hbl || null,
+            has_hbl: !!g.hbl,
+            customer: g.customer || null,
+          });
+          const { data: created, error } = await supabase.from("shipments").insert(payload).select().single();
+          if (error) throw error;
+          targetId = created.id;
+        }
+        const { error: mvErr } = await supabase.from("cargo_items").update({ shipment_id: targetId }).in("id", g.lineIds);
+        if (mvErr) throw mvErr;
+      }
+      alert("✓ 拆分完成");
+      if (onDone) await onDone();
+      onClose();
+    } catch (e) {
+      alert("拆分失败：" + (e.message || e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title="拆分母单货物到小票 — 按 HBL 分组" onClose={onClose} width={720}>
+      {loading ? (
+        <div style={{ padding: 20, color: "#888", fontSize: 12 }}>加载母单货物…</div>
+      ) : groups.length === 0 ? (
+        <div style={{ padding: 20, color: "#999", fontSize: 12 }}>
+          母单上没有可拆分的货物明细。货物可能已经在小票上，或母单本就没录货。
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+            母单 <b>{master.order_no}</b> 上有 {groups.reduce((a, g) => a + g.n, 0)} 条货，按 HBL 分成 {groups.length} 组。
+            每组生成（或并入）一个小票，货物自动挂过去，箱子仍归母单。
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 380, overflowY: "auto" }}>
+            {groups.map((g, i) => (
+              <div key={g.hbl || "_" + i} style={{ border: "1px solid #eee", borderRadius: 6, padding: 10,
+                  background: g.include ? "#fff" : "#fafafa", opacity: g.include ? 1 : 0.55 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <input type="checkbox" checked={g.include} onChange={e => upd(i, { include: e.target.checked })} />
+                  <b style={{ fontSize: 13 }}>HBL：{g.hbl || "（无 HBL）"}</b>
+                  <span style={{ fontSize: 11, color: "#888" }}>
+                    {g.n} 条 · {g.qty} {g.unit} · {g.gw.toFixed(0)}KG · {g.vol.toFixed(2)}CBM
+                  </span>
+                </div>
+                {g.include && (
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 12 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <input type="radio" checked={g.mode === "new"} onChange={() => upd(i, { mode: "new" })} /> 新建小票
+                    </label>
+                    {g.mode === "new" && (
+                      <span style={{ fontFamily: "monospace" }}>
+                        {master.order_no}-
+                        <input value={g.tail} onChange={e => upd(i, { tail: e.target.value.replace(/\D/g, "") })}
+                          style={{ width: 44, padding: "3px 6px", border: "1px solid #d9d9d9", borderRadius: 3 }} />
+                      </span>
+                    )}
+                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <input type="radio" checked={g.mode === "existing"} disabled={existingSubTickets.length === 0}
+                        onChange={() => upd(i, { mode: "existing" })} /> 并入已有
+                    </label>
+                    {g.mode === "existing" && (
+                      <select value={g.subId} onChange={e => upd(i, { subId: e.target.value })}
+                        style={{ padding: "3px 6px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }}>
+                        <option value="">— 选小票 —</option>
+                        {existingSubTickets.map(s => <option key={s.id} value={s.id}>{s.order_no}{s.customer ? " · " + s.customer : ""}</option>)}
+                      </select>
+                    )}
+                    {g.mode === "new" && (
+                      <div style={{ minWidth: 210 }}>
+                        <ComboBox value={g.customer} onChange={val => upd(i, { customer: val })} options={customers} placeholder="委托单位（可留空，稍后填）" />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+        <Button variant="secondary" onClick={onClose}>取消</Button>
+        <Button onClick={submit} disabled={loading || groups.length === 0 || submitting}>{submitting ? "拆分中…" : "确认拆分"}</Button>
       </div>
     </Modal>
   );

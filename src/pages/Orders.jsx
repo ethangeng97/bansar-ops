@@ -21,7 +21,7 @@ import {
   ChargeTemplateApplyModal,
   ChargeTemplateSaveModal,
 } from "../components/ChargesToolbarModals.jsx";
-import { JoinSubTicketModal, RemoveSubTicketModal } from "../components/SubTicketModals.jsx";
+import { JoinSubTicketModal, RemoveSubTicketModal, SplitCargoToSubsModal } from "../components/SubTicketModals.jsx";
 import MergeOrdersModal from "../components/MergeOrdersModal.jsx";
 import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
@@ -1480,6 +1480,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   // 加入/移除分票 modal 开关（仅主拼场景）
   const [joinSubOpen, setJoinSubOpen] = useState(false);
   const [removeSubOpen, setRemoveSubOpen] = useState(false);
+  const [splitCargoOpen, setSplitCargoOpen] = useState(false);  // 拆分母单货物到小票 modal
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   const [spotBooking, setSpotBooking] = useState(null);  // 关联的现舱（若有 spot_booking_id）
   const [copyPartiesOpen, setCopyPartiesOpen] = useState(false);  // 抄录历史 modal 开关
@@ -2527,6 +2528,32 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     alert(`分票 ${newOrderNo} 已创建。`);
   };
 
+  // 拆分货物到小票后刷新：重算母单合计 + 重新加载母单自己的货(应已挪空)/分票/聚合视图
+  const refreshAfterSplit = async () => {
+    try { await recomputeMasterTotals(order.order_no); } catch (e) { console.error("recompute after split:", e); }
+    try {
+      const own = await loadCargoLines(order.id);
+      setCargoLines(own); setCargoLinesDraft(own);
+    } catch (e) { console.error("reload own cargo:", e); }
+    const { data: subs } = await supabase.from("shipments").select("*")
+      .eq("booking_no", order.booking_no).like("order_no", order.order_no + "-%");
+    const sorted = (subs || []).sort((a, b) => {
+      const na = parseInt((a.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+      const nb = parseInt((b.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+      return na - nb;
+    });
+    setSubTickets(sorted);
+    const subIds = sorted.map(s => s.id);
+    const [ctnRes, cargoRes] = await Promise.all([
+      supabase.from("shipment_containers").select("*").in("shipment_id", [order.id, ...subIds]).order("sort_order", { ascending: true }),
+      subIds.length > 0
+        ? supabase.from("cargo_items").select("*").in("shipment_id", subIds).order("sort_order", { ascending: true })
+        : Promise.resolve({ data: [] }),
+    ]);
+    setMasterAggContainers(ctnRes.data || []);
+    setMasterAggCargoLines(cargoRes.data || []);
+  };
+
   // 删除分票
   // 删除当前作业（工具栏"删除"按钮）
   const deleteOrder = async () => {
@@ -2731,6 +2758,15 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           onRemoved={onReload}
         />
       )}
+      {splitCargoOpen && isMaster && (
+        <SplitCargoToSubsModal
+          master={order}
+          existingSubTickets={subTickets}
+          customers={refData.customers}
+          onClose={() => setSplitCargoOpen(false)}
+          onDone={refreshAfterSplit}
+        />
+      )}
       <TmsTitle title={`${titlePrefix} / 海运出口`} user={user} role={role} onClose={onBack} />
 
       {/* 第一行工具栏：主操作（白底） */}
@@ -2748,6 +2784,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             <Mi disabled={isLocked} onClick={() => { window.location.hash = "#/sea_export?action=new"; }}>新建</Mi>
             <Mi disabled={isLocked} onClick={cloneOrder}>复制</Mi>
             {isMaster && <Mi disabled={isLocked} onClick={createSubTicket}>+ 分票</Mi>}
+            {isMaster && cargoLines.length > 0 && <Mi disabled={isLocked} onClick={() => setSplitCargoOpen(true)}>拆分货物到小票</Mi>}
             {isSubTicket && masterExists === false && <Mi disabled={isLocked} onClick={createMaster}>补建母单</Mi>}
             <Mi disabled={isLocked} onClick={deleteOrder}>删除</Mi>
             <Tbl/>

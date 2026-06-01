@@ -2291,10 +2291,20 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         body: JSON.stringify({ shipment_id: order.id }),
       });
       if (r?.status === "unsupported_carrier") alert(`暂不支持该船司（${order.carrier || "—"}），Phase 1 仅 Maersk`);
-      else if (r?.status === "not_found") alert("Maersk 未查到该 booking 的船期（可能尚未排载或号码不符）");
+      else if (r?.status === "not_found") alert("Maersk 未查到该 booking 的船期（可能尚未排载、号码不符，或该票订舱主体非本司 Customer Code）");
       else if (r?.status === "error") alert("查询失败：" + (r.message || "未知错误"));
-      else if (!r?.eta_carrier) alert("已查询，但返回里没有到港时间");
-      else if (r.mismatch) alert(`船司 ETA 为 ${r.eta_carrier}，与现有 ETA(${r.eta_existing}) 不一致，已记录但未覆盖`);
+      else {
+        // 成功：把船司返回的轨迹汇总出来——即便与现有值一致也给反馈，避免“查了没反应”
+        const parts = [];
+        if (r?.atd_carrier) parts.push(`实际开船 ${r.atd_carrier}`);
+        else if (r?.etd_carrier) parts.push(`预计开船 ${r.etd_carrier}`);
+        if (r?.eta_carrier) parts.push(`预计到港 ${r.eta_carrier}`);
+        if (r?.vessel) parts.push(`船名 ${r.vessel}`);
+        if (r?.voyage) parts.push(`航次 ${r.voyage}`);
+        const head = parts.length ? `船司轨迹已更新：\n${parts.join("\n")}` : "已查询，Maersk 暂无可用轨迹数据";
+        const warn = r?.mismatch ? `\n\n⚠️ 船司到港 ${r.eta_carrier} 与现有 ETA(${r.eta_existing}) 不一致，已记录但未覆盖人工值` : "";
+        alert(head + warn);
+      }
     } catch (e) {
       alert("查询失败：" + (e?.message || e));
     } finally {

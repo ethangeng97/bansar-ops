@@ -26,8 +26,10 @@ const MAERSK_CUSTOMER_CODE = Deno.env.get("MAERSK_CUSTOMER_CODE") ?? "";
 
 // Maersk OAuth2 (client_credentials)。token 约 2 小时有效，模块级缓存复用。
 const MAERSK_TOKEN_URL = "https://api.maersk.com/customer-identity/oauth/v2/access_token";
-// ⚠️ 待校准：Track & Trace 端点。下面是按门户文档的占位，审批通过后以 API 目录页为准。
-const MAERSK_TRACK_URL = "https://api.maersk.com/track";
+// Track & Trace Events（DCSA v2.2, Maersk product "Ocean Track & Trace"）。
+// 门户 server base = .../track-and-trace-private，端点 GET /events，
+// 查询参数 carrierBookingReference / transportDocumentReference / equipmentReference（至少一个）。
+const MAERSK_TRACK_URL = "https://api.maersk.com/track-and-trace-private/events";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -80,16 +82,20 @@ async function fetchTracking(trackingNumber: string, type: "booking" | "bl") {
       ? { carrierBookingReference: trackingNumber }
       : { transportDocumentReference: trackingNumber },
   );
-  const res = await fetch(`${MAERSK_TRACK_URL}?${params}`, {
+  const url = `${MAERSK_TRACK_URL}?${params}`;
+  const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
       "Consumer-Key": MAERSK_KEY,
       Accept: "application/json",
     },
   });
-  if (res.status === 404) return { notFound: true, raw: null };
-  if (!res.ok) throw new Error(`Maersk track ${res.status}: ${await res.text()}`);
-  return { notFound: false, raw: await res.json() };
+  if (res.status === 404) {
+    const body = await res.text().catch(() => "");
+    return { notFound: true, raw: null, status: 404, url, errBody: body.slice(0, 1200) };
+  }
+  if (!res.ok) throw new Error(`Maersk track ${res.status} @ ${url}: ${await res.text()}`);
+  return { notFound: false, raw: await res.json(), status: res.status, url };
 }
 
 // ── 从返回事件里提炼"到卸货港的预计/实际时间" ──────────────────────────────
@@ -208,7 +214,7 @@ Deno.serve(async (req) => {
         eta_track_status: "not_found",
         eta_synced_at: new Date().toISOString(),
       });
-      return json({ status: "not_found", ...(debug ? { raw: result.raw } : {}) });
+      return json({ status: "not_found", ...(debug ? { raw: result.raw, _status: result.status, _url: result.url, _errBody: result.errBody } : {}) });
     }
 
     const parsed = extractMilestones(result.raw, s.pol_code, s.pod_code);

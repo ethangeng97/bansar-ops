@@ -407,6 +407,7 @@ function ExpandDetail({ request }) {
   const [bills, setBills] = useState([]);
   const [shipMap, setShipMap] = useState({});
   const [files, setFiles] = useState([]);
+  const [invs, setInvs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -433,6 +434,10 @@ function ExpandDetail({ request }) {
       const { data: f } = await supabase.from("invoice_request_files")
         .select("*").eq("request_id", request.id).order("created_at", { ascending: true });
       setFiles(f || []);
+      const { data: iv } = await supabase.from("invoices")
+        .select("id, invoice_no, invoice_date, tax_rate, amount_total, currency")
+        .eq("request_id", request.id).order("created_at", { ascending: true });
+      setInvs(iv || []);
       setLoading(false);
     })();
     /* eslint-disable-next-line */
@@ -490,144 +495,226 @@ function ExpandDetail({ request }) {
         )}
       </div>
 
-      {/* 发票文件 */}
-      <div style={{ flex: "1 1 260px", minWidth: 240 }}>
+      {/* 发票（可能多张） */}
+      <div style={{ flex: "1 1 300px", minWidth: 260 }}>
         <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#555" }}>
-          发票文件（{files.length}）
+          发票（{invs.length}）
         </div>
-        {files.length === 0 ? (
-          <div style={{ fontSize: 11.5, color: "#bbb" }}>尚未上传发票</div>
+        {invs.length === 0 ? (
+          <>
+            <div style={{ fontSize: 11.5, color: "#bbb" }}>尚未开票</div>
+            {files.length > 0 && (
+              <ul style={{ margin: "6px 0 0", paddingLeft: 0, listStyle: "none" }}>
+                {files.map(f => (
+                  <li key={f.id} style={{ marginBottom: 4 }}>
+                    <a onClick={() => openFile(f)} style={{ color: "#1990ff", cursor: "pointer", fontSize: 12 }}>📄 {f.file_name || "发票.pdf"}</a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-            {files.map(f => (
-              <li key={f.id} style={{ marginBottom: 4 }}>
-                <a onClick={() => openFile(f)} style={{ color: "#1990ff", cursor: "pointer", fontSize: 12 }}>
-                  📄 {f.file_name || "发票.pdf"}
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-        {request.status === "completed" && (
-          <div style={{ marginTop: 8, fontSize: 11.5, color: "#888" }}>
-            发票号 {request.invoice_no || "—"} · 开票日期 {request.invoice_date || "—"}
-          </div>
+          <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#f5f7fa", color: "#444" }}>
+                <th style={th}>发票号</th><th style={{ ...th, textAlign: "center" }}>税率</th>
+                <th style={{ ...th, textAlign: "right" }}>金额</th><th style={th}>文件</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invs.map(iv => {
+                const ivFiles = files.filter(f => f.invoice_id === iv.id);
+                return (
+                  <tr key={iv.id} style={{ borderTop: "1px solid #eee" }}>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace", color: "#444" }}>{iv.invoice_no}</td>
+                    <td style={{ ...td, textAlign: "center" }}>{iv.tax_rate == null ? "混合" : fmtRate(iv.tax_rate)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "Consolas,monospace" }}>{iv.currency} {Number(iv.amount_total).toFixed(2)}</td>
+                    <td style={td}>
+                      {ivFiles.length ? ivFiles.map(f => (
+                        <a key={f.id} onClick={() => openFile(f)} style={{ color: "#1990ff", cursor: "pointer", display: "block" }}>📄 下载</a>
+                      )) : <span style={{ color: "#bbb" }}>无</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
     </div>
   );
 }
 
-// ── 完成开票弹窗：填票号+日期+上传发票 → complete_invoice_request ──
-function CompleteDialog({ request, user, onClose, onDone }) {
-  const [invoiceNo, setInvoiceNo] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
-  const [files, setFiles] = useState([]);     // File[]
+// ── 完成开票弹窗：把应收费用按税率分成多张发票(可手动调) → complete_invoice_request_split ──
+const fmtRate = (r) => (Number(r) === 0 ? "免税(0%)" : `${Number(r)}%`);
+
+function CompleteDialog({ request, onClose, onDone }) {
+  const [charges, setCharges] = useState([]);     // {id, name, bill_id, amount_total, rate}
+  const [cards, setCards] = useState([]);          // [{key, invoice_no, invoice_date, file}]
+  const [assign, setAssign] = useState({});        // chargeId -> cardKey
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const { data: rb } = await supabase.from("invoice_request_bills").select("bill_id").eq("request_id", request.id);
+      const billIds = (rb || []).map(x => x.bill_id);
+      let cs = [];
+      if (billIds.length) {
+        const { data } = await supabase.from("charges")
+          .select("id, charge_item_id, bill_id, amount_total, tax_rate, remark")
+          .in("bill_id", billIds).eq("direction", "应收");
+        cs = data || [];
+        const itemIds = [...new Set(cs.map(c => c.charge_item_id).filter(Boolean))];
+        let nm = {};
+        if (itemIds.length) {
+          const { data: items } = await supabase.from("charge_items").select("id, name_zh, code").in("id", itemIds);
+          (items || []).forEach(i => { nm[i.id] = i.name_zh || i.code; });
+        }
+        cs = cs.map(c => ({ id: c.id, name: nm[c.charge_item_id] || c.remark || "费用",
+                            bill_id: c.bill_id, amount_total: Number(c.amount_total || 0), rate: Number(c.tax_rate || 0) }));
+      }
+      // 按税率预分组：每个税率一张发票卡
+      const today = new Date().toISOString().slice(0, 10);
+      const rates = [...new Set(cs.map(c => c.rate))].sort((a, b) => a - b);
+      const newCards = rates.map(r => ({ key: crypto.randomUUID(), _rate: r, invoice_no: "", invoice_date: today, file: null }));
+      const rateToKey = {}; newCards.forEach(c => { rateToKey[c._rate] = c.key; });
+      const asg = {}; cs.forEach(c => { asg[c.id] = rateToKey[c.rate]; });
+      setCharges(cs); setCards(newCards); setAssign(asg);
+      setLoading(false);
+    })();
+    /* eslint-disable-next-line */
+  }, [request.id]);
+
+  const cardCharges = (key) => charges.filter(c => assign[c.id] === key);
+  const cardAmount = (key) => cardCharges(key).reduce((s, c) => s + c.amount_total, 0);
+  const cardRateLabel = (key) => {
+    const rs = [...new Set(cardCharges(key).map(c => c.rate))];
+    return rs.length === 0 ? "（空）" : rs.length === 1 ? fmtRate(rs[0]) : "混合税率";
+  };
+  const setCard = (key, field, val) => setCards(cs => cs.map(c => c.key === key ? { ...c, [field]: val } : c));
+  const addCard = () => setCards(cs => [...cs, { key: crypto.randomUUID(), invoice_no: "", invoice_date: new Date().toISOString().slice(0, 10), file: null }]);
+  const removeCard = (key) => {
+    if (cardCharges(key).length > 0) { alert("该发票下还有费用，请先把费用移到别的发票再删除"); return; }
+    setCards(cs => cs.filter(c => c.key !== key));
+  };
+
   const submit = async () => {
-    if (!invoiceNo.trim()) { alert("请填写发票号"); return; }
-    if (files.length === 0) {
-      if (!confirm("尚未上传发票文件，仍要完成开票吗？")) return;
+    const used = cards.filter(c => cardCharges(c.key).length > 0);
+    if (used.length === 0) { alert("没有可开票的费用"); return; }
+    for (const c of used) {
+      if (!c.invoice_no.trim()) { alert("每张发票都要填发票号"); return; }
     }
     setSubmitting(true);
     try {
-      // 1) 先上传文件到 invoice-files/{customer_id}/{request_id}/...
-      const uploaded = [];
-      for (const file of files) {
-        const uuid = crypto.randomUUID();
-        const safeName = file.name.replace(/[^\w.\-一-龥()（）]/g, "_");
-        const path = `${request.customer_id}/${request.id}/${uuid}-${safeName}`;
-        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file);
-        if (upErr) { alert(`上传「${file.name}」失败：` + upErr.message); setSubmitting(false); return; }
-        const { error: dbErr } = await supabase.from("invoice_request_files").insert({
-          request_id: request.id, file_url: path, file_name: file.name,
-          file_size: file.size, mime_type: file.type || null, uploaded_by: user?.id || null,
-        });
-        if (dbErr) {
-          await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
-          alert("保存发票文件信息失败：" + dbErr.message); setSubmitting(false); return;
+      const payload = [];
+      for (const c of used) {
+        let file_url = null, file_name = null;
+        if (c.file) {
+          const uuid = crypto.randomUUID();
+          const safeName = c.file.name.replace(/[^\w.\-一-龥()（）]/g, "_");
+          const path = `${request.customer_id}/${request.id}/${uuid}-${safeName}`;
+          const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, c.file);
+          if (upErr) { alert(`上传「${c.file.name}」失败：` + upErr.message); setSubmitting(false); return; }
+          file_url = path; file_name = c.file.name;
         }
-        uploaded.push(path);
+        payload.push({
+          invoice_no: c.invoice_no.trim(), invoice_date: c.invoice_date || null,
+          charge_ids: cardCharges(c.key).map(x => x.id), file_url, file_name,
+        });
       }
-      // 2) 完成开票（建 invoices + invoice_bills + 盖 bills.invoice_no + 回填申请）
-      const { error } = await supabase.rpc("complete_invoice_request", {
-        p_request_id: request.id, p_invoice_no: invoiceNo.trim(), p_invoice_date: invoiceDate,
+      const { error } = await supabase.rpc("complete_invoice_request_split", {
+        p_request_id: request.id, p_invoices: payload,
       });
       if (error) { alert("完成开票失败：" + error.message); setSubmitting(false); return; }
-      alert(`✓ 已完成开票，发票号 ${invoiceNo.trim()}`);
+      alert(`✓ 已完成开票，共 ${payload.length} 张发票`);
       onDone();
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
+
+  const grandTotal = charges.reduce((s, c) => s + c.amount_total, 0);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex",
                   alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-      <div style={{ background: "#fff", borderRadius: 4, width: 560, maxWidth: "95vw",
-                    maxHeight: "90vh", display: "flex", flexDirection: "column",
+      <div style={{ background: "#fff", borderRadius: 4, width: 820, maxWidth: "96vw",
+                    maxHeight: "92vh", display: "flex", flexDirection: "column",
                     boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
         <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0", display: "flex",
                       justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>完成开票 · {request.request_no}</span>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>完成开票 · {request.request_no} <span style={{ fontWeight: 400, color: "#888", fontSize: 12, marginLeft: 8 }}>{request.partner_name} · {request.currency} {Number(request.amount_total).toFixed(2)}</span></span>
           <a onClick={onClose} style={{ cursor: "pointer", color: "#999" }}>×</a>
         </div>
 
-        <div style={{ padding: 16, background: "#fafafa", borderBottom: "1px solid #f0f0f0",
-                      fontSize: 12, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-          <Field label="客户" value={request.partner_name} />
-          <Field label="币别" value={request.currency} mono />
-          <Field label="开票总额" value={`${request.currency} ${Number(request.amount_total).toFixed(2)}`} mono valueBold valueColor="#1990ff" />
-        </div>
-
+        {loading ? <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div> : (
         <div style={{ padding: 16, flex: 1, overflowY: "auto" }}>
-          <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: "#888", marginBottom: 4, fontSize: 12 }}>发票号 <span style={{ color: "#ff4d4f" }}>*</span></div>
-              <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="请输入发票号"
-                     style={{ width: "100%", padding: "6px 10px", border: "1px solid #d9d9d9", borderRadius: 3,
-                              fontSize: 12, fontFamily: "Consolas,monospace", boxSizing: "border-box" }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: "#888", marginBottom: 4, fontSize: 12 }}>开票日期</div>
-              <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)}
-                     style={{ width: "100%", padding: "6px 10px", border: "1px solid #d9d9d9", borderRadius: 3,
-                              fontSize: 12, boxSizing: "border-box" }} />
-            </div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+            已按税率自动分成 <b style={{ color: BRAND }}>{cards.filter(c => cardCharges(c.key).length).length}</b> 张发票；
+            可在下方「费用归属」里手动把费用挪到别的发票，或「+ 新增一张发票」。
           </div>
 
-          <div style={{ color: "#888", marginBottom: 4, fontSize: 12 }}>发票文件（PDF / 图片，可多张）</div>
-          <input type="file" multiple accept="application/pdf,image/*"
-                 onChange={e => setFiles(Array.from(e.target.files || []))}
-                 style={{ fontSize: 12 }} />
-          {files.length > 0 && (
-            <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, color: "#555" }}>
-              {files.map((f, i) => <li key={i}>{f.name}（{(f.size / 1024).toFixed(0)} KB）</li>)}
-            </ul>
-          )}
+          {/* 发票卡片 */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+            {cards.map((c, idx) => (
+              <div key={c.key} style={{ flex: "1 1 240px", minWidth: 240, border: "1px solid #e8e8e8", borderRadius: 4, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <b style={{ fontSize: 12, color: BRAND }}>发票{idx + 1} · {cardRateLabel(c.key)}</b>
+                  <span style={{ fontFamily: "Consolas,monospace", fontSize: 12 }}>{request.currency} {cardAmount(c.key).toFixed(2)}</span>
+                </div>
+                <input value={c.invoice_no} onChange={e => setCard(c.key, "invoice_no", e.target.value)} placeholder="发票号 *"
+                       style={{ width: "100%", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, fontFamily: "Consolas,monospace", boxSizing: "border-box", marginBottom: 6 }} />
+                <input type="date" value={c.invoice_date} onChange={e => setCard(c.key, "invoice_date", e.target.value)}
+                       style={{ width: "100%", padding: "5px 8px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, boxSizing: "border-box", marginBottom: 6 }} />
+                <input type="file" accept="application/pdf,image/*" onChange={e => setCard(c.key, "file", e.target.files?.[0] || null)} style={{ fontSize: 11 }} />
+                {c.file && <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>{c.file.name}</div>}
+                {cardCharges(c.key).length === 0 && (
+                  <a onClick={() => removeCard(c.key)} style={{ color: "#ff4d4f", cursor: "pointer", fontSize: 11, display: "inline-block", marginTop: 6 }}>删除该发票</a>
+                )}
+              </div>
+            ))}
+            <button onClick={addCard} style={{ ...btn, alignSelf: "flex-start" }}>+ 新增一张发票</button>
+          </div>
+
+          {/* 费用归属 */}
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#555" }}>费用归属（合计 {request.currency} {grandTotal.toFixed(2)}）</div>
+          <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#fafafa", color: "#444" }}>
+                <th style={th}>费用项</th><th style={{ ...th, textAlign: "center" }}>税率</th>
+                <th style={{ ...th, textAlign: "right" }}>金额</th><th style={th}>归到哪张发票</th>
+              </tr>
+            </thead>
+            <tbody>
+              {charges.map(c => (
+                <tr key={c.id} style={{ borderTop: "1px solid #f5f5f5" }}>
+                  <td style={td}>{c.name}</td>
+                  <td style={{ ...td, textAlign: "center" }}>{fmtRate(c.rate)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "Consolas,monospace" }}>{c.amount_total.toFixed(2)}</td>
+                  <td style={td}>
+                    <select value={assign[c.id] || ""} onChange={e => setAssign(a => ({ ...a, [c.id]: e.target.value }))}
+                            style={{ padding: "3px 6px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 11.5 }}>
+                      {cards.map((card, idx) => <option key={card.key} value={card.key}>发票{idx + 1}（{cardRateLabel(card.key)}）</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+              {charges.length === 0 && <tr><td colSpan={4} style={{ padding: 20, textAlign: "center", color: "#999" }}>该申请账单下没有应收费用，无法开票</td></tr>}
+            </tbody>
+          </table>
           <div style={{ marginTop: 10, fontSize: 11.5, color: "#999" }}>
-            完成后将自动生成发票记录、关联 {request.amount_total != null ? "该申请的全部账单" : "账单"}，并盖上发票号；客户可在 portal 下载。
+            完成后按上面分组生成多张发票记录、盖发票号到每条费用；客户可在 portal 下载各张发票。
           </div>
         </div>
+        )}
 
         <div style={{ padding: 12, borderTop: "1px solid #f0f0f0", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button onClick={onClose} style={btn} disabled={submitting}>取消</button>
-          <button onClick={submit} style={btnPrimary} disabled={submitting}>
+          <button onClick={submit} style={btnPrimary} disabled={submitting || loading || charges.length === 0}>
             {submitting ? "提交中..." : "确认完成开票"}
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Field({ label, value, mono, valueColor, valueBold }) {
-  return (
-    <div>
-      <div style={{ fontSize: 11, color: "#888", marginBottom: 3 }}>{label}</div>
-      <div style={{ fontFamily: mono ? "Consolas,monospace" : "inherit", fontSize: 12.5,
-                    color: valueColor || "#222", fontWeight: valueBold ? 700 : 400 }}>{value || "—"}</div>
     </div>
   );
 }

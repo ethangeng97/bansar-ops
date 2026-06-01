@@ -251,8 +251,12 @@ function NewRequestDialog({ onClose, onDone }) {
       }
       rows = rows.map(b => {
         const s = m[b.shipment_id] || {};
-        return { ...b, partner_name: cmap[b.partner_id] || "", order_no: s.order_no || "",
-                 mbl: (s.mbl_no || "").trim() || (s.hbl_no || "").trim() || (s.booking_no || "").trim() };
+        const pn = cmap[b.partner_id] || "";
+        const mbl = (s.mbl_no || "").trim() || (s.hbl_no || "").trim() || (s.booking_no || "").trim();
+        // 搜索串覆盖：订单号 / MBL / HBL / 订舱号 / 账单号 / 客户
+        const _search = [s.order_no, s.mbl_no, s.hbl_no, s.booking_no, b.bill_no, pn]
+          .filter(Boolean).join(" ").toLowerCase();
+        return { ...b, partner_name: pn, order_no: s.order_no || "", mbl, _search };
       });
       setAllBills(rows);
       setLoading(false);
@@ -260,9 +264,7 @@ function NewRequestDialog({ onClose, onDone }) {
   }, []);
 
   const k = kw.toLowerCase().trim();
-  const bills = !k ? allBills : allBills.filter(b =>
-    (b.order_no || "").toLowerCase().includes(k) || (b.mbl || "").toLowerCase().includes(k) ||
-    (b.partner_name || "").toLowerCase().includes(k) || (b.bill_no || "").toLowerCase().includes(k));
+  const bills = !k ? allBills : allBills.filter(b => (b._search || "").includes(k));
 
   const toggle = (id) => { const n = new Set(picked); n.has(id) ? n.delete(id) : n.add(id); setPicked(n); };
   const pickedBills = allBills.filter(b => picked.has(b.id));
@@ -303,7 +305,7 @@ function NewRequestDialog({ onClose, onDone }) {
           {loading ? (
             <div style={{ padding: 20, textAlign: "center", color: "#888" }}>加载中...</div>
           ) : bills.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: "#999" }}>{allBills.length === 0 ? "暂无可申请的应收账单（都已开票或已在申请中）" : "无匹配结果"}</div>
+            <div style={{ padding: 20, textAlign: "center", color: "#999" }}>{allBills.length === 0 ? "暂无可申请的应收账单（都已开票或已在申请中）" : "无匹配结果 —— 该订单可能尚未生成应收账单（需先在订单「费用」里生成应收账单）"}</div>
           ) : (
             <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
               <thead>

@@ -92,13 +92,14 @@ export default function UserRolesList({ onBack }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: "#fafafa", color: "#444" }}>
-                <th style={th}>姓名</th><th style={th}>角色</th><th style={th}>关联客户</th>
+                <th style={th}>登录邮箱</th><th style={th}>姓名</th><th style={th}>角色</th><th style={th}>关联客户</th>
                 <th style={{ ...th, textAlign: "center" }}>操作</th>
               </tr>
             </thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                  <td style={{ ...td, fontFamily: "Consolas,monospace" }}>{u.email || <span style={{ color: "#bbb" }}>—</span>}</td>
                   <td style={td}>{u.display_name || u.full_name || <span style={{ color: "#bbb", fontFamily: "Consolas,monospace" }}>{u.id.slice(0, 8)}…</span>}</td>
                   <td style={td}>
                     <select value={u.role || ""} onChange={e => changeRole(u, e.target.value)} style={sel}>

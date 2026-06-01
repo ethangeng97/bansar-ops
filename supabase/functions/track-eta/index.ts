@@ -93,13 +93,14 @@ async function fetchTracking(trackingNumber: string, type: "booking" | "bl") {
 }
 
 // ── 从返回事件里提炼"到卸货港的预计/实际时间" ──────────────────────────────
-// ⚠️ 待校准：以下按 DCSA 风格事件结构(events[].transportEventTypeCode=ARRI,
-//   eventClassifierCode=EST/ACT, transportCall.location...)做最佳猜测。
-//   拿到真实 raw 后按实际字段调整即可，逻辑骨架不用改。
-function extractArrivalEta(raw: any, podCode?: string | null): {
-  eta: string | null; vessel: string | null; voyage: string | null;
+// ⚠️ 待校准：以下按 DCSA 风格事件结构(events[].transportEventTypeCode=DEPA/ARRI,
+//   eventClassifierCode=EST/ACT/PLN, transportCall.location.UNLocationCode...)做最佳猜测。
+//   拿到真实 raw(传 debug:true) 后按实际字段调整即可，逻辑骨架不用改。
+function extractMilestones(raw: any, polCode?: string | null, podCode?: string | null): {
+  eta: string | null; etd: string | null; atd: string | null; vessel: string | null; voyage: string | null;
 } {
-  const out = { eta: null as string | null, vessel: null as string | null, voyage: null as string | null };
+  const out = { eta: null as string | null, etd: null as string | null, atd: null as string | null,
+                vessel: null as string | null, voyage: null as string | null };
   if (!raw) return out;
 
   const events: any[] = Array.isArray(raw?.events) ? raw.events
@@ -107,27 +108,32 @@ function extractArrivalEta(raw: any, podCode?: string | null): {
     : Array.isArray(raw?.transportEvents) ? raw.transportEvents
     : [];
 
-  const arrivals = events.filter((e) => {
-    const code = (e?.transportEventTypeCode || e?.eventType || "").toString().toUpperCase();
-    return code.includes("ARRI") || code === "ARRIVAL";
-  });
+  const typeOf  = (e: any) => (e?.transportEventTypeCode || e?.eventType || "").toString().toUpperCase();
+  const classOf = (e: any) => (e?.eventClassifierCode || e?.eventClassifier || "").toString().toUpperCase(); // EST/ACT/PLN
+  const locOf   = (e: any) => (e?.transportCall?.location?.UNLocationCode
+    || e?.location?.UNLocationCode || e?.transportCall?.UNLocationCode || "").toString().toUpperCase();
+  const dateOf  = (e: any) => {
+    const dt = e?.eventDateTime || e?.eventCreatedDateTime || e?.dateTime;
+    return dt ? String(dt).slice(0, 10) : null; // YYYY-MM-DD
+  };
+  const isDep = (e: any) => typeOf(e).includes("DEPA");
+  const isArr = (e: any) => typeOf(e).includes("ARRI");
+  // 取符合 (类型 + EST/ACT + 港口) 的最后一个事件的日期
+  const pick = (fn: (e: any) => boolean, cls: string, code?: string | null) => {
+    let cand = events.filter((e) => fn(e) && classOf(e) === cls);
+    if (code) { const at = cand.filter((e) => locOf(e) === code.toUpperCase()); if (at.length) cand = at; }
+    const e = cand[cand.length - 1];
+    return e ? dateOf(e) : null;
+  };
 
-  // 优先匹配卸货港(POD)的到港事件；匹配不到就取最后一个到港事件
-  const pickLoc = (e: any) =>
-    (e?.transportCall?.location?.UNLocationCode
-      || e?.location?.UNLocationCode
-      || e?.transportCall?.UNLocationCode || "").toString().toUpperCase();
+  out.atd = pick(isDep, "ACT", polCode);                                  // 实际开船
+  out.etd = pick(isDep, "EST", polCode);                                  // 预计开船
+  out.eta = pick(isArr, "EST", podCode) || pick(isArr, "ACT", podCode);   // 预计(或实际)到港
 
-  let chosen = podCode ? arrivals.find((e) => pickLoc(e) === podCode.toUpperCase()) : null;
-  if (!chosen) chosen = arrivals[arrivals.length - 1] || null;
-  if (!chosen) return out;
-
-  const dt = chosen.eventDateTime || chosen.eventCreatedDateTime || chosen.dateTime;
-  if (dt) out.eta = String(dt).slice(0, 10); // YYYY-MM-DD
-
-  const vessel = chosen?.transportCall?.vessel || chosen?.vessel;
+  const vEvt = events.find((e) => (isDep(e) || isArr(e)) && (e?.transportCall?.vessel || e?.vessel));
+  const vessel = vEvt?.transportCall?.vessel || vEvt?.vessel;
   if (vessel?.vesselName) out.vessel = String(vessel.vesselName).toUpperCase();
-  const voy = chosen?.transportCall?.carrierVoyageNumber || chosen?.transportCall?.universalExportVoyageReference;
+  const voy = vEvt?.transportCall?.carrierVoyageNumber || vEvt?.transportCall?.universalExportVoyageReference;
   if (voy) out.voyage = String(voy).toUpperCase();
 
   return out;
@@ -177,7 +183,7 @@ Deno.serve(async (req) => {
 
   try {
     const rows = await sbGet(
-      `shipments?id=eq.${shipmentId}&select=id,order_no,carrier,booking_no,mbl_no,pod,pod_code,eta,vessel,voyage`,
+      `shipments?id=eq.${shipmentId}&select=id,order_no,carrier,booking_no,mbl_no,pol,pol_code,pod,pod_code,eta,etd,atd,vessel,voyage`,
     );
     const s = rows?.[0];
     if (!s) return json({ error: "票号不存在" }, 404);
@@ -205,16 +211,17 @@ Deno.serve(async (req) => {
       return json({ status: "not_found", ...(debug ? { raw: result.raw } : {}) });
     }
 
-    const parsed = extractArrivalEta(result.raw, s.pod_code);
+    const parsed = extractMilestones(result.raw, s.pol_code, s.pod_code);
+    const got = parsed.eta || parsed.etd || parsed.atd;
 
     const patch: Record<string, unknown> = {
       eta_synced_at: new Date().toISOString(),
-      eta_track_status: parsed.eta ? "ok" : "no_eta_in_response",
+      eta_track_status: got ? "ok" : "no_eta_in_response",
     };
-    if (parsed.eta) {
-      patch.eta_carrier = parsed.eta;
-      if (!s.eta) patch.eta = parsed.eta;            // 只填空白，不覆盖人工
-    }
+    // 船司值始终覆盖 *_carrier；人工列(eta/etd/atd)仅空白时回填
+    if (parsed.eta) { patch.eta_carrier = parsed.eta; if (!s.eta) patch.eta = parsed.eta; }
+    if (parsed.etd) { patch.etd_carrier = parsed.etd; if (!s.etd) patch.etd = parsed.etd; }
+    if (parsed.atd) { patch.atd_carrier = parsed.atd; if (!s.atd) patch.atd = parsed.atd; }
     if (parsed.vessel && !s.vessel) patch.vessel = parsed.vessel;
     if (parsed.voyage && !s.voyage) patch.voyage = parsed.voyage;
 
@@ -222,12 +229,10 @@ Deno.serve(async (req) => {
 
     return json({
       status: patch.eta_track_status,
-      eta_carrier: parsed.eta,
-      eta_applied: parsed.eta && !s.eta ? parsed.eta : null,
-      eta_existing: s.eta,
+      eta_carrier: parsed.eta, etd_carrier: parsed.etd, atd_carrier: parsed.atd,
+      eta_existing: s.eta, etd_existing: s.etd, atd_existing: s.atd,
       mismatch: !!(parsed.eta && s.eta && parsed.eta !== s.eta),
-      vessel: parsed.vessel,
-      voyage: parsed.voyage,
+      vessel: parsed.vessel, voyage: parsed.voyage,
       ...(debug ? { raw: result.raw } : {}),
     });
   } catch (err) {

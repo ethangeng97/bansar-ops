@@ -383,6 +383,7 @@ export function OrdersPage({ user, onBack }) {
     if (f.voyage && !(o.voyage || "").toLowerCase().includes(String(f.voyage).toLowerCase())) return false;
     if (f.pol && o.pol !== f.pol) return false;
     if (f.pod && o.pod !== f.pod) return false;
+    if (f.qty_type && !(o.qty_container || "").toUpperCase().includes(String(f.qty_type).toUpperCase())) return false;
     if (f.destination && o.destination !== f.destination) return false;
     if (f.booking_no) {
       const q = String(f.booking_no).toLowerCase();
@@ -878,6 +879,9 @@ export function OrdersPage({ user, onBack }) {
             </Fi>
             <Fi label="起运港" refLabel>
               <ComboBox value={filters.pol || ""} onChange={v => sf("pol", v)} options={refs.pol} />
+            </Fi>
+            <Fi label="箱型" refLabel>
+              <ComboBox value={filters.qty_type || ""} onChange={v => sf("qty_type", (v || "").toUpperCase())} options={CONTAINER_TYPES} />
             </Fi>
             <Fi label="发货人名称"><input disabled /></Fi>
             <Fi label="收货人名称"><input disabled /></Fi>
@@ -1469,6 +1473,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [historyOpen, setHistoryOpen] = useState(false);
   // 订舱模板 modal 开关
   const [templateOpen, setTemplateOpen] = useState(false);
+  // ETA 船司查询（Maersk Track & Trace）状态
+  const [etaSyncing, setEtaSyncing] = useState(false);
   // ChargesPanel 操作句柄（用于费用 tab 下工具栏按钮调用）
   const chargesRef = useRef(null);
   // 加入/移除分票 modal 开关（仅主拼场景）
@@ -2274,6 +2280,28 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     if (data && onUpdated) onUpdated(data); else onReload();
   };
 
+  // 调 Maersk Track & Trace 查 ETA → 后端回写 → 刷新本票
+  const syncEta = async () => {
+    if (etaSyncing) return;
+    setEtaSyncing(true);
+    try {
+      const r = await supabase.api("/functions/v1/track-eta", {
+        method: "POST",
+        body: JSON.stringify({ shipment_id: order.id }),
+      });
+      if (r?.status === "unsupported_carrier") alert(`暂不支持该船司（${order.carrier || "—"}），Phase 1 仅 Maersk`);
+      else if (r?.status === "not_found") alert("Maersk 未查到该 booking 的船期（可能尚未排载或号码不符）");
+      else if (r?.status === "error") alert("查询失败：" + (r.message || "未知错误"));
+      else if (!r?.eta_carrier) alert("已查询，但返回里没有到港时间");
+      else if (r.mismatch) alert(`船司 ETA 为 ${r.eta_carrier}，与现有 ETA(${r.eta_existing}) 不一致，已记录但未覆盖`);
+    } catch (e) {
+      alert("查询失败：" + (e?.message || e));
+    } finally {
+      setEtaSyncing(false);
+      onReload();
+    }
+  };
+
   const setLifecycle = async (lc) => {
     const updates = { lifecycle: lc };
     if (lc === "已完结") {
@@ -2299,10 +2327,10 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const isLocked = order.lifecycle === "已完结" || order.lifecycle === "已关闭";
 
   // 主拼判定：自拼柜 且 order_no 不含 -N 后缀
-  // 例外：从现舱划走的单子(spot_booking_id 不为空)即使被误标 Console 也不算 master,
-  //       因为它没有也不应该有分票, 不该锁委托单位字段
+  // 注：现舱划走的单子也可能是合法自拼母单(用整条现舱做自拼)，所以不再用
+  //     spot_booking_id 排除 master。若某条单纯是"现舱划给单一客户"被误标 Console
+  //     导致委托单位锁死，正确修法是把它的出运类型改回 FCL（数据层），而不是隐藏母单功能。
   const isMaster = order.shipment_type === "Console"
-    && !order.spot_booking_id
     && order.order_no
     && !/-\d+$/.test(order.order_no);
 
@@ -2996,7 +3024,30 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 <Df label="邮件"><input value={v("email")} onChange={e => ch("email", e.target.value)} disabled={!editing} /></Df>
                 <Df label="预计开航时间"><input type="date" value={v("etd")} onChange={e => ch("etd", e.target.value)} disabled={!editing} /></Df>
                 <Df label="实际开航时间"><input type="date" value={v("atd")} onChange={e => ch("atd", e.target.value)} disabled={!editing} /></Df>
-                <Df label="预计到港时间"><input type="date" value={v("eta")} onChange={e => ch("eta", e.target.value)} disabled={!editing} /></Df>
+                <Df label="预计到港时间">
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <input type="date" value={v("eta")} onChange={e => ch("eta", e.target.value)} disabled={!editing} />
+                    {!editing && (
+                      <button
+                        type="button"
+                        onClick={syncEta}
+                        disabled={etaSyncing}
+                        title="向 Maersk 查询最新到港时间（仅 Maersk）"
+                        style={{ padding: "2px 8px", fontSize: 12, cursor: etaSyncing ? "wait" : "pointer", whiteSpace: "nowrap" }}
+                      >
+                        {etaSyncing ? "查询中…" : "🔄 查ETA"}
+                      </button>
+                    )}
+                    {order.eta_carrier && (
+                      <span
+                        style={{ fontSize: 11, color: order.eta && order.eta_carrier !== order.eta ? "#d4380d" : "#888" }}
+                        title={order.eta_synced_at ? "更新于 " + new Date(order.eta_synced_at).toLocaleString() : undefined}
+                      >
+                        船司:{order.eta_carrier}{order.eta && order.eta_carrier !== order.eta ? "（不符）" : ""}
+                      </span>
+                    )}
+                  </div>
+                </Df>
                 <Df label="清关日期"><input type="date" value={v("customs_clear_date")} onChange={e => ch("customs_clear_date", e.target.value)} disabled={!editing} /></Df>
 
                 <Df label="客户编号"><input value={v("po")} onChange={e => ch("po", e.target.value)} disabled={!editing} /></Df>

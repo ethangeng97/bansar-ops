@@ -243,6 +243,28 @@ export default function ChargesPanel({ shipment, currentUser, canEdit = true, on
 
   // 保存所有
   const saveAll = async () => {
+    // —— 保存前校验：缺必填项（费用名称/结算单位/单价）时弹窗拦截 ——
+    //    不清空 rows、不 reload，已填内容原样保留，避免点保存后数据丢失
+    const labelOf = (r) => {
+      const ci = chargeItems.find(i => i.id === r.charge_item_id)
+      return ci ? (ci.name_zh || ci.name_en || ci.code) : '未选费用名称'
+    }
+    const isBlankDraft = (r) => r._draft && !r.charge_item_id && !r.partner_id && !Number(r.unit_price)
+    const dirZh = (r) => (r.direction === 'AR' || r.direction === '应收') ? '应收' : '应付'
+    const problems = []
+    rows.forEach(r => {
+      if (isBlankDraft(r)) return        // 完全空白的新行：忽略，不当作要保存的数据
+      const miss = []
+      if (!r.charge_item_id) miss.push('费用名称')
+      if (!r.partner_id) miss.push('结算单位')
+      if (!Number(r.unit_price)) miss.push('单价')
+      if (miss.length) problems.push(`· ${dirZh(r)}「${labelOf(r)}」缺：${miss.join('、')}`)
+    })
+    if (problems.length) {
+      alert('以下费用未填写完整，暂时无法保存（已填内容已保留，请补齐后再点保存）：\n\n' + problems.join('\n'))
+      return
+    }
+
     setSaving(true)
     try {
       const drafts = rows.filter(r => r._draft).map(r => {

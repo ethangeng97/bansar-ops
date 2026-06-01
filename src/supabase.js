@@ -69,7 +69,7 @@ function createClient() {
     if (res.status === 401 && !path.startsWith("/auth/v1/token")) signalSessionExpired();
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.msg || err.error_description || res.statusText);
+      throw new Error(err.message || err.msg || err.error || err.error_description || res.statusText);
     }
     const text = await res.text();
     return text ? JSON.parse(text) : null;

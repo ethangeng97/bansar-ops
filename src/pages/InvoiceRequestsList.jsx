@@ -222,7 +222,7 @@ function NewRequestDialog({ onClose, onDone }) {
     (async () => {
       setLoading(true);
       const { data: bs } = await supabase.from("bills")
-        .select("id, bill_no, shipment_id, partner_id, partner_name, amount_total, currency, status, invoice_no")
+        .select("id, bill_no, shipment_id, partner_id, amount_total, currency, status, invoice_no")
         .eq("direction", "AR").order("created_at", { ascending: false });
       let rows = (bs || []).filter(b => b.status !== "void");
       const ids = rows.map(b => b.id);
@@ -243,9 +243,16 @@ function NewRequestDialog({ onClose, onDone }) {
         const { data: ss } = await supabase.from("shipments").select("id, order_no, mbl_no, hbl_no, booking_no").in("id", shipIds);
         (ss || []).forEach(x => { m[x.id] = x; });
       }
+      const custIds = [...new Set(rows.map(b => b.partner_id).filter(Boolean))];
+      let cmap = {};
+      if (custIds.length) {
+        const { data: cs } = await supabase.from("customers").select("id, name").in("id", custIds);
+        (cs || []).forEach(c => { cmap[c.id] = c.name; });
+      }
       rows = rows.map(b => {
         const s = m[b.shipment_id] || {};
-        return { ...b, order_no: s.order_no || "", mbl: (s.mbl_no || "").trim() || (s.hbl_no || "").trim() || (s.booking_no || "").trim() };
+        return { ...b, partner_name: cmap[b.partner_id] || "", order_no: s.order_no || "",
+                 mbl: (s.mbl_no || "").trim() || (s.hbl_no || "").trim() || (s.booking_no || "").trim() };
       });
       setAllBills(rows);
       setLoading(false);

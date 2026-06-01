@@ -76,6 +76,17 @@ async function roleExists(admin: any, role: string): Promise<boolean> {
   return !!data;
 }
 
+// 把底层报错翻译成更可读的中文提示
+function friendly(msg: string): string {
+  const m = (msg || "").toLowerCase();
+  if (/duplicate|already been regist|already.*exist|already.*use|23505/.test(m)) {
+    return "该邮箱已被其他账号占用，请换一个邮箱";
+  }
+  if (/invalid.*email|email.*invalid/.test(m)) return "邮箱格式不正确";
+  if (/password/.test(m)) return "密码不符合要求（至少 6 位）";
+  return msg || "操作失败";
+}
+
 async function handleCreate(admin: any, body: any) {
   const { email, password, role, name, customer_id, overseas_agent_id } = body;
   if (!email || !password || !role) return json({ error: "email, password, role are required" }, { status: 400 });
@@ -84,7 +95,7 @@ async function handleCreate(admin: any, body: any) {
   if (ROLES_REQUIRING_OVERSEAS_AGENT.has(role) && !overseas_agent_id) return json({ error: "overseas_agent_id is required for this role" }, { status: 400 });
 
   const { data: created, error: createErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
-  if (createErr) return json({ error: createErr.message }, { status: 400 });
+  if (createErr) return json({ error: friendly(createErr.message) }, { status: 400 });
 
   const newId = created.user.id;
   const profileRow: any = { id: newId, role, name: name || null, display_name: name || null };
@@ -109,7 +120,7 @@ async function handleUpdateEmail(admin: any, body: any) {
   const { user_id, email } = body;
   if (!user_id || !email) return json({ error: "user_id and email are required" }, { status: 400 });
   const { error } = await admin.auth.admin.updateUserById(user_id, { email, email_confirm: true });
-  if (error) return json({ error: error.message }, { status: 400 });
+  if (error) return json({ error: friendly(error.message) }, { status: 400 });
   return json({ ok: true });
 }
 

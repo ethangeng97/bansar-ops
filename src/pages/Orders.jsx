@@ -4640,6 +4640,34 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
 
   // 保存所有未保存行 + 排序变化
   const saveAll = async () => {
+    // —— 保存前校验：缺必填项（费用名称/结算单位/金额）时弹窗拦截 ——
+    //    不写库、不 reload、不弹"保存成功"，已填内容原样保留，
+    //    避免出现"点了保存却什么都没存，反而把刚填的内容清空"的问题。
+    const chargeLabel = (r) => {
+      const ci = chargeItems.find(i => i.id === r.charge_item_id);
+      return ci ? (ci.name_zh || ci.name_en || ci.code) : "未选费用名称";
+    };
+    // 完全空白的新行（加了行但什么都没填）→ 忽略，不当作要保存的数据
+    const isBlankDraft = (r) =>
+      r._draft && !r.charge_item_id && !r.partner_id && !(parseFloat(r.unit_price) > 0);
+    const problems = [];
+    for (const direction of ["应收", "应付"]) {
+      const rows = direction === "应收" ? arRows : apRows;
+      rows.forEach(r => {
+        if (isBlankDraft(r)) return;            // 空草稿：跳过，不提示
+        if (!(r._draft || r._dirty)) return;    // 未改动的已存行：无需校验
+        const miss = [];
+        if (!r.charge_item_id) miss.push("费用名称");
+        if (!r.partner_id) miss.push("结算单位");
+        if (!(parseFloat(r.unit_price) > 0)) miss.push("金额");
+        if (miss.length) problems.push(`· ${direction}「${chargeLabel(r)}」缺：${miss.join("、")}`);
+      });
+    }
+    if (problems.length) {
+      alert("以下费用未填写完整，暂时无法保存（已填内容已保留，请补齐后再点保存）：\n\n" + problems.join("\n"));
+      return;
+    }
+
     setSaving(true);
 
     // 处理应收 + 应付

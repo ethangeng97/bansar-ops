@@ -3026,6 +3026,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                          onBlur={async (e) => {
                            // 反向关联：booking_no 在 spot_bookings 里有，且当前 shipment 还没 spot_booking_id → 提示绑定
                            if (!editing) return;
+                           // 分票共用母单 booking_no，现舱关联只挂在母单上；分票若单独绑会被重复算进「已售」
+                           if (isSubTicket) return;
                            const bn = (e.target.value || "").trim();
                            if (!bn || v("spot_booking_id")) return;
                            const { data } = await supabase.from("spot_bookings")

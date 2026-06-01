@@ -1715,7 +1715,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     // shipper/consignee/notify_party 强制大写：编辑框的 onChange 已经这么干，
     // 程序化导入也走同样规则，避免出现"Keplin Group Limited" 之类的小写漏网鱼
     const normalizedFields = { ...fields };
-    for (const k of ["shipper", "consignee", "notify_party"]) {
+    for (const k of ["shipper", "consignee", "notify_party", "marks"]) {
       if (typeof normalizedFields[k] === "string") {
         normalizedFields[k] = normalizedFields[k].toUpperCase();
       }
@@ -3338,7 +3338,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           <label style={{ ...tmStyles.label, ...tmStyles.labelVertical }}>唛头</label>
                           <textarea
                             value={v("marks")}
-                            onChange={e => ch("marks", e.target.value)}
+                            onChange={e => ch("marks", e.target.value.toUpperCase())}
                             onBlur={e => {
                               const err = validateNoFullWidthSymbols(e.target.value);
                               if (err) alert("唛头：" + err);
@@ -3978,7 +3978,7 @@ function CargoLinesEditor({ shipmentId, defaultHbl, blLabel = "HBL", editing, li
                 <td style={cellBody}><input style={cellInput} value={r.package_unit || "CARTONS"} onChange={e => updateRow(i, "package_unit", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInputNum} value={r.gross_weight ?? ""} onChange={e => updateRow(i, "gross_weight", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInputNum} value={r.volume ?? ""} onChange={e => updateRow(i, "volume", e.target.value)} disabled={!editing} /></td>
-                <td style={{ ...cellBody, whiteSpace: "normal" }}><textarea style={{ ...cellInput, minHeight: 24, resize: "vertical", fontFamily: "Consolas,monospace", whiteSpace: "pre" }} value={r.marks || ""} onChange={e => updateRow(i, "marks", e.target.value)} disabled={!editing} placeholder="可换行" /></td>
+                <td style={{ ...cellBody, whiteSpace: "normal" }}><textarea style={{ ...cellInput, minHeight: 24, resize: "vertical", fontFamily: "Consolas,monospace", whiteSpace: "pre" }} value={r.marks || ""} onChange={e => updateRow(i, "marks", e.target.value.toUpperCase())} disabled={!editing} placeholder="可换行" /></td>
                 <td style={cellBody}><input style={cellInput} value={r.un || ""} onChange={e => updateRow(i, "un", e.target.value)} disabled={!editing} /></td>
                 <td style={cellBody}><input style={cellInput} value={r.cl || ""} onChange={e => updateRow(i, "cl", e.target.value)} disabled={!editing} /></td>
                 {editing && <td style={cellBody}><button onClick={() => delRow(i)} style={{ padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>删</button></td>}

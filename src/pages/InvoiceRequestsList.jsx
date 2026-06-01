@@ -216,6 +216,7 @@ function NewRequestDialog({ onClose, onDone }) {
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [hints, setHints] = useState([]); // 搜到但不可申请的订单(无账单/已开票)，仅提示
 
   // 载入所有可申请的应收账单(未作废、未在 待开票/已开票 申请中)，附订单号/提单号
   useEffect(() => {
@@ -266,6 +267,33 @@ function NewRequestDialog({ onClose, onDone }) {
   const k = kw.toLowerCase().trim();
   const bills = !k ? allBills : allBills.filter(b => (b._search || "").includes(k));
 
+  // 搜索时：把"匹配到订单、但没有可申请应收账单"的订单查出来做灰色提示
+  useEffect(() => {
+    const key = kw.trim();
+    if (key.length < 2) { setHints([]); return; }
+    let cancelled = false;
+    (async () => {
+      const esc = key.replace(/[%,*]/g, "");
+      const { data: ss } = await supabase.from("shipments")
+        .select("id, order_no, mbl_no, hbl_no, booking_no, customer")
+        .or(`order_no.ilike.*${esc}*,mbl_no.ilike.*${esc}*,hbl_no.ilike.*${esc}*,booking_no.ilike.*${esc}*`)
+        .limit(20);
+      const candShip = new Set(allBills.map(b => b.shipment_id));
+      const matched = (ss || []).filter(s => !candShip.has(s.id));
+      if (!matched.length) { if (!cancelled) setHints([]); return; }
+      const { data: bb } = await supabase.from("bills").select("shipment_id, direction").in("shipment_id", matched.map(s => s.id));
+      const arShip = new Set((bb || []).filter(b => b.direction === "AR").map(b => b.shipment_id));
+      const h = matched.map(s => ({
+        id: s.id, order_no: s.order_no,
+        mbl: (s.mbl_no || "").trim() || (s.hbl_no || "").trim() || (s.booking_no || "").trim(),
+        customer: s.customer,
+        reason: arShip.has(s.id) ? "应收账单已开票或已在申请中" : "未生成应收账单，不能申请开票",
+      }));
+      if (!cancelled) setHints(h);
+    })();
+    return () => { cancelled = true; };
+  }, [kw, allBills]);
+
   const toggle = (id) => { const n = new Set(picked); n.has(id) ? n.delete(id) : n.add(id); setPicked(n); };
   const pickedBills = allBills.filter(b => picked.has(b.id));
   const partners = [...new Set(pickedBills.map(b => b.partner_id))];
@@ -304,8 +332,8 @@ function NewRequestDialog({ onClose, onDone }) {
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           {loading ? (
             <div style={{ padding: 20, textAlign: "center", color: "#888" }}>加载中...</div>
-          ) : bills.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: "#999" }}>{allBills.length === 0 ? "暂无可申请的应收账单（都已开票或已在申请中）" : "无匹配结果 —— 该订单可能尚未生成应收账单（需先在订单「费用」里生成应收账单）"}</div>
+          ) : (bills.length === 0 && hints.length === 0) ? (
+            <div style={{ padding: 20, textAlign: "center", color: "#999" }}>{allBills.length === 0 ? "暂无可申请的应收账单（都已开票或已在申请中）" : "无匹配结果"}</div>
           ) : (
             <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
               <thead>
@@ -326,6 +354,16 @@ function NewRequestDialog({ onClose, onDone }) {
                     <td style={td}>{b.partner_name || "—"}</td>
                     <td style={{ ...td, fontFamily: "Consolas,monospace", color: BRAND }}>{b.bill_no}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "Consolas,monospace" }}>{b.currency} {Number(b.amount_total).toFixed(2)}</td>
+                  </tr>
+                ))}
+                {/* 搜到但不可申请的订单：灰色提示，不可勾选 */}
+                {hints.map(h => (
+                  <tr key={h.id} style={{ borderTop: "1px solid #f5f5f5", background: "#fafafa", color: "#bbb" }} title={h.reason}>
+                    <td style={{ ...td, textAlign: "center" }}>🚫</td>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace" }}>{h.order_no || "—"}</td>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace" }}>{h.mbl || "—"}</td>
+                    <td style={td}>{h.customer || "—"}</td>
+                    <td colSpan={2} style={{ ...td, color: "#fa8c16" }}>⚠ {h.reason}</td>
                   </tr>
                 ))}
               </tbody>

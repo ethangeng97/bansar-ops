@@ -129,7 +129,7 @@ export default function StatementDetail({ statementId, onBack }) {
   const requestInvoice = async () => {
     const arBills = bills.filter(b => b.direction === "AR" && b.status !== "void");
     if (arBills.length === 0) { alert("本对账单下无可申请开票的应收账单"); return; }
-    const note = prompt(`为本对账单 ${arBills.length} 张应收账单提交开票申请\n开票抬头/备注（可选）：`, "");
+    const note = prompt(`为本对账单 ${arBills.length} 张应收账单提交开票申请\n开票要求（可选，如专票/普票、开票内容、寄送方式）：`, "");
     if (note === null) return;
     const { error } = await supabase.rpc("create_invoice_request", {
       p_bill_ids: arBills.map(b => b.id), p_note: note || null,

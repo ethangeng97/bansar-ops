@@ -140,7 +140,7 @@ export default function BillsList({ onBack }) {
     if (sel.some(b => b.direction !== "AR")) { alert("只能对应收账单申请开票"); return; }
     if ([...new Set(sel.map(b => b.partner_id))].length > 1) { alert("所选账单分属不同客户，无法合并申请"); return; }
     if ([...new Set(sel.map(b => b.currency || "CNY"))].length > 1) { alert("所选账单币别不一致，请分别申请"); return; }
-    const note = prompt(`向「${sel[0].partner_name || "该客户"}」提交开票申请\n开票抬头/备注（可选）：`, "");
+    const note = prompt(`向「${sel[0].partner_name || "该客户"}」提交开票申请\n开票要求（可选，如专票/普票、开票内容、寄送方式）：`, "");
     if (note === null) return;
     const { error } = await supabase.rpc("create_invoice_request", {
       p_bill_ids: sel.map(b => b.id), p_note: note || null,

@@ -207,40 +207,27 @@ export default function InvoiceRequestsList({ user, onBack }) {
   );
 }
 
-// ── 新建开票申请：选客户 → 勾该客户未开票的应收账单 → create_invoice_request ──
+// ── 新建开票申请：搜订单/提单/客户 → 勾选相关应收账单(单票/多票) → create_invoice_request ──
 function NewRequestDialog({ onClose, onDone }) {
-  const [customers, setCustomers] = useState([]);
-  const [customerId, setCustomerId] = useState("");
-  const [bills, setBills] = useState([]);
-  const [shipMap, setShipMap] = useState({});
+  const [allBills, setAllBills] = useState([]);   // 候选应收账单(含订单信息)
   const [picked, setPicked] = useState(new Set());
-  const [note, setNote] = useState("");
+  const [kw, setKw] = useState("");
+  const [requirement, setRequirement] = useState(""); // 开票要求
   const [title, setTitle] = useState("");
-  const [loadingBills, setLoadingBills] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
+  // 载入所有可申请的应收账单(未作废、未在 待开票/已开票 申请中)，附订单号/提单号
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("customers").select("id, name").order("name");
-      setCustomers(data || []);
-    })();
-  }, []);
-
-  // 选客户后：拉该客户应收账单，排除已在 待开票/已开票 申请里的
-  useEffect(() => {
-    if (!customerId) { setBills([]); setPicked(new Set()); return; }
-    (async () => {
-      setLoadingBills(true);
+      setLoading(true);
       const { data: bs } = await supabase.from("bills")
-        .select("id, bill_no, shipment_id, amount_total, currency, status, invoice_no")
-        .eq("direction", "AR").eq("partner_id", customerId)
-        .order("created_at", { ascending: false });
+        .select("id, bill_no, shipment_id, partner_id, partner_name, amount_total, currency, status, invoice_no")
+        .eq("direction", "AR").order("created_at", { ascending: false });
       let rows = (bs || []).filter(b => b.status !== "void");
-      // 排除已在 待开票/已开票 申请里的账单（两步查，避免嵌套语法）
       const ids = rows.map(b => b.id);
       if (ids.length) {
-        const { data: used } = await supabase.from("invoice_request_bills")
-          .select("bill_id, request_id").in("bill_id", ids);
+        const { data: used } = await supabase.from("invoice_request_bills").select("bill_id, request_id").in("bill_id", ids);
         const reqIds = [...new Set((used || []).map(u => u.request_id))];
         let activeReq = new Set();
         if (reqIds.length) {
@@ -250,28 +237,39 @@ function NewRequestDialog({ onClose, onDone }) {
         const usedSet = new Set((used || []).filter(u => activeReq.has(u.request_id)).map(u => u.bill_id));
         rows = rows.filter(b => !usedSet.has(b.id));
       }
-      setBills(rows);
-      setPicked(new Set());
       const shipIds = [...new Set(rows.map(b => b.shipment_id).filter(Boolean))];
+      let m = {};
       if (shipIds.length) {
         const { data: ss } = await supabase.from("shipments").select("id, order_no, mbl_no, hbl_no, booking_no").in("id", shipIds);
-        const m = {}; (ss || []).forEach(x => { m[x.id] = x; }); setShipMap(m);
-      } else setShipMap({});
-      setLoadingBills(false);
+        (ss || []).forEach(x => { m[x.id] = x; });
+      }
+      rows = rows.map(b => {
+        const s = m[b.shipment_id] || {};
+        return { ...b, order_no: s.order_no || "", mbl: (s.mbl_no || "").trim() || (s.hbl_no || "").trim() || (s.booking_no || "").trim() };
+      });
+      setAllBills(rows);
+      setLoading(false);
     })();
-  }, [customerId]);
+  }, []);
+
+  const k = kw.toLowerCase().trim();
+  const bills = !k ? allBills : allBills.filter(b =>
+    (b.order_no || "").toLowerCase().includes(k) || (b.mbl || "").toLowerCase().includes(k) ||
+    (b.partner_name || "").toLowerCase().includes(k) || (b.bill_no || "").toLowerCase().includes(k));
 
   const toggle = (id) => { const n = new Set(picked); n.has(id) ? n.delete(id) : n.add(id); setPicked(n); };
-  const pickedBills = bills.filter(b => picked.has(b.id));
+  const pickedBills = allBills.filter(b => picked.has(b.id));
+  const partners = [...new Set(pickedBills.map(b => b.partner_id))];
   const currencies = [...new Set(pickedBills.map(b => b.currency || "CNY"))];
   const total = pickedBills.reduce((s, b) => s + Number(b.amount_total || 0), 0);
 
   const submit = async () => {
-    if (picked.size === 0) { alert("请勾选要开票的应收账单"); return; }
+    if (picked.size === 0) { alert("请勾选要开票的应收账单（可跨订单多选，但须同一客户、同一币别）"); return; }
+    if (partners.length > 1) { alert("所选账单分属不同客户，无法合并到一张发票申请"); return; }
     if (currencies.length > 1) { alert("所选账单币别不一致，请分别申请"); return; }
     setBusy(true);
     const { error } = await supabase.rpc("create_invoice_request", {
-      p_bill_ids: [...picked], p_note: note || null, p_invoice_title: title || null,
+      p_bill_ids: [...picked], p_note: requirement || null, p_invoice_title: title || null,
     });
     setBusy(false);
     if (error) { alert("提交失败：" + error.message); return; }
@@ -282,67 +280,57 @@ function NewRequestDialog({ onClose, onDone }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex",
                   alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-      <div style={{ background: "#fff", borderRadius: 4, width: 680, maxWidth: "95vw", maxHeight: "90vh",
+      <div style={{ background: "#fff", borderRadius: 4, width: 760, maxWidth: "95vw", maxHeight: "90vh",
                     display: "flex", flexDirection: "column", boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
         <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: 14, fontWeight: 700 }}>新建开票申请（应收）</span>
           <a onClick={onClose} style={{ cursor: "pointer", color: "#999" }}>×</a>
         </div>
 
-        <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 12 }}>
-            <span style={{ color: "#888" }}>客户 *</span>
-            <select value={customerId} onChange={e => setCustomerId(e.target.value)}
-                    style={{ flex: 1, padding: "6px 10px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12 }}>
-              <option value="">请选择客户</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f0f0" }}>
+          <input value={kw} onChange={e => setKw(e.target.value)} placeholder="搜索 订单号 / 提单号 / 客户 / 账单号 —— 选 1 票或多票"
+                 style={{ width: "100%", padding: "6px 10px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, boxSizing: "border-box" }} />
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          {!customerId ? (
-            <div style={{ padding: 20, textAlign: "center", color: "#bbb" }}>请先选择客户</div>
-          ) : loadingBills ? (
+          {loading ? (
             <div style={{ padding: 20, textAlign: "center", color: "#888" }}>加载中...</div>
           ) : bills.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: "#999" }}>该客户暂无可申请的应收账单（可能都已开票或已在申请中）</div>
+            <div style={{ padding: 20, textAlign: "center", color: "#999" }}>{allBills.length === 0 ? "暂无可申请的应收账单（都已开票或已在申请中）" : "无匹配结果"}</div>
           ) : (
             <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#fafafa", color: "#444" }}>
                   <th style={{ ...th, width: 28, textAlign: "center" }}>
-                    <input type="checkbox" checked={picked.size === bills.length && bills.length > 0}
-                           onChange={() => setPicked(picked.size === bills.length ? new Set() : new Set(bills.map(b => b.id)))} />
+                    <input type="checkbox" checked={bills.every(b => picked.has(b.id)) && bills.length > 0}
+                           onChange={() => { const n = new Set(picked); const all = bills.every(b => picked.has(b.id)); bills.forEach(b => all ? n.delete(b.id) : n.add(b.id)); setPicked(n); }} />
                   </th>
-                  <th style={th}>账单号</th><th style={th}>提单号</th><th style={{ ...th, textAlign: "right" }}>金额</th>
+                  <th style={th}>订单号</th><th style={th}>提单号</th><th style={th}>客户</th><th style={th}>账单号</th><th style={{ ...th, textAlign: "right" }}>金额</th>
                 </tr>
               </thead>
               <tbody>
-                {bills.map(b => {
-                  const ship = shipMap[b.shipment_id];
-                  const mbl = ship ? ((ship.mbl_no || "").trim() || (ship.hbl_no || "").trim() || (ship.booking_no || "").trim()) : "";
-                  return (
-                    <tr key={b.id} style={{ borderTop: "1px solid #f5f5f5", background: picked.has(b.id) ? "#e6f4ff" : "#fff" }}>
-                      <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} /></td>
-                      <td style={{ ...td, fontFamily: "Consolas,monospace", color: BRAND }}>{b.bill_no}</td>
-                      <td style={{ ...td, fontFamily: "Consolas,monospace", color: "#444" }}>{mbl || "—"}</td>
-                      <td style={{ ...td, textAlign: "right", fontFamily: "Consolas,monospace" }}>{b.currency} {Number(b.amount_total).toFixed(2)}</td>
-                    </tr>
-                  );
-                })}
+                {bills.map(b => (
+                  <tr key={b.id} style={{ borderTop: "1px solid #f5f5f5", background: picked.has(b.id) ? "#e6f4ff" : "#fff" }}>
+                    <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} /></td>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace", color: "#1990ff" }}>{b.order_no || "—"}</td>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace", color: "#444" }}>{b.mbl || "—"}</td>
+                    <td style={td}>{b.partner_name || "—"}</td>
+                    <td style={{ ...td, fontFamily: "Consolas,monospace", color: BRAND }}>{b.bill_no}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "Consolas,monospace" }}>{b.currency} {Number(b.amount_total).toFixed(2)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
           <div style={{ marginTop: 12, display: "flex", gap: 12 }}>
             <div style={{ flex: 1 }}>
               <div style={{ color: "#888", fontSize: 12, marginBottom: 4 }}>开票抬头（可选）</div>
-              <input value={title} onChange={e => setTitle(e.target.value)} placeholder="如客户开票抬头/税号要求"
+              <input value={title} onChange={e => setTitle(e.target.value)} placeholder="客户开票抬头 / 税号"
                      style={{ width: "100%", padding: "6px 10px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, boxSizing: "border-box" }} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ color: "#888", fontSize: 12, marginBottom: 4 }}>备注（可选）</div>
-              <input value={note} onChange={e => setNote(e.target.value)}
+              <div style={{ color: "#888", fontSize: 12, marginBottom: 4 }}>开票要求（可选）</div>
+              <input value={requirement} onChange={e => setRequirement(e.target.value)} placeholder="如：专票 / 普票、寄送方式、开票内容等"
                      style={{ width: "100%", padding: "6px 10px", border: "1px solid #d9d9d9", borderRadius: 3, fontSize: 12, boxSizing: "border-box" }} />
             </div>
           </div>
@@ -351,7 +339,8 @@ function NewRequestDialog({ onClose, onDone }) {
         <div style={{ padding: 12, borderTop: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "#666" }}>
             已选 <b style={{ color: BRAND }}>{picked.size}</b> 张
-            {picked.size > 0 && <> · 合计 <b style={{ color: "#1990ff", fontFamily: "Consolas,monospace" }}>{currencies[0] || ""} {total.toFixed(2)}</b></>}
+            {picked.size > 0 && <> · {pickedBills[0]?.partner_name} · 合计 <b style={{ color: "#1990ff", fontFamily: "Consolas,monospace" }}>{currencies[0] || ""} {total.toFixed(2)}</b></>}
+            {partners.length > 1 && <span style={{ color: "#ff4d4f" }}> · ⚠ 含多个客户</span>}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onClose} style={btn} disabled={busy}>取消</button>
@@ -447,7 +436,7 @@ function ExpandDetail({ request }) {
           </div>
         )}
         {request.request_note && (
-          <div style={{ marginTop: 4, fontSize: 11.5, color: "#666" }}>申请备注：{request.request_note}</div>
+          <div style={{ marginTop: 4, fontSize: 11.5, color: "#666" }}>开票要求：{request.request_note}</div>
         )}
         {request.reject_note && (
           <div style={{ marginTop: 4, fontSize: 11.5, color: "#ff4d4f" }}>驳回原因：{request.reject_note}</div>

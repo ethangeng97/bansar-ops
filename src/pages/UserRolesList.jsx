@@ -19,7 +19,8 @@ const ALL_PAGES = [
 const SCOPES = [["all", "全部(应收+应付)"], ["ar", "仅应收"], ["ap", "仅应付"], ["none", "无财务数据"]];
 const SCOPE_LABEL = Object.fromEntries(SCOPES);
 
-export default function UserRolesList({ onBack }) {
+export default function UserRolesList({ user, onBack }) {
+  const myId = user?.id;
   const [tab, setTab] = useState("users");
   const [roles, setRoles] = useState([]);
   const [users, setUsers] = useState([]);
@@ -27,6 +28,7 @@ export default function UserRolesList({ onBack }) {
   const [loading, setLoading] = useState(true);
   const [showAccount, setShowAccount] = useState(false);
   const [resetUser, setResetUser] = useState(null);
+  const [editUser, setEditUser] = useState(null); // 编辑用户信息
   const [editRole, setEditRole] = useState(null); // role row or {} for new
 
   const load = async () => {
@@ -51,6 +53,18 @@ export default function UserRolesList({ onBack }) {
     const { error } = await supabase.from("user_profiles").update({ role: newRole }).eq("id", u.id);
     if (error) { alert("修改失败：" + error.message); return; }
     await load();
+  };
+
+  const delUser = async (u) => {
+    if (u.id === myId) { alert("不能删除当前登录的自己"); return; }
+    if (!confirm(`确认删除用户「${u.email || u.display_name || u.id}」？\n该登录账号将被永久删除，不可恢复。`)) return;
+    try {
+      await supabase.api("/functions/v1/admin-user-management", {
+        method: "POST", body: JSON.stringify({ action: "delete", user_id: u.id }),
+      });
+      alert("✓ 用户已删除");
+      await load();
+    } catch (e) { alert("删除失败：" + (e?.message || e)); }
   };
 
   const delRole = async (r) => {
@@ -108,8 +122,10 @@ export default function UserRolesList({ onBack }) {
                     </select>
                   </td>
                   <td style={td}>{u.customer_id ? (customers.find(c => c.id === u.customer_id)?.name || u.customer_id.slice(0, 8)) : "—"}</td>
-                  <td style={{ ...td, textAlign: "center" }}>
-                    <a onClick={() => setResetUser(u)} style={{ color: "#1990ff", cursor: "pointer" }}>重置密码</a>
+                  <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                    <a onClick={() => setEditUser(u)} style={{ color: "#1990ff", cursor: "pointer", marginRight: 10 }}>编辑</a>
+                    <a onClick={() => setResetUser(u)} style={{ color: "#fa8c16", cursor: "pointer", marginRight: 10 }}>重置密码</a>
+                    {u.id !== myId && <a onClick={() => delUser(u)} style={{ color: "#ff4d4f", cursor: "pointer" }}>删除</a>}
                   </td>
                 </tr>
               ))}
@@ -143,6 +159,7 @@ export default function UserRolesList({ onBack }) {
 
       {showAccount && <AccountDialog roles={roles} customers={customers} onClose={() => setShowAccount(false)} onDone={() => { setShowAccount(false); load(); }} />}
       {resetUser && <ResetPwdDialog user={resetUser} onClose={() => setResetUser(null)} onDone={() => setResetUser(null)} />}
+      {editUser && <EditUserDialog row={editUser} roles={roles} customers={customers} onClose={() => setEditUser(null)} onDone={() => { setEditUser(null); load(); }} />}
       {editRole && <RoleDialog role={editRole} onClose={() => setEditRole(null)} onDone={() => { setEditRole(null); load(); }} />}
     </div>
   );
@@ -216,6 +233,67 @@ function ResetPwdDialog({ user, onClose, onDone }) {
       <Row label="新密码 *"><input value={pwd} onChange={e => setPwd(e.target.value)} style={inp} placeholder="≥6 位" /></Row>
       <Footer><button onClick={onClose} style={btn} disabled={busy}>取消</button>
         <button onClick={submit} style={btnPrimary} disabled={busy}>{busy ? "提交中..." : "确认重置"}</button></Footer>
+    </Modal>
+  );
+}
+
+// ── 编辑用户信息（姓名/邮箱/角色/关联客户/启用）──
+function EditUserDialog({ row, roles, customers, onClose, onDone }) {
+  const [f, setF] = useState({
+    name: row.display_name || row.full_name || row.name || "",
+    email: row.email || "",
+    role: row.role || "",
+    customer_id: row.customer_id || "",
+    active: row.active !== false,
+  });
+  const [busy, setBusy] = useState(false);
+  const needCustomer = ["customer", "supplier"].includes(f.role);
+
+  const submit = async () => {
+    if (!f.role) { alert("请选择角色"); return; }
+    if (needCustomer && !f.customer_id) { alert("该角色需选择关联客户"); return; }
+    setBusy(true);
+    try {
+      // 1) profile 字段直接更新（admin RLS 允许）
+      const { error } = await supabase.from("user_profiles").update({
+        display_name: f.name || null, name: f.name || null, role: f.role,
+        customer_id: needCustomer ? f.customer_id : (["overseas_agent"].includes(f.role) ? row.customer_id : null),
+        active: f.active,
+      }).eq("id", row.id);
+      if (error) { alert("保存失败：" + error.message); setBusy(false); return; }
+      // 2) 邮箱变更走 edge function
+      if (f.email && f.email.trim() !== (row.email || "")) {
+        await supabase.api("/functions/v1/admin-user-management", {
+          method: "POST", body: JSON.stringify({ action: "update_email", user_id: row.id, email: f.email.trim() }),
+        });
+      }
+      alert("✓ 已保存");
+      onDone();
+    } catch (e) { alert("邮箱更新失败：" + (e?.message || e)); setBusy(false); }
+  };
+
+  return (
+    <Modal title="编辑用户信息" onClose={onClose}>
+      <Row label="登录邮箱"><input value={f.email} onChange={e => setF({ ...f, email: e.target.value })} style={{ ...inp, fontFamily: "Consolas,monospace" }} /></Row>
+      <Row label="姓名"><input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} style={inp} /></Row>
+      <Row label="角色">
+        <select value={f.role} onChange={e => setF({ ...f, role: e.target.value })} style={inp}>
+          {roles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+      </Row>
+      {needCustomer && (
+        <Row label="关联客户 *">
+          <select value={f.customer_id} onChange={e => setF({ ...f, customer_id: e.target.value })} style={inp}>
+            <option value="">请选择</option>
+            {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Row>
+      )}
+      <Row label="状态">
+        <label style={{ fontSize: 12 }}><input type="checkbox" checked={f.active} onChange={e => setF({ ...f, active: e.target.checked })} /> 启用（取消勾选=停用，停用后仍可登录但业务上视为离职/禁用，按需使用）</label>
+      </Row>
+      <Footer><button onClick={onClose} style={btn} disabled={busy}>取消</button>
+        <button onClick={submit} style={btnPrimary} disabled={busy}>{busy ? "保存中..." : "保存"}</button></Footer>
     </Modal>
   );
 }

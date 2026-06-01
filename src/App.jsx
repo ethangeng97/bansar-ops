@@ -23,6 +23,7 @@ import StatementNew from "./pages/StatementNew.jsx";
 import StatementDetail from "./pages/StatementDetail.jsx";
 import StatementImport from "./pages/StatementImport.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
+import InvoiceRequestsList from "./pages/InvoiceRequestsList.jsx";
 import PaymentsList from "./pages/PaymentsList.jsx";
 import ChargesList from "./pages/ChargesList.jsx";
 import ChargesPrint from "./pages/ChargesPrint.jsx";
@@ -31,6 +32,8 @@ import SettlementsList from "./pages/SettlementsList.jsx";
 import ChargeTypesList from "./pages/ChargeTypesList.jsx";
 import ExchangeRatesList from "./pages/ExchangeRatesList.jsx";
 import { SpotBookingsPage } from "./pages/SpotBookings.jsx";
+import UserRolesList from "./pages/UserRolesList.jsx";
+import { canAccessPage } from "./lib/permissions.js";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
@@ -74,7 +77,13 @@ export default function App() {
         const s = supabase.getSession();
         if (s?.access_token && s?.user?.id) {
           const { data } = await supabase.from("user_profiles_view").select("*").eq("id", s.user.id).single();
-          const u = { ...s.user, profile: data || { role: "operator" } };
+          const profile = data || { role: "operator" };
+          // 加载该角色的定义(data_scope + page_access)用于数据驱动权限
+          if (profile.role) {
+            const { data: rd } = await supabase.from("roles").select("*").eq("key", profile.role).single();
+            if (rd) profile.roleDef = rd;
+          }
+          const u = { ...s.user, profile };
           setUser(u);
           if (u.profile.role === "operator" || u.profile.role === "sales") setLang("zh");
         }
@@ -180,40 +189,54 @@ export default function App() {
 
   function renderRoute() {
 
+  // 页面级门禁：无权访问则给提示页（数据层另有 RLS 兜底）
+  const guard = (pageKey, element) =>
+    canAccessPage(user, pageKey) ? element : <NoAccess onBack={() => { window.location.hash = ""; }} />;
+
   // 没有 hash 路由 → 显示门户首页
   if (!route) {
     return <Portal user={user} onLogout={logout} />;
   }
 
+  // 用户角色管理（admin）
+  if (route === "user-admin") {
+    return guard("user_admin", <UserRolesList user={user} onBack={() => { window.location.hash = ""; }} />);
+  }
+
   // 静态路由：账单管理列表 #/bills
   if (route === "bills") {
-    return <BillsList onBack={() => { window.location.hash = ""; }} />;
+    return guard("billing", <BillsList onBack={() => { window.location.hash = ""; }} />);
   }
 
   // 导入对账单 #/import-statement
   if (route === "import-statement") {
-    return <StatementImport user={user} onBack={() => { window.location.hash = ""; }} />;
+    return guard("billing", <StatementImport user={user} onBack={() => { window.location.hash = ""; }} />);
   }
 
   // ── V5 财务模块路由 ──
   // #/invoices 开票/收票记录
   if (route === "invoices") {
-    return <InvoicesList user={user} onBack={() => { window.location.hash = ""; }} />;
+    return guard("invoices", <InvoicesList user={user} onBack={() => { window.location.hash = ""; }} />);
+  }
+
+  // #/invoice-requests 开票申请
+  if (route === "invoice-requests") {
+    return guard("invoice_requests", <InvoiceRequestsList user={user} onBack={() => { window.location.hash = ""; }} />);
   }
 
   // #/payments 收付款记录
   if (route === "payments") {
-    return <PaymentsList onBack={() => { window.location.hash = ""; }} />;
+    return guard("payments", <PaymentsList user={user} onBack={() => { window.location.hash = ""; }} />);
   }
 
   // #/charges 费用记录(全局只读视图)
   if (route === "charges") {
-    return <ChargesList onBack={() => { window.location.hash = ""; }} />;
+    return guard("charges", <ChargesList onBack={() => { window.location.hash = ""; }} />);
   }
 
   // #/settlements 核销管理(以账单为视角的反向视图)
   if (route === "settlements") {
-    return <SettlementsList onBack={() => { window.location.hash = ""; }} />;
+    return guard("billing", <SettlementsList onBack={() => { window.location.hash = ""; }} />);
   }
 
   // #/exchange_rates 汇率设置 CRUD
@@ -340,7 +363,7 @@ export default function App() {
 
   // 动态路由：新建对账单 #/statements/new
   if (route === "statements/new" || route.startsWith("statements/new?")) {
-    return (
+    return guard("billing",
       <StatementNew
         onBack={() => { window.location.hash = "#/statements"; }}
       />
@@ -349,8 +372,9 @@ export default function App() {
 
   // 动态路由：对账单列表 #/statements
   if (route === "statements") {
-    return (
+    return guard("billing",
       <StatementsList
+        user={user}
         onBack={() => { window.location.hash = ""; }}
       />
     );
@@ -359,7 +383,7 @@ export default function App() {
   // 动态路由：对账单详情（明细列表）#/statements/:id
   if (route.startsWith("statements/")) {
     const statementId = route.slice("statements/".length);
-    return (
+    return guard("billing",
       <StatementDetail
         statementId={statementId}
         onBack={() => { window.location.hash = "#/statements"; }}
@@ -387,4 +411,20 @@ export default function App() {
     />
   );
   }
+}
+
+// 无权访问提示页
+function NoAccess({ onBack }) {
+  return (
+    <div style={{ padding: 40, textAlign: "center", color: "#666", background: "#f0f2f5", minHeight: "100vh" }}>
+      <div style={{ background: "#fff", maxWidth: 420, margin: "80px auto", padding: 32, borderRadius: 6,
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>无权访问</div>
+        <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>你的角色没有此页面的访问权限，请联系管理员。</div>
+        <button onClick={onBack} style={{ padding: "6px 18px", background: "#1990ff", color: "#fff",
+                  border: "none", borderRadius: 3, cursor: "pointer", fontSize: 13 }}>返回首页</button>
+      </div>
+    </div>
+  );
 }

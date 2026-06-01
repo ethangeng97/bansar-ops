@@ -133,6 +133,24 @@ export default function BillsList({ onBack }) {
     setShowBatchMenu(false);
   };
 
+  // 申请开票：仅应收、同客户、同币别 → create_invoice_request（走「开票申请」流程）
+  const batchRequestInvoice = async () => {
+    if (selected.size === 0) { alert("请先勾选要申请开票的账单"); return; }
+    const sel = bills.filter(b => selected.has(b.id));
+    if (sel.some(b => b.direction !== "AR")) { alert("只能对应收账单申请开票"); return; }
+    if ([...new Set(sel.map(b => b.partner_id))].length > 1) { alert("所选账单分属不同客户，无法合并申请"); return; }
+    if ([...new Set(sel.map(b => b.currency || "CNY"))].length > 1) { alert("所选账单币别不一致，请分别申请"); return; }
+    const note = prompt(`向「${sel[0].partner_name || "该客户"}」提交开票申请\n开票抬头/备注（可选）：`, "");
+    if (note === null) return;
+    const { error } = await supabase.rpc("create_invoice_request", {
+      p_bill_ids: sel.map(b => b.id), p_note: note || null,
+    });
+    if (error) { alert("申请失败：" + error.message); return; }
+    alert("✓ 已提交开票申请，可在财务模块「开票申请」中查看处理进度");
+    setShowBatchMenu(false);
+    setSelected(new Set());
+  };
+
   // 批量核销（弹窗输入核销日期 + 流水号，每张账单整额核销其未核销部分）
   const batchSettle = async () => {
     if (selected.size === 0) { alert("请先勾选要核销的账单"); return; }
@@ -312,7 +330,8 @@ export default function BillsList({ onBack }) {
                   boxShadow: "0 4px 12px rgba(0,0,0,0.12)", width: 140, zIndex: 10,
                   padding: "4px 0",
                 }}>
-                  <div onClick={batchInvoice} style={menuItem}>批量开票</div>
+                  <div onClick={batchRequestInvoice} style={{ ...menuItem, color: "#fa8c16", fontWeight: 600 }}>申请开票</div>
+                  <div onClick={batchInvoice} style={menuItem}>直接开票</div>
                   <div onClick={batchSettle} style={menuItem}>批量核销</div>
                   <div onClick={batchClearInvoice} style={menuItem}>批量清票</div>
                   <div onClick={batchDelete} style={{ ...menuItem, color: "#ff4d4f" }}>批量删除</div>

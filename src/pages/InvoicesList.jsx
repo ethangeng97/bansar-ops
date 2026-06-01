@@ -10,6 +10,7 @@ import { useEffect, useState, Fragment, useMemo } from "react";
 import { supabase } from "../supabase.js";
 import InvoiceEditor from "./InvoiceEditor.jsx";
 import InvoiceImportDialog from "./InvoiceImportDialog.jsx";
+import { dataScopeOf } from "../lib/permissions.js";
 
 const BRAND = "#1f3864";
 
@@ -22,8 +23,10 @@ const formatDate = (d) => {
 export default function InvoicesList({ user, onBack }) {
   const role = user?.profile?.role || "operator";
   const isAdmin = role === "admin";
+  const _scope = dataScopeOf(user);
+  const allowedDirs = _scope === "ar" ? ["AR"] : _scope === "ap" ? ["AP"] : ["AR", "AP"];
 
-  const [direction, setDirection] = useState("AR");
+  const [direction, setDirection] = useState(allowedDirs[0]);
   const [kindFilter, setKindFilter] = useState("business"); // business / non_business / all
   const [invoices, setInvoices] = useState([]);
   const [billsByInvoice, setBillsByInvoice] = useState({});
@@ -150,7 +153,7 @@ export default function InvoicesList({ user, onBack }) {
 
         {/* AR/AP Tab */}
         <div style={{ display: "flex", gap: 0, marginBottom: 8, borderBottom: "1px solid #e8e8e8" }}>
-          {[["AR","开票记录（应收）"],["AP","收票记录（应付）"]].map(([key, label]) => (
+          {[["AR","开票记录（应收）"],["AP","收票记录（应付）"]].filter(([k]) => allowedDirs.includes(k)).map(([key, label]) => (
             <div key={key} onClick={() => setDirection(key)}
                  style={{
                    padding: "10px 24px", cursor: "pointer",

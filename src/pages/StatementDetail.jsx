@@ -125,6 +125,20 @@ export default function StatementDetail({ statementId, onBack }) {
     onBack?.();
   };
 
+  // 申请开票：对本对账单下的应收账单整单提交开票申请
+  const requestInvoice = async () => {
+    const arBills = bills.filter(b => b.direction === "AR" && b.status !== "void");
+    if (arBills.length === 0) { alert("本对账单下无可申请开票的应收账单"); return; }
+    const note = prompt(`为本对账单 ${arBills.length} 张应收账单提交开票申请\n开票抬头/备注（可选）：`, "");
+    if (note === null) return;
+    const { error } = await supabase.rpc("create_invoice_request", {
+      p_bill_ids: arBills.map(b => b.id), p_note: note || null,
+    });
+    if (error) { alert("申请失败：" + error.message); return; }
+    alert("✓ 已提交开票申请，可在财务模块「开票申请」中查看处理进度");
+    await reload();
+  };
+
   // 单条解绑（直接清 bill.statement_id）
   const unbindOne = async (bill) => {
     if (!confirm(`确认从对账单中移除账单 ${bill.bill_no}？`)) return;
@@ -177,6 +191,12 @@ export default function StatementDetail({ statementId, onBack }) {
                style={{ ...btn, textDecoration: "none", display: "inline-block" }}>
               查看 PDF
             </a>
+            {stmt.direction === "AR" && stmt.status !== "void" && (
+              <button onClick={requestInvoice}
+                      style={{ ...btnPrimary, background: "#fa8c16", border: "1px solid #fa8c16" }}>
+                申请开票
+              </button>
+            )}
             {stmt.status !== "settled" && stmt.status !== "void" && (
               <button onClick={markSettled} style={btnPrimary}>
                 标{stmt.direction === "AP" ? "已付" : "已收"}

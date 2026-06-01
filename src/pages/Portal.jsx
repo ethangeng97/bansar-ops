@@ -8,6 +8,14 @@
 import { useState, useEffect, useRef, Fragment } from "react";
 import { supabase } from "../supabase.js";
 import { SOP_NODES, isNodeDone } from "../lib/constants.js";
+import { canAccessPage } from "../lib/permissions.js";
+
+// 节点 href → 权限页面 key（用于按角色隐藏首页卡片；未列出的 href 默认可见）
+const HREF_PAGE = {
+  "#/charges": "charges", "#/bills": "billing", "#/statements": "billing",
+  "#/import-statement": "billing", "#/settlements": "billing",
+  "#/invoices": "invoices", "#/invoice-requests": "invoice_requests", "#/payments": "payments",
+};
 
 // ── 模块定义（左侧菜单） ──
 const MODULES = [
@@ -80,6 +88,7 @@ const NODES_FINANCE = {
     { name: "导入对账单",   icon: "filelist", href: "#/import-statement" },
   ],
   2: [
+    { name: "开票申请",     icon: "ticket",   href: "#/invoice-requests" },
     { name: "开票记录",     icon: "ticket",   href: "#/invoices" },
     { name: "收付款记录",   icon: "dollar",   href: "#/payments" },
     { name: "核销管理",     icon: "rotate",   href: "#/settlements" },
@@ -219,7 +228,9 @@ export default function Portal({ user, onLogout }) {
         <div className="ri">
           <span className="mi">{userName}<span className="ar"></span></span>
           <span className="mi">BS（NB）GJ<span className="ar"></span></span>
-          <span className="mi">{role === "admin" ? "管理部" : "操作部"}<span className="ar"></span></span>
+          {role === "admin"
+            ? <span className="mi" style={{ cursor: "pointer" }} onClick={() => { window.location.hash = "#/user-admin"; }} title="用户角色管理">管理部<span className="ar"></span></span>
+            : <span className="mi">操作部<span className="ar"></span></span>}
           <span className="mi">简体中文<span className="ar"></span></span>
           <span className="mi" onClick={onLogout}>退出<span className="ar"></span></span>
         </div>
@@ -338,7 +349,7 @@ export default function Portal({ user, onLogout }) {
                 {STAGES.map((s, i) => (
                   <Fragment key={s.num}>
                     <div className="tms-col">
-                      {NODES[s.num].map((n, ni) => {
+                      {NODES[s.num].filter(n => !n.href || !HREF_PAGE[n.href] || canAccessPage(user, HREF_PAGE[n.href])).map((n, ni) => {
                         const clickable = !!n.href || !!n.submenu;
                         const isOpen = submenuFor && submenuFor.stage === s.num && submenuFor.idx === ni;
                         return (

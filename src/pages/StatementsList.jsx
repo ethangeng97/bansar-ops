@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase.js";
+import { dataScopeOf } from "../lib/permissions.js";
 
 const BRAND = "#1f3864";
 
@@ -28,8 +29,10 @@ const STATUS_LABELS_AP = {
   void:      { label: "作废",     color: "#888",    bg: "#fafafa" },
 };
 
-export default function StatementsList({ onBack }) {
-  const [direction, setDirection] = useState("AR"); // AR / AP
+export default function StatementsList({ user, onBack }) {
+  const scope = dataScopeOf(user);
+  const allowedDirs = scope === "ar" ? ["AR"] : scope === "ap" ? ["AP"] : ["AR", "AP"];
+  const [direction, setDirection] = useState(allowedDirs[0]); // AR / AP
   const [statements, setStatements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -161,7 +164,7 @@ export default function StatementsList({ onBack }) {
 
         {/* Tab */}
         <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
-          {[["AR", "应收对账单"], ["AP", "应付对账单"]].map(([key, label]) => (
+          {[["AR", "应收对账单"], ["AP", "应付对账单"]].filter(([k]) => allowedDirs.includes(k)).map(([key, label]) => (
             <div key={key}
                  onClick={() => setDirection(key)}
                  style={{

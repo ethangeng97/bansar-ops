@@ -10,6 +10,7 @@
 import { useEffect, useState, Fragment } from "react";
 import { supabase } from "../supabase.js";
 import PaymentEditor from "./PaymentEditor.jsx";
+import { dataScopeOf } from "../lib/permissions.js";
 
 const BRAND = "#1f3864";
 const PAGE_SIZE = 50;
@@ -40,8 +41,10 @@ const csvCell = (v) => {
 };
 const csvRow = (cells) => cells.map(csvCell).join(",");
 
-export default function PaymentsList({ onBack }) {
-  const [direction, setDirection] = useState("AR");      // AR=收款 / AP=付款
+export default function PaymentsList({ user, onBack }) {
+  const _scope = dataScopeOf(user);
+  const allowedDirs = _scope === "ar" ? ["AR"] : _scope === "ap" ? ["AP"] : ["AR", "AP"];
+  const [direction, setDirection] = useState(allowedDirs[0]);  // AR=收款 / AP=付款
   const [payments, setPayments] = useState([]);          // 当前页的 payment 数组(最多 PAGE_SIZE 行)
   const [billsByPayment, setBillsByPayment] = useState({}); // { [payment_id]: [{bill, applied_amount}] }
   const [loading, setLoading] = useState(true);
@@ -307,7 +310,7 @@ export default function PaymentsList({ onBack }) {
 
         {/* AR/AP Tab */}
         <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
-          {[["AR", "收款记录(应收)"], ["AP", "付款记录(应付)"]].map(([key, label]) => (
+          {[["AR", "收款记录(应收)"], ["AP", "付款记录(应付)"]].filter(([k]) => allowedDirs.includes(k)).map(([key, label]) => (
             <div key={key}
                  onClick={() => { setDirection(key); setPage(0); }}
                  style={{

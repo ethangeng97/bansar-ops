@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../supabase.js";
-import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination } from "../components/tms.jsx";
+import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination, ModalShell } from "../components/tms.jsx";
 import SpotBookingImportModal from "../components/SpotBookingImportModal.jsx";
 import { COMMON_CARRIERS } from "../lib/carriers.js";
 import { getCachedRef } from "../lib/ref-cache.js";
@@ -709,31 +709,7 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
 }
 
 // ─── 通用 modal & form ─────────────────────────────────────────
-function ModalShell({ title, children, actions, onClose }) {
-  return (
-    <div onClick={onClose} style={{
-      position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-      background: "rgba(0,0,0,.35)", zIndex: 100,
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        background: "#fff", borderRadius: 6, width: "min(900px, 95vw)",
-        maxHeight: "92vh", display: "flex", flexDirection: "column",
-        boxShadow: "0 10px 40px rgba(0,0,0,.2)",
-      }}>
-        <div style={{ padding: "12px 18px", borderBottom: "1px solid #e8e8e8",
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                      background: "linear-gradient(#fafafa,#f0f0f0)" }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
-          <button onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#999" }}>×</button>
-        </div>
-        <div style={{ padding: 18, overflowY: "auto", flex: 1 }}>{children}</div>
-        <div style={{ padding: "10px 18px", borderTop: "1px solid #e8e8e8",
-                      display: "flex", justifyContent: "flex-end", gap: 8 }}>{actions}</div>
-      </div>
-    </div>
-  );
-}
+// ModalShell 已抽到 components/tms.jsx 共享，这里直接 import 使用
 
 function Group({ title, children }) {
   return (

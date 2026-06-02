@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useImperativeHandle } from "react";
 import { supabase } from "../supabase.js";
 import { Spinner, ComboBox } from "../components/ui.jsx";
-import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress } from "../components/tms.jsx";
+import { TmsTitle, Mi, MiDropdown, Tbl, Fi, TmsTabs, TmsInfoBar, TmsPagination, Df, DfCheckbox, LifecycleStamp, SopProgress, ModalShell } from "../components/tms.jsx";
+import { modalBtnPrimary, modalBtnSecondary } from "../lib/modal-styles.js";
 import { COMMON_CARRIERS } from "../lib/carriers.js";
 import PortPicker from "../components/PortPicker.jsx";
 import ContainerEditor from "../components/ContainerEditor.jsx";
@@ -6704,33 +6705,20 @@ function SpaceReturnModal({ order, user, onClose, onDone }) {
     onDone?.(res);
   };
 
-  const overlay = {
-    position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 200,
-    display: "flex", alignItems: "center", justifyContent: "center",
-  };
-  const box = {
-    background: "#fff", borderRadius: 6, width: "min(640px, 95vw)",
-    maxHeight: "88vh", display: "flex", flexDirection: "column",
-    boxShadow: "0 10px 40px rgba(0,0,0,.2)",
-  };
-  const head = {
-    padding: "12px 18px", borderBottom: "1px solid #e8e8e8",
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-    background: "linear-gradient(#fafafa,#f0f0f0)",
-  };
   const lbl = { fontSize: 12, color: "#666", display: "block", marginBottom: 4 };
   const inp = { width: "100%", padding: "6px 8px", border: "1px solid #d9d9d9", borderRadius: 4, fontSize: 13, boxSizing: "border-box" };
   const radioRow = { display: "flex", alignItems: "center", gap: 6, padding: "7px 0", fontSize: 13, cursor: "pointer" };
 
   return (
-    <div onClick={onClose} style={overlay}>
-      <div onClick={e => e.stopPropagation()} style={box}>
-        <div style={head}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>退关 / 改配 — {order.order_no || "本票"}（占用 {cur} 柜）</span>
-          <button onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#999" }}>×</button>
-        </div>
-
-        <div style={{ padding: "14px 18px", overflowY: "auto", flex: 1 }}>
+    <ModalShell
+      title={`退关 / 改配 — ${order.order_no || "本票"}（占用 ${cur} 柜）`}
+      width={640} zIndex={200} bodyPad="14px 18px" onClose={onClose}
+      actions={<>
+        <button onClick={onClose} disabled={saving} style={modalBtnSecondary}>取消</button>
+        <button onClick={submit} disabled={saving} style={{ ...modalBtnPrimary, background: "#cf1322", border: "1px solid #cf1322" }}>
+          {saving ? "处理中..." : "确认"}
+        </button>
+      </>}>
           <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
             当前现舱：{order.carrier || "—"} {order.vessel || ""} {order.voyage || ""} · {order.pol || "—"}→{order.pod || "—"} · ETD {order.etd ? order.etd.slice(0, 10) : "—"}
           </div>
@@ -6799,18 +6787,7 @@ function SpaceReturnModal({ order, user, onClose, onDone }) {
               </select>
             </div>
           </div>
-        </div>
-
-        <div style={{ padding: "10px 18px", borderTop: "1px solid #e8e8e8", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button onClick={onClose} disabled={saving}
-                  style={{ padding: "6px 14px", border: "1px solid #d9d9d9", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>取消</button>
-          <button onClick={submit} disabled={saving}
-                  style={{ padding: "6px 16px", border: "1px solid #cf1322", background: "#cf1322", color: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-            {saving ? "处理中..." : "确认"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -6841,21 +6818,6 @@ function CopyPartiesModal({ open, onClose, currentShipmentId, customer, overseas
 
   if (!open) return null;
 
-  const overlay = {
-    position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 200,
-    display: "flex", alignItems: "center", justifyContent: "center",
-  };
-  const box = {
-    background: "#fff", borderRadius: 6, width: "min(900px, 95vw)",
-    maxHeight: "85vh", display: "flex", flexDirection: "column",
-    boxShadow: "0 10px 40px rgba(0,0,0,.2)",
-  };
-  const head = {
-    padding: "12px 18px", borderBottom: "1px solid #e8e8e8",
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-    background: "linear-gradient(#fafafa,#f0f0f0)",
-  };
-
   const truncate = (s, n = 60) => {
     if (!s) return "—";
     const oneLine = s.replace(/\s+/g, " ").trim();
@@ -6863,13 +6825,7 @@ function CopyPartiesModal({ open, onClose, currentShipmentId, customer, overseas
   };
 
   return (
-    <div onClick={onClose} style={overlay}>
-      <div onClick={e => e.stopPropagation()} style={box}>
-        <div style={head}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>📋 抄录 shipper / consignee / notify</span>
-          <button onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#999" }}>×</button>
-        </div>
-
+    <ModalShell title="📋 抄录 shipper / consignee / notify" width={900} zIndex={200} bodyPad={0} onClose={onClose}>
         <div style={{ padding: "10px 18px", borderBottom: "1px solid #f0f0f0", fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <span>委托单位：<b>{customer || "—"}</b></span>
           {overseasAgent && <span>· 海外代理：<b>{overseasAgent}</b></span>}
@@ -6935,7 +6891,6 @@ function CopyPartiesModal({ open, onClose, currentShipmentId, customer, overseas
         <div style={{ padding: "10px 18px", borderTop: "1px solid #e8e8e8", fontSize: 11, color: "#888", textAlign: "center" }}>
           点「抄录」会把该订单的 shipper / consignee / notify_party 三个字段一起复制到当前订单。点订单号可在新 tab 打开原单。
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -6,6 +6,39 @@
 import { useState, useEffect } from "react";
 import { LIFECYCLE, lifecycleOf, SOP_NODES, nodeStatusOf, applicableNodesFor } from "../lib/constants.js";
 
+/* ── 通用弹窗外壳（单一事实源）─────────────────────────────────────
+   所有弹窗共用同一套 overlay/box/header/footer，避免各页各搓一套不协调。
+   props: title 标题 / children 主体 / actions 底部按钮(没传则不渲染 footer)
+          onClose 关闭 / width 最大宽(px) / zIndex 层级 / bodyPad 主体内边距
+   配套按钮样式 modalBtnPrimary / modalBtnSecondary 也从这里导出复用。 */
+export function ModalShell({ title, children, actions = null, onClose, width = 900, zIndex = 100, bodyPad = 18 }) {
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "#fff", borderRadius: 6, width: `min(${width}px, 95vw)`,
+        maxHeight: "92vh", display: "flex", flexDirection: "column",
+        boxShadow: "0 10px 40px rgba(0,0,0,.2)",
+      }}>
+        <div style={{ padding: "12px 18px", borderBottom: "1px solid #e8e8e8",
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      background: "linear-gradient(#fafafa,#f0f0f0)" }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#999" }}>×</button>
+        </div>
+        <div style={{ padding: bodyPad, overflowY: "auto", flex: 1 }}>{children}</div>
+        {actions && (
+          <div style={{ padding: "10px 18px", borderTop: "1px solid #e8e8e8",
+                        display: "flex", justifyContent: "flex-end", gap: 8 }}>{actions}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+// 配套按钮样式见 src/lib/modal-styles.js（modalBtnPrimary / modalBtnSecondary）
+
 /* ── 标题栏 ─────────────────────────────────────────────────── */
 export function TmsTitle({ title, user, role, onClose }) {
   const goHome = () => {

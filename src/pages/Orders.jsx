@@ -6639,6 +6639,183 @@ function PortRow({ label, required, value, onChange, disabled, title }) {
 // CopyPartiesModal — 抄录历史 shipper/consignee/notify_party
 // 查询：同 customer (+ 同 overseas_agent 优先)的最近订单，按 etd/created_at 倒序
 // ═══════════════════════════════════════════════════════════════
+// 退关 / 部分退关 / 改配——把舱位从本订单退回现舱，并写留痕
+// 条件挂载（父层 {open && <.../>}），故 state 用初始值即可，无需 effect 重置
+function SpaceReturnModal({ order, user, onClose, onDone }) {
+  const cur = numQty(order.qty_container);
+  const [mode, setMode] = useState("cancel");            // cancel / partial / reassign
+  const [partialQty, setPartialQty] = useState(String(Math.max(1, cur - 1)));
+  const [spots, setSpots] = useState([]);
+  const [loadingSpots, setLoadingSpots] = useState(true);
+  const [newSpotId, setNewSpotId] = useState("");
+  const [reason, setReason] = useState("");
+  const [cancelFee, setCancelFee] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [saving, setSaving] = useState(false);
+
+  // 拉可改配的现舱（可售/部分已售、有剩余、排除本现舱）
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const { data: sp } = await supabase.from("spot_bookings")
+        .select("id, carrier, vessel, voyage, pol, pod, etd, total_qty, status, container_size, container_type")
+        .in("status", ["可售", "部分已售"])
+        .order("etd", { ascending: true });
+      const cand = (sp || []).filter(s => s.id !== order.spot_booking_id);
+      const ids = cand.map(s => s.id);
+      const soldMap = {};
+      if (ids.length) {
+        const { data: ships } = await supabase.from("shipments")
+          .select("spot_booking_id, qty_container").in("spot_booking_id", ids);
+        (ships || []).forEach(s => {
+          soldMap[s.spot_booking_id] = (soldMap[s.spot_booking_id] || 0) + numQty(s.qty_container);
+        });
+      }
+      const withRem = cand
+        .map(s => ({ ...s, remaining: (s.total_qty || 0) - (soldMap[s.id] || 0) }))
+        .filter(s => s.remaining > 0);
+      if (alive) { setSpots(withRem); setLoadingSpots(false); }
+    })();
+    return () => { alive = false; };
+  }, [order.spot_booking_id]);
+
+  const submit = async () => {
+    if (mode === "partial") {
+      const n = parseInt(partialQty, 10);
+      if (!Number.isFinite(n) || n <= 0 || n >= cur) { alert(`部分退关柜数需在 1 ~ ${cur - 1} 之间`); return; }
+    }
+    if (mode === "reassign" && !newSpotId) { alert("请选择要改配到的现舱"); return; }
+    setSaving(true);
+    const res = await returnSlotToSpot(order, {
+      mode,
+      returnQty: mode === "partial" ? parseInt(partialQty, 10) : null,
+      newSpotId: mode === "reassign" ? newSpotId : null,
+      reason: reason.trim() || null,
+      cancelFee: cancelFee !== "" ? cancelFee : null,
+      currency,
+      operatorId: user?.id || null,
+    });
+    setSaving(false);
+    if (!res.ok) { alert("操作失败：" + res.reason); return; }
+    const msg = mode === "reassign"
+      ? `✓ 已改配到新现舱，${res.qtyReturned} 柜，原现舱已重算。`
+      : mode === "partial"
+        ? `✓ 已部分退关，退回 ${res.qtyReturned} 柜，本票剩 ${cur - res.qtyReturned} 柜。`
+        : `✓ 已退关，${res.qtyReturned} 柜已退回现舱。`;
+    alert(msg);
+    onDone?.(res);
+  };
+
+  const overlay = {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 200,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  };
+  const box = {
+    background: "#fff", borderRadius: 6, width: "min(640px, 95vw)",
+    maxHeight: "88vh", display: "flex", flexDirection: "column",
+    boxShadow: "0 10px 40px rgba(0,0,0,.2)",
+  };
+  const head = {
+    padding: "12px 18px", borderBottom: "1px solid #e8e8e8",
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    background: "linear-gradient(#fafafa,#f0f0f0)",
+  };
+  const lbl = { fontSize: 12, color: "#666", display: "block", marginBottom: 4 };
+  const inp = { width: "100%", padding: "6px 8px", border: "1px solid #d9d9d9", borderRadius: 4, fontSize: 13, boxSizing: "border-box" };
+  const radioRow = { display: "flex", alignItems: "center", gap: 6, padding: "7px 0", fontSize: 13, cursor: "pointer" };
+
+  return (
+    <div onClick={onClose} style={overlay}>
+      <div onClick={e => e.stopPropagation()} style={box}>
+        <div style={head}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>退关 / 改配 — {order.order_no || "本票"}（占用 {cur} 柜）</span>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#999" }}>×</button>
+        </div>
+
+        <div style={{ padding: "14px 18px", overflowY: "auto", flex: 1 }}>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
+            当前现舱：{order.carrier || "—"} {order.vessel || ""} {order.voyage || ""} · {order.pol || "—"}→{order.pod || "—"} · ETD {order.etd ? order.etd.slice(0, 10) : "—"}
+          </div>
+
+          {/* 方式选择 */}
+          <label style={radioRow}>
+            <input type="radio" checked={mode === "cancel"} onChange={() => setMode("cancel")} />
+            <b>整柜退关</b><span style={{ color: "#888" }}>— {cur} 柜全部退回现舱，订单保留并标记退关(Cancelled)</span>
+          </label>
+          {cur > 1 && (
+            <label style={radioRow}>
+              <input type="radio" checked={mode === "partial"} onChange={() => setMode("partial")} />
+              <b>部分退关</b>
+              {mode === "partial" && (
+                <>
+                  <input type="number" min={1} max={cur - 1} value={partialQty}
+                         onChange={e => setPartialQty(e.target.value)}
+                         style={{ ...inp, width: 70, marginLeft: 4 }} />
+                  <span style={{ color: "#888" }}>柜（退回，本票剩 {Math.max(0, cur - (parseInt(partialQty, 10) || 0))} 柜）</span>
+                </>
+              )}
+            </label>
+          )}
+          <label style={radioRow}>
+            <input type="radio" checked={mode === "reassign"} onChange={() => setMode("reassign")} />
+            <b>改配到其他现舱</b><span style={{ color: "#888" }}>— 换条船，船期/订舱号同步成新现舱</span>
+          </label>
+
+          {mode === "reassign" && (
+            <div style={{ margin: "4px 0 10px 22px" }}>
+              {loadingSpots ? (
+                <div style={{ color: "#888", fontSize: 12, padding: "6px 0" }}>加载现舱...</div>
+              ) : spots.length === 0 ? (
+                <div style={{ color: "#cf1322", fontSize: 12, padding: "6px 0" }}>没有可改配的现舱（无剩余舱位）</div>
+              ) : (
+                <select value={newSpotId} onChange={e => setNewSpotId(e.target.value)} style={inp}>
+                  <option value="">— 选择目标现舱 —</option>
+                  {spots.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.carrier} {s.vessel || ""} {s.voyage || ""} | {s.pol}→{s.pod} | ETD {s.etd ? s.etd.slice(0, 10) : "—"} | 剩 {s.remaining} 柜
+                      {s.remaining < cur ? "（不足本票柜数）" : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* 原因 + 退关费 */}
+          <div style={{ marginTop: 10 }}>
+            <label style={lbl}>退关原因</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+                      placeholder="如：错过 SI 截单 / 客户取消 / 报关被扣 / 甩柜"
+                      style={{ ...inp, resize: "vertical" }} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={lbl}>退关费（选填）</label>
+              <input type="number" value={cancelFee} onChange={e => setCancelFee(e.target.value)}
+                     placeholder="0.00" style={inp} />
+            </div>
+            <div style={{ width: 90 }}>
+              <label style={lbl}>币别</label>
+              <select value={currency} onChange={e => setCurrency(e.target.value)} style={inp}>
+                <option>USD</option><option>CNY</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: "10px 18px", borderTop: "1px solid #e8e8e8", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onClose} disabled={saving}
+                  style={{ padding: "6px 14px", border: "1px solid #d9d9d9", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>取消</button>
+          <button onClick={submit} disabled={saving}
+                  style={{ padding: "6px 16px", border: "1px solid #cf1322", background: "#cf1322", color: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            {saving ? "处理中..." : "确认"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CopyPartiesModal({ open, onClose, currentShipmentId, customer, overseasAgent, onPick }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);

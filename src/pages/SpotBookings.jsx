@@ -15,6 +15,7 @@ import { TmsTitle, Mi, Tbl, TmsInfoBar, TmsPagination } from "../components/tms.
 import SpotBookingImportModal from "../components/SpotBookingImportModal.jsx";
 import { COMMON_CARRIERS } from "../lib/carriers.js";
 import { getCachedRef } from "../lib/ref-cache.js";
+import { numQty, recalcSpotStatus } from "../lib/spot-inventory.js";
 
 const STATUS_OPTS = ["可售", "部分已售", "全部已售", "已截单", "已取消"];
 const STATUS_BG = {
@@ -23,14 +24,6 @@ const STATUS_BG = {
   "全部已售": { bg: "#f5f5f5", fg: "#888",    bd: "#ddd"    },
   "已截单":   { bg: "#fff1f0", fg: "#cf1322", bd: "#ffa39e" },
   "已取消":   { bg: "#f5f5f5", fg: "#aaa",    bd: "#ddd"    },
-};
-
-// qty_container 是 text 类型，可能是 "1" / "1x40HC" / ""，统一抽出整数（前缀数字）
-// 没填或不可识别时 fallback 到 1 柜
-const numQty = (v) => {
-  if (v == null) return 1;
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) && n > 0 ? n : 1;
 };
 
 const fmtDate = (d) => {
@@ -365,26 +358,6 @@ export function SpotBookingsPage({ user, onBack }) {
   );
 }
 
-// 重算现舱状态 = sum(shipments.qty_container WHERE spot_booking_id=X) vs total_qty
-// 用户手动改的"已截单/已取消"不覆盖
-async function recalcSpotStatusInline(spotId) {
-  if (!spotId) return;
-  const [{ data: spot }, { data: ships }] = await Promise.all([
-    supabase.from("spot_bookings").select("total_qty, status").eq("id", spotId).single(),
-    supabase.from("shipments").select("qty_container").eq("spot_booking_id", spotId),
-  ]);
-  if (!spot) return;
-  if (["已截单", "已取消"].includes(spot.status)) return;
-  const sold = (ships || []).reduce((a, s) => a + numQty(s.qty_container), 0);
-  const total = spot.total_qty || 0;
-  let next = "可售";
-  if (sold >= total && total > 0) next = "全部已售";
-  else if (sold > 0) next = "部分已售";
-  if (next !== spot.status) {
-    await supabase.from("spot_bookings").update({ status: next }).eq("id", spotId);
-  }
-}
-
 // ─── 新建 / 编辑现舱 ───────────────────────────────────────────
 function SpotEditor({ spot, customers, onClose, onSaved }) {
   const [form, setForm] = useState(() => spot ? { ...spot } : {
@@ -627,7 +600,7 @@ function AllocateModal({ spot, soldQty, customers, customerPartyMap, onClose, on
     const { data, error } = await supabase.from("shipments").insert(payloads).select();
     if (error) { setSaving(false); alert("批量创建失败：" + error.message); return; }
     // 重算现舱状态（统一走 helper，跟订单删除时退柜同套逻辑）
-    await recalcSpotStatusInline(spot.id);
+    await recalcSpotStatus(spot.id);
     setSaving(false);
     const orderList = (data || []).map((d, i) => `  ${i+1}) ${d.order_no} → ${rows[i].customerName} (${rows[i].qty}柜)`).join("\n");
     if (rows.length === 1 && confirm(`✓ 已划给 ${rows[0].customerName} ${rows[0].qty} 柜，新建订单 ${data?.[0]?.order_no}。\n\n马上打开新订单？`)) {

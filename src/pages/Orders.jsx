@@ -2309,7 +2309,11 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       alert("查询失败：" + (e?.message || e));
     } finally {
       setEtaSyncing(false);
-      onReload();
+      // 重新拉取本票，立即刷新当前详情（避免"查完没数据、强刷才有"）
+      try {
+        const { data } = await supabase.from("shipments").select("*").eq("id", order.id).single();
+        if (data && onUpdated) onUpdated(data); else onReload();
+      } catch { onReload(); }
     }
   };
 
@@ -3071,8 +3075,28 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                   <input value={v("hbl_no")} onChange={e => ch("hbl_no", e.target.value)} disabled={!editing} placeholder={!order.has_hbl ? "未签 HBL" : ""} />
                 </Df>
                 <Df label="邮件"><input value={v("email")} onChange={e => ch("email", e.target.value)} disabled={!editing} /></Df>
-                <Df label="预计开航时间"><input type="date" value={v("etd")} onChange={e => ch("etd", e.target.value)} disabled={!editing} /></Df>
-                <Df label="实际开航时间"><input type="date" value={v("atd")} onChange={e => ch("atd", e.target.value)} disabled={!editing} /></Df>
+                <Df label="预计开航时间">
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <input type="date" value={v("etd")} onChange={e => ch("etd", e.target.value)} disabled={!editing} />
+                    {!editing && order.etd_carrier && (
+                      <span style={{ fontSize: 11, color: order.etd && order.etd_carrier !== order.etd ? "#d4380d" : "#888" }}
+                        title={order.eta_synced_at ? "船司更新于 " + new Date(order.eta_synced_at).toLocaleString() : undefined}>
+                        船司:{order.etd_carrier}{order.etd && order.etd_carrier !== order.etd ? "（不符）" : ""}
+                      </span>
+                    )}
+                  </div>
+                </Df>
+                <Df label="实际开航时间">
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <input type="date" value={v("atd")} onChange={e => ch("atd", e.target.value)} disabled={!editing} />
+                    {!editing && order.atd_carrier && (
+                      <span style={{ fontSize: 11, color: order.atd && order.atd_carrier !== order.atd ? "#d4380d" : "#888" }}
+                        title={order.eta_synced_at ? "船司更新于 " + new Date(order.eta_synced_at).toLocaleString() : undefined}>
+                        船司:{order.atd_carrier}{order.atd && order.atd_carrier !== order.atd ? "（不符）" : ""}
+                      </span>
+                    )}
+                  </div>
+                </Df>
                 <Df label="预计到港时间">
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <input type="date" value={v("eta")} onChange={e => ch("eta", e.target.value)} disabled={!editing} />

@@ -139,6 +139,81 @@ function Icon({ name, ...rest }) {
 // 主组件
 // ═══════════════════════════════════════════════════════════════
 
+// ── 通知铃铛：船司 ETA/开船 异动（shipment_notifications，未处理）──
+function NotifBell() {
+  const [list, setList] = useState([]);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  const load = async () => {
+    const { data } = await supabase
+      .from("shipment_notifications")
+      .select("id, shipment_id, kind, summary, created_at")
+      .eq("is_resolved", false)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    setList(data || []);
+  };
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const resolve = async (id, e) => {
+    e.stopPropagation();
+    await supabase.from("shipment_notifications")
+      .update({ is_resolved: true, resolved_at: new Date().toISOString() }).eq("id", id);
+    setList(l => l.filter(n => n.id !== id));
+  };
+  const resolveAll = async () => {
+    const ids = list.map(n => n.id);
+    if (!ids.length) return;
+    await supabase.from("shipment_notifications")
+      .update({ is_resolved: true, resolved_at: new Date().toISOString() }).in("id", ids);
+    setList([]);
+  };
+
+  const n = list.length;
+  return (
+    <span className="mi" ref={ref} style={{ position: "relative", cursor: "pointer" }}
+          onClick={() => setOpen(o => !o)} title="船司 ETA/开船 异动通知">
+      🔔{n > 0 && <b style={{ color: "#fa541c", marginLeft: 2 }}>{n}</b>}
+      {open && (
+        <div onClick={e => e.stopPropagation()} style={{
+          position: "absolute", top: "100%", right: 0, marginTop: 6, width: 340, maxHeight: 420,
+          overflowY: "auto", background: "#fff", color: "#333", border: "1px solid #ddd",
+          borderRadius: 4, boxShadow: "0 4px 16px rgba(0,0,0,.15)", zIndex: 1000, textAlign: "left",
+          cursor: "default",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                        padding: "8px 12px", borderBottom: "1px solid #eee", fontSize: 13, fontWeight: 600 }}>
+            <span>船司轨迹异动（{n}）</span>
+            {n > 0 && <span style={{ fontSize: 12, color: "#1677ff", cursor: "pointer", fontWeight: 400 }}
+                            onClick={resolveAll}>全部已处理</span>}
+          </div>
+          {n === 0 && <div style={{ padding: "18px 12px", fontSize: 12, color: "#999", textAlign: "center" }}>暂无未处理异动</div>}
+          {list.map(item => (
+            <div key={item.id} onClick={() => window.open(`#/sea_export?id=${item.shipment_id}`, "_blank")} style={{
+              padding: "8px 12px", borderBottom: "1px solid #f5f5f5", fontSize: 12, cursor: "pointer" }}>
+              <div style={{ color: "#333" }}>{item.summary}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                <span style={{ color: "#999", fontSize: 11 }}>{new Date(item.created_at).toLocaleString()}</span>
+                <span style={{ color: "#1677ff", fontSize: 11 }} onClick={(e) => resolve(item.id, e)}>已处理</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
 export default function Portal({ user, onLogout }) {
   const [activeModule, setActiveModule] = useState("sea_export");
   const [tab, setTab] = useState("看板");
@@ -226,6 +301,7 @@ export default function Portal({ user, onLogout }) {
           班萨（宁波）国际货运代理有限公司
         </div>
         <div className="ri">
+          <NotifBell />
           <span className="mi">{userName}<span className="ar"></span></span>
           <span className="mi">BS（NB）GJ<span className="ar"></span></span>
           {role === "admin"

@@ -4747,7 +4747,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
         const miss = [];
         if (!r.charge_item_id) miss.push("费用名称");
         if (!r.partner_id) miss.push("结算单位");
-        if (!(parseFloat(r.unit_price) > 0)) miss.push("金额");
+        if (!parseFloat(r.unit_price)) miss.push("金额");  // 允许负数（折扣/抵扣），仅拦 0/空
         if (miss.length) problems.push(`· ${direction}「${chargeLabel(r)}」缺：${miss.join("、")}`);
       });
     }

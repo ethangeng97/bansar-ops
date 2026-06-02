@@ -5,6 +5,7 @@
 // ============================================================================
 import { useState, useEffect } from "react";
 import { supabase } from "../supabase.js";
+import { ModalShell } from "./tms.jsx";
 
 // 英文 col → 中文 label（部分常用字段）。其他直接显示 col 名
 const COL_LABELS = {
@@ -65,14 +66,7 @@ export default function HistoryModal({ open, onClose, shipmentId }) {
   };
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #eee" }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>📜 修改历史</div>
-          <div style={{ flex: 1, fontSize: 11, color: "#888", marginLeft: 16 }}>{rows.length} 条记录（最多 200 条）</div>
-          <button onClick={onClose} style={{ padding: "4px 12px" }}>关闭</button>
-        </div>
-        <div style={{ padding: 16, overflow: "auto", flex: 1 }}>
+    <ModalShell title={`📜 修改历史（${rows.length} 条，最多 200）`} width={880} zIndex={1000} onClose={onClose}>
           {loading ? (
             <div style={{ padding: 24, textAlign: "center", color: "#888" }}>加载中…</div>
           ) : rows.length === 0 ? (
@@ -108,17 +102,6 @@ export default function HistoryModal({ open, onClose, shipmentId }) {
               })}
             </div>
           )}
-        </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
-
-const overlayStyle = {
-  position: "fixed", inset: 0, background: "rgba(0,0,0,.4)",
-  display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-};
-const modalStyle = {
-  width: "min(880px, 95vw)", maxHeight: "90vh", background: "#fff", borderRadius: 6,
-  boxShadow: "0 6px 30px rgba(0,0,0,.2)", display: "flex", flexDirection: "column",
-};

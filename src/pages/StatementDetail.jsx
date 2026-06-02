@@ -189,7 +189,11 @@ export default function StatementDetail({ statementId, onBack }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <a href={`#/docs/stmt_batch/${statementId}`} target="_blank" rel="noreferrer"
                style={{ ...btn, textDecoration: "none", display: "inline-block" }}>
-              查看 PDF
+              预览
+            </a>
+            <a href={`#/docs/stmt_batch/${statementId}?print=1`} target="_blank" rel="noreferrer"
+               style={{ ...btn, textDecoration: "none", display: "inline-block" }}>
+              下载 PDF
             </a>
             {stmt.direction === "AR" && stmt.status !== "void" && (
               <button onClick={requestInvoice}

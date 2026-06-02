@@ -337,25 +337,29 @@ export default function App() {
     );
   }
 
-  // 动态路由：单票对账单 #/docs/stmt/:shipmentId
+  // 动态路由：单票对账单 #/docs/stmt/:shipmentId（?print=1 → 打开即自动调起打印/另存PDF）
   if (route.startsWith("docs/stmt/")) {
     const shipmentId = route.slice("docs/stmt/".length);
+    const autoPrint = new URLSearchParams(window.location.hash.split("?")[1] || "").has("print");
     return (
       <Statement
         shipmentId={shipmentId}
         mode="single"
+        autoPrint={autoPrint}
         onBack={() => { window.history.back(); }}
       />
     );
   }
 
-  // 动态路由：多票合并对账单 PDF #/docs/stmt_batch/:id
+  // 动态路由：多票合并对账单 PDF #/docs/stmt_batch/:id（?print=1 → 打开即自动调起打印/另存PDF，跳过卡顿的交互式预览）
   if (route.startsWith("docs/stmt_batch/")) {
     const statementId = route.slice("docs/stmt_batch/".length);
+    const autoPrint = new URLSearchParams(window.location.hash.split("?")[1] || "").has("print");
     return (
       <Statement
         statementId={statementId}
         mode="batch"
+        autoPrint={autoPrint}
         onBack={() => { window.history.back(); }}
       />
     );

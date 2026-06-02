@@ -7,13 +7,17 @@
 //      取关联的所有 bills + charges，按票分组渲染
 // ============================================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../supabase.js";
 
 const BRAND = "#1f3864";
 const STAMP_RED = "#c00";
 
-export default function Statement({ shipmentId, statementId, mode, onBack }) {
+// embedded：在订单详情「代理对账单」tab 内嵌渲染时为 true。
+//   此时不能直接 window.print()——会把整个订单详情大页面一起送去打印排版，非常卡，
+//   且打印结果混入订单页内容。改为打开独立干净页面 #/docs/stmt/:id?print=1 自动打印。
+// autoPrint：独立页加载完成后自动调起打印（配合上面的下载入口）。
+export default function Statement({ shipmentId, statementId, mode, embedded, autoPrint, onBack }) {
   const [statement, setStatement] = useState(null);  // batch 模式才有
   const [shipments, setShipments] = useState([]);    // 关联的票（单票=1，多票=N）
   const [chargesByShip, setChargesByShip] = useState({}); // ship_id => charges[]
@@ -32,15 +36,11 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
       setLoading(true);
       setError(null);
       try {
-        // 1. 公司
-        const { data: c } = await supabase.from("company_settings").select("*").eq("id", 1).single();
-        setCompany(c || {});
-
-        // 2. charge_items 字典
-        const { data: items } = await supabase.from("charge_items").select("id,name_zh");
-        const im = {};
-        (items || []).forEach(i => { im[i.id] = i.name_zh; });
-        setChargeItemMap(im);
+        // 无依赖的字典查询先并发发起，与下面解析 shipIds 的查询重叠，减少串行往返
+        const dictsP = Promise.all([
+          supabase.from("company_settings").select("*").eq("id", 1).single(),
+          supabase.from("charge_items").select("id,name_zh"),
+        ]);
 
         let shipIds = [];
         let stmt = null;
@@ -50,25 +50,36 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           shipIds = [shipmentId];
         } else if (isBatch) {
           if (!statementId) throw new Error("缺少 statementId");
-          // 取 statement
-          const { data: st, error: e1 } = await supabase
-            .from("statements").select("*").eq("id", statementId).single();
+          // statement 与其 bills 都只依赖 statementId → 并发
+          const [{ data: st, error: e1 }, { data: bs }] = await Promise.all([
+            supabase.from("statements").select("*").eq("id", statementId).single(),
+            supabase.from("bills").select("shipment_id").eq("statement_id", statementId),
+          ]);
           if (e1) throw new Error("加载对账单失败: " + e1.message);
           stmt = st;
           setStatement(st);
-          // 取关联 bills
-          const { data: bs } = await supabase
-            .from("bills").select("shipment_id").eq("statement_id", statementId);
           shipIds = [...new Set((bs || []).map(b => b.shipment_id))];
         } else {
           throw new Error("mode 必须是 single 或 batch");
         }
 
+        // 字典结果落地
+        const [{ data: c }, { data: items }] = await dictsP;
+        setCompany(c || {});
+        const im = {};
+        (items || []).forEach(i => { im[i.id] = i.name_zh; });
+        setChargeItemMap(im);
+
         if (shipIds.length === 0) throw new Error("找不到关联的票");
 
-        // 3. 取 shipments
-        const { data: ships } = await supabase
-          .from("shipments").select("*").in("id", shipIds);
+        // shipments / cargo_items / charges 都只依赖 shipIds、彼此独立 → 并发拉取
+        let chargeQuery = supabase.from("charges").select("*").in("shipment_id", shipIds);
+        if (isSingle) chargeQuery = chargeQuery.eq("direction", "应收");
+        const [{ data: ships }, { data: ciRows }, { data: chargesAll }] = await Promise.all([
+          supabase.from("shipments").select("*").in("id", shipIds),
+          supabase.from("cargo_items").select("shipment_id, qty, gross_weight, volume").in("shipment_id", shipIds),
+          chargeQuery,
+        ]);
         setShipments(ships || []);
 
         // 3b. 自拼分票 (Console + 带 -N 后缀) 借母单的 container/qty_container
@@ -102,10 +113,7 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
         // 历史教训：BSOEC260400013-2 票级 volume=24.08 是旧值，cargo_items 合计 39.266 才是准的。
         // 若票没有 cargo_items 行（agg 取不到），保留原票级值不动。
         if (ships && ships.length > 0) {
-          const { data: ciRows } = await supabase.from("cargo_items")
-            .select("shipment_id, qty, gross_weight, volume")
-            .in("shipment_id", ships.map(s => s.id));
-          const agg = {};  // ship_id → {qty, weight, volume}
+          const agg = {};  // ship_id → {qty, weight, volume}（ciRows 已在上面并发取回）
           (ciRows || []).forEach(r => {
             const a = agg[r.shipment_id] || (agg[r.shipment_id] = { qty: 0, weight: 0, volume: 0 });
             a.qty += parseInt(r.qty) || 0;
@@ -149,12 +157,7 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
         }
         setContainersByShip(ctnMap);
 
-        // 4b. 取 charges。单票模式只取应收（对账单是给客户的），多票模式按 bills 已经过滤好的
-        let chargeQuery = supabase
-          .from("charges").select("*").in("shipment_id", shipIds);
-        if (isSingle) chargeQuery = chargeQuery.eq("direction", "应收");
-        const { data: chargesAll } = await chargeQuery;
-
+        // 4b. charges（单票只取应收，已在上面并发取回 chargesAll）
         const map = {};
         (chargesAll || []).forEach(ch => {
           if (!map[ch.shipment_id]) map[ch.shipment_id] = [];
@@ -178,6 +181,16 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
     })();
   }, [shipmentId, statementId, mode]);
 
+  // autoPrint：独立页数据 + 图片(logo/公章)就绪后自动调起打印，避免章/抬头还没解码就出 PDF
+  const printedRef = useRef(false);
+  useEffect(() => {
+    if (!autoPrint || embedded || loading || shipments.length === 0 || printedRef.current) return;
+    printedRef.current = true;
+    const imgs = [...document.images].filter(i => !i.complete);
+    Promise.all(imgs.map(i => new Promise(res => { i.onload = i.onerror = res; })))
+      .then(() => window.print());
+  }, [autoPrint, embedded, loading, shipments]);
+
   // 把浏览器 tab/打印另存为的默认文件名设成「主单号-对账单」
   useEffect(() => {
     if (shipments.length === 0) return;
@@ -195,7 +208,18 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
   if (shipments.length === 0) return <div style={{ padding: 24 }}>无数据</div>;
 
   const co = company || {};
-  const print = () => window.print();
+  // 内嵌在订单详情里时，直接 window.print() 会连同整个订单大页面一起排版（非常卡）。
+  // 改为打开独立干净页面并自动打印；独立页本身则直接打印。
+  const print = () => {
+    if (embedded) {
+      const url = isBatch
+        ? `#/docs/stmt_batch/${statementId}?print=1`
+        : `#/docs/stmt/${shipmentId}?print=1`;
+      window.open(url, "_blank");
+    } else {
+      window.print();
+    }
+  };
   const issueDate = formatDate(new Date());
 
   // 单票模式：直接用第一票
@@ -253,7 +277,9 @@ export default function Statement({ shipmentId, statementId, mode, onBack }) {
           {isBatch && <span style={{ marginLeft: 8, color: "#999" }}>· 多票合并 ({shipments.length} 票)</span>}
         </span>
         <div style={{ flex: 1 }} />
-        <button onClick={print} style={btnPrimary}>🖨 打印 / 另存为 PDF</button>
+        <button onClick={print} style={btnPrimary}>
+          {embedded ? "🖨 打印 / 下载 PDF（独立窗口）" : "🖨 打印 / 另存为 PDF"}
+        </button>
       </div>
 
       <div className="stm-page" style={{

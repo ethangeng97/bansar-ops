@@ -3858,7 +3858,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
 
         {tab === "代理对账单" && (
           order.id
-            ? <Statement shipmentId={order.id} mode="single" onBack={() => setTab("作业")} />
+            ? <Statement shipmentId={order.id} mode="single" embedded onBack={() => setTab("作业")} />
             : <div style={{ padding: 30, color: "#888", textAlign: "center" }}>请先保存订单</div>
         )}
 

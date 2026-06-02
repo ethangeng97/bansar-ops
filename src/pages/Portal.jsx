@@ -152,7 +152,18 @@ function NotifBell() {
       .eq("is_resolved", false)
       .order("created_at", { ascending: false })
       .limit(50);
-    setList(data || []);
+    const rows = data || [];
+    // 补取主单号 MBL（通知表只有 shipment_id），按 shipment 批量查一次后回填
+    const ids = [...new Set(rows.map(r => r.shipment_id).filter(Boolean))];
+    let shpById = {};
+    if (ids.length) {
+      const { data: shp } = await supabase
+        .from("shipments")
+        .select("id, order_no, mbl_no")
+        .in("id", ids);
+      shpById = Object.fromEntries((shp || []).map(s => [s.id, s]));
+    }
+    setList(rows.map(r => ({ ...r, _shp: shpById[r.shipment_id] })));
   };
   useEffect(() => {
     load();
@@ -202,6 +213,9 @@ function NotifBell() {
             <div key={item.id} onClick={() => window.open(`#/sea_export?id=${item.shipment_id}`, "_blank")} style={{
               padding: "8px 12px", borderBottom: "1px solid #f5f5f5", fontSize: 12, cursor: "pointer" }}>
               <div style={{ color: "#333" }}>{item.summary}</div>
+              {item._shp?.mbl_no && (
+                <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>主单号 {item._shp.mbl_no}</div>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
                 <span style={{ color: "#999", fontSize: 11 }}>{new Date(item.created_at).toLocaleString()}</span>
                 <span style={{ color: "#1677ff", fontSize: 11 }} onClick={(e) => resolve(item.id, e)}>已处理</span>

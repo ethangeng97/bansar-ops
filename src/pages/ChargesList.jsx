@@ -30,7 +30,9 @@ const csvCell = (v) => {
 const csvRow = (cells) => cells.map(csvCell).join(",");
 
 export default function ChargesList({ onBack }) {
-  const [direction, setDirection] = useState("AR");
+  // 注意：charges.direction 库里存的是中文「应收/应付」，不是 AR/AP
+  // （订单详情费用面板写的就是中文）。这里必须用中文值查询，否则全查不到。
+  const [direction, setDirection] = useState("应收");
   const [charges, setCharges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -153,7 +155,7 @@ export default function ChargesList({ onBack }) {
         ship?.order_no || "",
         blNo,
         ship?.hbl_no || "",
-        r.direction === "AR" ? "应收" : "应付",
+        r.direction || "",
         item?.name_zh || item?.code || "",
         partnerMap[r.partner_id] || "",
         r.quantity ?? "",
@@ -173,7 +175,7 @@ export default function ChargesList({ onBack }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `charges_${direction}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `charges_${direction === "应收" ? "AR" : "AP"}_${new Date().toISOString().slice(0,10)}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   };
@@ -206,7 +208,7 @@ export default function ChargesList({ onBack }) {
 
         {/* AR/AP tab */}
         <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid #e8e8e8" }}>
-          {[["AR", "应收(客户)"], ["AP", "应付(供应商)"]].map(([key, label]) => (
+          {[["应收", "应收(客户)"], ["应付", "应付(供应商)"]].map(([key, label]) => (
             <div key={key}
                  onClick={() => setDirection(key)}
                  style={{
@@ -266,7 +268,7 @@ export default function ChargesList({ onBack }) {
           <div style={{ padding: 30, textAlign: "center", color: "#888" }}>加载中...</div>
         ) : charges.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", color: "#999" }}>
-            暂无{direction === "AR" ? "应收" : "应付"}费用
+            暂无{direction}费用
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>

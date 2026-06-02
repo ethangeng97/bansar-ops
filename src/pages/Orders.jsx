@@ -142,8 +142,12 @@ export function OrdersPage({ user, onBack }) {
   });
   useEffect(() => {
     const onHashChange = () => {
-      const m = window.location.hash.match(/[?&]sop=([^&]+)/);
-      setSopFilter(m ? decodeURIComponent(m[1]) : null);
+      const sm = window.location.hash.match(/[?&]sop=([^&]+)/);
+      setSopFilter(sm ? decodeURIComponent(sm[1]) : null);
+      // 同步 selectedId：浏览器前进/后退、或 window.location.hash= 跳转时
+      // 也能正确进入/退出详情（行点击走 replaceState 不触发 hashchange，互不冲突）
+      const im = window.location.hash.match(/[?&]id=([^&]+)/);
+      setSelectedId(im ? decodeURIComponent(im[1]) : null);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -2905,13 +2909,13 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         </div>
       )}
 
-      {/* 大 tab：作业 / 装箱 / 费用 / 凭证 / 代理对账单 / 附件 / SOP 进度 */}
+      {/* 大 tab：作业 / 费用 / 凭证 / 代理对账单 / 附件 / SOP 进度（集装箱在 作业→集装箱 子 tab） */}
       <div className="tms-bigtabs">
         {(isCreating
           ? ["作业"]
           : isMaster
-            ? ["作业", "小票", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
-            : ["作业", "装箱", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+            ? ["作业", "小票", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
+            : ["作业", "费用", "凭证", "代理对账单", "附件", "SOP 进度"]
         ).map(t => (
           <div key={t} className={"bt " + (tab === t ? "act" : "")} onClick={() => setTab(t)}>
             {t === "SOP 进度" && (
@@ -2925,8 +2929,8 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         ))}
       </div>
 
-      {/* 第二行工具栏：按 tab 切换 ─ 作业/装箱/小票 → 作业操作；费用 → 费用操作；其他 tab 隐藏 */}
-      {(tab === "作业" || tab === "装箱" || tab === "小票") && (
+      {/* 第二行工具栏：按 tab 切换 ─ 作业/小票 → 作业操作；费用 → 费用操作；其他 tab 隐藏 */}
+      {(tab === "作业" || tab === "小票") && (
         <div className="tms-dtb2">
           {!editing ? (
             <Mi disabled={isLocked} onClick={startEdit}>编辑</Mi>
@@ -3840,12 +3844,6 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                 )}
               </tbody>
             </table>
-          </div>
-        )}
-
-        {tab === "装箱" && (
-          <div style={{ padding: 30, color: "#888", textAlign: "center" }}>
-            装箱详细信息（暂用作业 tab 下的"集装箱"子 tab 替代）
           </div>
         )}
 

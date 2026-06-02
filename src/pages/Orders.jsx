@@ -27,6 +27,7 @@ import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
 import { filterShipmentPayload } from "../lib/shipment-fields.js";
+import { numQty, recalcSpotStatus, returnSlotToSpot } from "../lib/spot-inventory.js";
 import {
   STATUS_COLORS,
   TRADE_TERMS,
@@ -1226,27 +1227,6 @@ async function recomputeShipmentTotalsFromCargo(shipmentId) {
   }).eq("id", shipmentId);
 }
 
-// 重算现舱状态 = 根据关联 shipments 的 qty_container 之和算出"可售/部分已售/全部已售"
-// 用于：现舱"划给客户"后 / 订单删除后 / 订单 spot_booking_id 改了后 同步状态
-async function recalcSpotStatus(spotId) {
-  if (!spotId) return;
-  const [{ data: spot }, { data: ships }] = await Promise.all([
-    supabase.from("spot_bookings").select("total_qty, status").eq("id", spotId).single(),
-    supabase.from("shipments").select("qty_container").eq("spot_booking_id", spotId),
-  ]);
-  if (!spot) return;
-  const sold = (ships || []).reduce((a, s) => a + (s.qty_container || 1), 0);
-  const total = spot.total_qty || 0;
-  let next = "可售";
-  if (sold >= total && total > 0) next = "全部已售";
-  else if (sold > 0) next = "部分已售";
-  // 用户手动改的"已截单/已取消"不覆盖
-  if (["已截单", "已取消"].includes(spot.status)) return;
-  if (next !== spot.status) {
-    await supabase.from("spot_bookings").update({ status: next }).eq("id", spotId);
-  }
-}
-
 // 重算母单 qty_packages/weight/volume（= 所有分票之和），写回 DB
 // 让列表/单证/portal 报表都能直接读母单字段拿到合计，无需各自聚合
 async function recomputeMasterTotals(masterOrderNo) {
@@ -1475,6 +1455,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [templateOpen, setTemplateOpen] = useState(false);
   // ETA 船司查询（Maersk Track & Trace）状态
   const [etaSyncing, setEtaSyncing] = useState(false);
+  const [dlSyncing, setDlSyncing] = useState(false);
   // ChargesPanel 操作句柄（用于费用 tab 下工具栏按钮调用）
   const chargesRef = useRef(null);
   // 加入/移除分票 modal 开关（仅主拼场景）
@@ -1484,6 +1465,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   const [spotBooking, setSpotBooking] = useState(null);  // 关联的现舱（若有 spot_booking_id）
   const [copyPartiesOpen, setCopyPartiesOpen] = useState(false);  // 抄录历史 modal 开关
+  const [spaceModalOpen, setSpaceModalOpen] = useState(false);  // 退关/改配 modal 开关
 
   // 加载关联的现舱信息（用于顶部 banner 显示）
   useEffect(() => {
@@ -2317,6 +2299,34 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     }
   };
 
+  // 调 Maersk Ocean Deadlines 查单证截止时间 → 回写 → 刷新本票
+  const syncDeadlines = async () => {
+    if (dlSyncing) return;
+    setDlSyncing(true);
+    try {
+      const r = await supabase.api("/functions/v1/track-deadlines", {
+        method: "POST",
+        body: JSON.stringify({ shipment_id: order.id }),
+      });
+      if (r?.status === "missing_input") alert("缺 船名/航次/起运港，无法查询截止时间");
+      else if (r?.status === "no_imo") alert(`未能由船名"${order.vessel || "—"}"查到 IMO，暂无法查截止时间`);
+      else if (r?.status === "not_found") alert("Maersk 未查到该船期的截止时间（航次/港口可能不符）");
+      else if (r?.status === "error") alert("查询失败：" + (r.message || "未知错误"));
+      else {
+        const f = (d) => d ? new Date(d).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+        alert(`截止时间已更新（${r.terminal || ""}）：\n截单(SI)：${f(r.si)}\n截VGM：${f(r.vgm)}\n截关：${f(r.cy)}`);
+      }
+    } catch (e) {
+      alert("查询失败：" + (e?.message || e));
+    } finally {
+      setDlSyncing(false);
+      try {
+        const { data } = await supabase.from("shipments").select("*").eq("id", order.id).single();
+        if (data && onUpdated) onUpdated(data); else onReload();
+      } catch { onReload(); }
+    }
+  };
+
   const setLifecycle = async (lc) => {
     const updates = { lifecycle: lc };
     if (lc === "已完结") {
@@ -2603,6 +2613,14 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     }
   };
 
+  // 退关/改配完成后刷新本票
+  const onSpaceDone = async (res) => {
+    setSpaceModalOpen(false);
+    if (!res?.ok) return;
+    const { data } = await supabase.from("shipments").select("*").eq("id", order.id).single();
+    if (data && onUpdated) onUpdated(data); else onReload();
+  };
+
   const deleteSubTicket = async (subTicket) => {
     if (!confirm(`确定删除分票 ${subTicket.order_no} ？此操作不可恢复。`)) return;
     const { error } = await supabase.from("shipments").delete().eq("id", subTicket.id);
@@ -2729,6 +2747,14 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
         onClose={() => setHistoryOpen(false)}
         shipmentId={order.id}
       />
+      {spaceModalOpen && (
+        <SpaceReturnModal
+          order={order}
+          user={user}
+          onClose={() => setSpaceModalOpen(false)}
+          onDone={onSpaceDone}
+        />
+      )}
       <CopyPartiesModal
         open={copyPartiesOpen}
         onClose={() => setCopyPartiesOpen(false)}
@@ -2801,6 +2827,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             {isMaster && cargoLines.length > 0 && <Mi disabled={isLocked} onClick={() => setSplitCargoOpen(true)}>拆分货物到小票</Mi>}
             {isSubTicket && masterExists === false && <Mi disabled={isLocked} onClick={createMaster}>补建母单</Mi>}
             <Mi disabled={isLocked} onClick={deleteOrder}>删除</Mi>
+            {order.spot_booking_id && <Mi disabled={isLocked} onClick={() => setSpaceModalOpen(true)}>退关/改配</Mi>}
             <Tbl/>
             <ConfirmStep field="manifest_confirmed_at" label="舱单" order={order} updateField={updateField} isLocked={isLocked} />
             <ConfirmStep field="route_confirmed_at"     label="航线" order={order} updateField={updateField} isLocked={isLocked} />
@@ -3118,6 +3145,33 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                       >
                         船司:{order.eta_carrier}{order.eta && order.eta_carrier !== order.eta ? "（不符）" : ""}
                       </span>
+                    )}
+                  </div>
+                </Df>
+                <Df label="单证截止">
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+                    {(() => {
+                      const fmt = (d) => d ? new Date(d).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : null;
+                      const soon = (d) => d && (new Date(d) - Date.now()) < 24 * 3600e3 && new Date(d) > Date.now();
+                      const item = (label, d) => {
+                        const f = fmt(d);
+                        if (!f) return null;
+                        return <span style={{ color: soon(d) ? "#d4380d" : "#555", fontWeight: soon(d) ? 600 : 400 }}>{label} {f}{soon(d) ? " ⚠" : ""}</span>;
+                      };
+                      const any = order.si_cutoff || order.vgm_cutoff || order.cy_cutoff;
+                      return (<>
+                        {item("截单", order.si_cutoff)}
+                        {item("截VGM", order.vgm_cutoff)}
+                        {item("截关", order.cy_cutoff)}
+                        {!any && <span style={{ color: "#aaa" }}>—</span>}
+                      </>);
+                    })()}
+                    {!editing && (
+                      <button type="button" onClick={syncDeadlines} disabled={dlSyncing}
+                        title="向 Maersk 查询单证截止时间（截单/截VGM/截关，仅 Maersk）"
+                        style={{ padding: "2px 8px", fontSize: 12, cursor: dlSyncing ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+                        {dlSyncing ? "查询中…" : "🔄 查截单"}
+                      </button>
                     )}
                   </div>
                 </Df>

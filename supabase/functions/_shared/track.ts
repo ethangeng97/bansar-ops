@@ -115,7 +115,7 @@ export async function sbGet(path: string) {
   if (!res.ok) throw new Error(`sb get ${res.status}: ${await res.text()}`);
   return res.json();
 }
-async function sbPatch(path: string, body: unknown) {
+export async function sbPatch(path: string, body: unknown) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method: "PATCH",
     headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}`,

@@ -24,6 +24,7 @@ export const SHIPMENT_DB_COLUMNS = new Set([
   "destination", "destination_agent",
   "e_booking_no", "end_customer", "entry_done", "entry_number",
   "equipment_return", "eta", "eta_carrier", "eta_synced_at", "eta_track_status", "etd", "etd_carrier", "atd_carrier",
+  "si_cutoff", "vgm_cutoff", "cy_cutoff", "deadlines_raw", "deadlines_synced_at", "deadlines_status",
   "finance_status",
   "free_demurrage_calc", "free_demurrage_days",
   "freight_terms",

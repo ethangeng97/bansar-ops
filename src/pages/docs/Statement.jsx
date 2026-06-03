@@ -77,7 +77,7 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         if (isSingle) chargeQuery = chargeQuery.eq("direction", "应收");
         const [{ data: ships }, { data: ciRows }, { data: chargesAll }] = await Promise.all([
           supabase.from("shipments").select("*").in("id", shipIds),
-          supabase.from("cargo_items").select("shipment_id, qty, gross_weight, volume").in("shipment_id", shipIds),
+          supabase.from("cargo_items").select("shipment_id, container_no, qty, gross_weight, volume").in("shipment_id", shipIds),
           chargeQuery,
         ]);
         setShipments(ships || []);
@@ -142,16 +142,34 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
           if (!ctnByShip[c.shipment_id]) ctnByShip[c.shipment_id] = [];
           ctnByShip[c.shipment_id].push(c);
         });
-        // 分票借母单的 containers + qty_container 兜底
+        // 分票：取「自己」占用的箱，而不是整借母单的全部箱。
+        // 母单 4 个箱全挂在母单上，分票自己的 shipment_containers 是空的，但分票
+        // cargo_items 里记了它装在哪几个箱号(container_no)。据此从母单 shipment_containers
+        // 里筛出本票自己的那几个箱 → 拿到 size/type/seal → 算出本票自己的「箱型箱量」(如 2x40HC)
+        // 与箱号，不再回退显示母单的 4x40HC。
         const ctnMap = { ...ctnByShip };
+        // 每张分票自己 cargo_items 引用到的箱号集合
+        const subCtnNos = {};  // sub.id -> Set(container_no)
+        (ciRows || []).forEach(r => {
+          if (!r.container_no) return;
+          (subCtnNos[r.shipment_id] || (subCtnNos[r.shipment_id] = new Set())).add(r.container_no);
+        });
         for (const sub of subShips) {
           const masterId = subToMasterId[sub.id];
           if (!masterId) continue;
-          if (!ctnMap[sub.id] || ctnMap[sub.id].length === 0) {
-            ctnMap[sub.id] = ctnByShip[masterId] || [];
-          }
-          // qty_container 兜底（不写回 DB，只在前端 props 里覆盖）
-          if (!sub.qty_container && masterById[masterId]?.qty_container) {
+          const masterCtns = ctnByShip[masterId] || [];
+          const myNos = subCtnNos[sub.id];
+          // 本票已有自己的箱行就用自己的；否则按 cargo_items 的箱号从母单里筛
+          let ownCtns = (ctnByShip[sub.id] && ctnByShip[sub.id].length > 0)
+            ? ctnByShip[sub.id]
+            : (myNos ? masterCtns.filter(c => myNos.has(c.container_no)) : []);
+          // 老数据 cargo_items 没填箱号、实在筛不出 → 整借母单，保持旧行为不回归
+          if (ownCtns.length === 0) ownCtns = masterCtns;
+          ctnMap[sub.id] = ownCtns;
+          // 「箱型箱量」按本票自己的箱子算；只有筛不出箱时才兜底母单的 qty_container
+          const computed = formatQtyContainer(ownCtns);
+          if (computed) sub.qty_container = computed;
+          else if (!sub.qty_container && masterById[masterId]?.qty_container) {
             sub.qty_container = masterById[masterId].qty_container;
           }
         }
@@ -556,6 +574,17 @@ function ChargeTable({ charges, chargeItemMap }) {
       </tbody>
     </table>
   );
+}
+
+// 把一组 shipment_containers 按 箱型 汇总成「箱型箱量」字符串，如 [40HC,40HC] => "2x40HC"
+function formatQtyContainer(ctns) {
+  const counts = {};
+  (ctns || []).forEach(c => {
+    const key = `${c.container_size || ""}${c.container_type || ""}`.trim();
+    if (!key) return;
+    counts[key] = (counts[key] || 0) + (Number(c.qty) || 1);
+  });
+  return Object.entries(counts).map(([k, n]) => `${n}x${k}`).join("+");
 }
 
 function formatDate(d) {

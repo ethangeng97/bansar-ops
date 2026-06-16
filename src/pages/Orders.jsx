@@ -1828,8 +1828,28 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           cl: cl.cl || null,
         }));
         if (rows.length) await supabase.from("cargo_items").insert(rows);
+        // 回写该分票行汇总（件/毛/体）—— cargo_items 是单一事实源，
+        // 不回写的话 小票 表格/对账单/列表 读行字段会显示为空
+        await recomputeShipmentTotalsFromCargo(subId);
       } catch (e) {
         console.error("Sino56 import: write cargo to sub", subId, "error:", e);
+      }
+    }
+    // 各分票回写完，重算母单合计并刷新分票列表（否则导入后母单合计漏算、UI 显示旧值）
+    if (Object.keys(bySubId).length > 0) {
+      try {
+        await recomputeMasterTotals(order.order_no);
+        const { data: refreshed } = await supabase.from("shipments").select("*")
+          .eq("booking_no", order.booking_no).like("order_no", order.order_no + "-%");
+        if (refreshed) {
+          setSubTickets(refreshed.sort((a, b) => {
+            const na = parseInt((a.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            const nb = parseInt((b.order_no || "").match(/-(\d+)$/)?.[1] || "999");
+            return na - nb;
+          }));
+        }
+      } catch (e) {
+        console.error("Sino56 import: recompute totals after import error:", e);
       }
     }
     // 集装箱：每箱写一条 shipment_containers 行

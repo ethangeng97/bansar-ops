@@ -345,6 +345,181 @@ export function SplitCargoToSubsModal({ master, existingSubTickets, customers = 
   );
 }
 
+// ── 合并分票 ─────────────────────────────────────────────────────────
+// 把 2+ 个分票合成 1 个：
+//   · 选一个"保留票"，勾选若干"被合并票"
+//   · 被合并票的 cargo_items（货物明细）整条挪到保留票
+//   · 保留票件/毛/体重算（有 cargo_items 走明细合计，无则手填值相加）
+//   · 品名合并去重；被合并票连同 portal container_items 一起删除
+//   · 删 source 前必须先挪走 cargo_items —— shipments 删除会 CASCADE 掉 cargo_items
+export function MergeSubTicketsModal({ master, existingSubTickets, onClose, onMerged }) {
+  const [keepId, setKeepId] = useState(existingSubTickets[0]?.id || "");
+  const [sourceIds, setSourceIds] = useState([]);
+  const [overwriteHbl, setOverwriteHbl] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  const keep = existingSubTickets.find(s => s.id === keepId);
+  const sources = existingSubTickets.filter(s => sourceIds.includes(s.id) && s.id !== keepId);
+
+  // 切换保留票时，把它从已勾选的被合并里剔除
+  const toggleSource = (id) => {
+    if (id === keepId) return;
+    setSourceIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+  const changeKeep = (id) => {
+    setKeepId(id);
+    setSourceIds(prev => prev.filter(x => x !== id));
+  };
+
+  // 合并后预览合计（分票行件/毛/体已与 cargo_items 同步，直接相加即可）
+  const preview = useMemo(() => {
+    const all = [keep, ...sources].filter(Boolean);
+    let pkg = 0, wt = 0, vol = 0; const descs = [];
+    all.forEach(s => {
+      pkg += parseInt(s.qty_packages) || 0;
+      wt += parseFloat(s.weight) || 0;
+      vol += parseFloat(s.volume) || 0;
+      if (s.description && !descs.includes(s.description)) descs.push(s.description);
+    });
+    return { pkg, wt: Number(wt.toFixed(3)), vol: Number(vol.toFixed(4)), desc: descs.join(" / ") };
+  }, [keep, sources]);
+
+  const submit = async () => {
+    if (!keep) { alert("请选择要保留的分票"); return; }
+    if (sources.length === 0) { alert("请勾选至少一个要合并进来的分票"); return; }
+
+    if (!confirm(
+      `把以下分票合并进 ${keep.order_no}：\n\n` +
+      sources.map(s => `· ${s.order_no}${s.customer ? "（" + s.customer + "）" : ""}`).join("\n") +
+      `\n\n· 它们的货物明细会挪到 ${keep.order_no}\n` +
+      `· 件/毛/体合并为 ${preview.pkg || "—"} 件 / ${preview.wt || "—"} KG / ${preview.vol || "—"} CBM\n` +
+      `· 被合并的分票将被删除，不可恢复\n\n确认合并？`
+    )) return;
+
+    setSubmitting(true);
+    try {
+      // 1) 挪 cargo_items：源 → 保留票，sort_order 接在保留票现有明细之后
+      const { data: keepLines } = await supabase.from("cargo_items")
+        .select("sort_order").eq("shipment_id", keep.id);
+      let so = (keepLines || []).reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
+      for (const src of sources) {
+        const { data: lines } = await supabase.from("cargo_items")
+          .select("id").eq("shipment_id", src.id).order("sort_order", { ascending: true });
+        for (const ln of (lines || [])) {
+          so += 1;
+          const patch = { shipment_id: keep.id, sort_order: so };
+          if (overwriteHbl && keep.hbl_no) patch.hbl_no = keep.hbl_no;
+          const { error } = await supabase.from("cargo_items").update(patch).eq("id", ln.id);
+          if (error) throw error;
+        }
+      }
+
+      // 2) 重算保留票件/毛/体
+      const { data: merged } = await supabase.from("cargo_items")
+        .select("qty, gross_weight, volume").eq("shipment_id", keep.id);
+      let pkg = 0, wt = 0, vol = 0;
+      if (merged && merged.length) {
+        merged.forEach(l => {
+          pkg += parseInt(l.qty) || 0;
+          wt += parseFloat(l.gross_weight) || 0;
+          vol += parseFloat(l.volume) || 0;
+        });
+      } else {
+        // 没有任何 cargo_items 明细 → 用各票手填合计相加兜底
+        [keep, ...sources].forEach(s => {
+          pkg += parseInt(s.qty_packages) || 0;
+          wt += parseFloat(s.weight) || 0;
+          vol += parseFloat(s.volume) || 0;
+        });
+      }
+      const descs = [keep, ...sources].map(s => s.description).filter(Boolean);
+      const uniqDesc = [...new Set(descs)].join(" / ") || null;
+      const { error: upErr } = await supabase.from("shipments").update(filterShipmentPayload({
+        qty_packages: pkg || null,
+        weight: wt ? Number(wt.toFixed(3)) : null,
+        volume: vol ? Number(vol.toFixed(4)) : null,
+        description: uniqDesc,
+      })).eq("id", keep.id);
+      if (upErr) throw upErr;
+
+      // 3) 删源分票（先清 portal container_items，再删 shipments）
+      for (const src of sources) {
+        await supabase.from("container_items").delete().eq("shipment_id", src.id);
+        const { error: delErr } = await supabase.from("shipments").delete().eq("id", src.id);
+        if (delErr) throw delErr;
+      }
+
+      alert(`✓ 已合并 ${sources.length} 个分票进 ${keep.order_no}`);
+      if (onMerged) await onMerged();
+      onClose();
+    } catch (e) {
+      alert("合并失败：" + (e.message || e) + "\n\n部分操作可能已生效，请刷新核对。");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title="合并分票 — 把多个分票并成一个" onClose={onClose} width={620}>
+      {existingSubTickets.length < 2 ? (
+        <div style={{ padding: 20, color: "#999", fontSize: 12 }}>当前母拼下少于 2 个分票，无法合并。</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+            母拼 <b>{master.order_no}</b> 下挂 {existingSubTickets.length} 个分票。<br/>
+            选一个<b>保留票</b>（单选），勾选要并进它的<b>被合并票</b>（可多选）。被合并票的货物挪入保留票后会被删除。
+          </div>
+          <div style={{ border: "1px solid #eee", borderRadius: 6, overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "46px 46px 1fr", background: "#fafafa",
+                fontSize: 11, color: "#888", padding: "6px 10px", borderBottom: "1px solid #eee" }}>
+              <span>保留</span><span>合并</span><span>分票</span>
+            </div>
+            {existingSubTickets.map(s => {
+              const isKeep = s.id === keepId;
+              const isSrc = sourceIds.includes(s.id);
+              return (
+                <div key={s.id} style={{ display: "grid", gridTemplateColumns: "46px 46px 1fr",
+                    alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #f5f5f5",
+                    background: isKeep ? "#e6f7ff" : isSrc ? "#fff7e6" : "#fff", fontSize: 12 }}>
+                  <input type="radio" name="keep" checked={isKeep} onChange={() => changeKeep(s.id)} />
+                  <input type="checkbox" checked={isSrc} disabled={isKeep} onChange={() => toggleSource(s.id)} />
+                  <div>
+                    <span style={{ fontWeight: 600, fontFamily: "monospace" }}>{s.order_no}</span>
+                    {isKeep && <span style={{ color: "#1890ff", fontSize: 11, marginLeft: 6 }}>← 保留</span>}
+                    <div style={{ color: "#888", fontSize: 11 }}>
+                      {s.customer || "—"} · HBL {s.hbl_no || "—"} ·
+                      {" "}{s.qty_packages || "—"} 件 / {s.weight || "—"} KG / {s.volume || "—"} CBM
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, color: "#555" }}>
+            <input type="checkbox" checked={overwriteHbl} onChange={e => setOverwriteHbl(e.target.checked)} />
+            把并入的货物明细 HBL 改写成保留票的 HBL（{keep?.hbl_no || "保留票暂无 HBL，不改写"}）
+          </label>
+
+          {sources.length > 0 && (
+            <div style={{ marginTop: 12, padding: 10, background: "#f6ffed", border: "1px solid #b7eb8f",
+                borderRadius: 6, fontSize: 12, color: "#389e0d" }}>
+              合并后 <b>{keep?.order_no}</b>：{preview.pkg || "—"} 件 / {preview.wt || "—"} KG / {preview.vol || "—"} CBM
+              {preview.desc && <div style={{ color: "#555", marginTop: 4 }}>品名：{preview.desc}</div>}
+            </div>
+          )}
+        </>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+        <Button variant="secondary" onClick={onClose}>取消</Button>
+        <Button onClick={submit} disabled={existingSubTickets.length < 2 || !keep || sources.length === 0 || submitting}>
+          {submitting ? "合并中…" : "确认合并"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 // ── 移除分票 ─────────────────────────────────────────────────────────
 export function RemoveSubTicketModal({ master, existingSubTickets, onClose, onRemoved }) {
   const [subId, setSubId] = useState("");

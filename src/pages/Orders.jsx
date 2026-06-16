@@ -22,7 +22,7 @@ import {
   ChargeTemplateApplyModal,
   ChargeTemplateSaveModal,
 } from "../components/ChargesToolbarModals.jsx";
-import { JoinSubTicketModal, RemoveSubTicketModal, SplitCargoToSubsModal } from "../components/SubTicketModals.jsx";
+import { JoinSubTicketModal, RemoveSubTicketModal, SplitCargoToSubsModal, MergeSubTicketsModal } from "../components/SubTicketModals.jsx";
 import MergeOrdersModal from "../components/MergeOrdersModal.jsx";
 import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
@@ -1466,6 +1466,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
   // 加入/移除分票 modal 开关（仅主拼场景）
   const [joinSubOpen, setJoinSubOpen] = useState(false);
   const [removeSubOpen, setRemoveSubOpen] = useState(false);
+  const [mergeSubOpen, setMergeSubOpen] = useState(false);  // 合并分票 modal
   const [splitCargoOpen, setSplitCargoOpen] = useState(false);  // 拆分母单货物到小票 modal
   const [subTickets, setSubTickets] = useState([]);  // 主拼下面的所有分票
   const [spotBooking, setSpotBooking] = useState(null);  // 关联的现舱（若有 spot_booking_id）
@@ -2803,6 +2804,14 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
           onRemoved={onReload}
         />
       )}
+      {mergeSubOpen && isMaster && (
+        <MergeSubTicketsModal
+          master={order}
+          existingSubTickets={subTickets}
+          onClose={() => setMergeSubOpen(false)}
+          onMerged={refreshAfterSplit}
+        />
+      )}
       {splitCargoOpen && isMaster && (
         <SplitCargoToSubsModal
           master={order}
@@ -3782,6 +3791,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
               <button className="primary" disabled={isLocked} onClick={createSubTicket}>+ 新增分票</button>
               <button disabled title="点击下方表格中分票号即可编辑">编辑分票</button>
               <button disabled={isLocked} onClick={() => setJoinSubOpen(true)} title="把一个独立作业并入当前母拼">加入分票</button>
+              <button disabled={isLocked || subTickets.length < 2} onClick={() => setMergeSubOpen(true)} title="把多个分票合并成一个">合并分票</button>
               <button disabled={isLocked || subTickets.length === 0} onClick={() => setRemoveSubOpen(true)} title="把分票从母拼解绑成独立作业">移除分票</button>
             </div>
 

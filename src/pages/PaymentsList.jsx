@@ -10,6 +10,7 @@
 import { useEffect, useState, Fragment } from "react";
 import { supabase } from "../supabase.js";
 import PaymentEditor from "./PaymentEditor.jsx";
+import BankStatementImportModal from "../components/BankStatementImportModal.jsx";
 import { dataScopeOf } from "../lib/permissions.js";
 
 const BRAND = "#1f3864";
@@ -33,6 +34,11 @@ const formatDate = (d) => {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 
+// 千分位金额（2 位小数）
+const fmtMoney = (n) =>
+  Number(n || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const CCY_SYMBOL = { CNY: "¥", USD: "$", EUR: "€", GBP: "£" };
+
 // 把一行数据数组拼成 CSV 行,字段含逗号/引号时按 RFC 4180 用双引号转义
 const csvCell = (v) => {
   if (v == null) return "";
@@ -54,6 +60,7 @@ export default function PaymentsList({ user, onBack }) {
   });
   const [expanded, setExpanded] = useState(new Set());
   const [editing, setEditing] = useState(null);          // null | {} (新建) | payment 对象(编辑)
+  const [importing2, setImporting2] = useState(false);   // 对账单导入 modal 开关
   const [page, setPage] = useState(0);                   // 0-indexed
   // 头部统计:走单独 RPC,绕过 PostgREST 1000 行上限,反映"全量符合筛选条件"的真实数字
   const [headerSummary, setHeaderSummary] = useState({ cnt: 0, total_cny: 0, by_currency: [] });
@@ -287,16 +294,11 @@ export default function PaymentsList({ user, onBack }) {
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             {onBack && <button onClick={onBack} style={btn}>← 返回</button>}
             <span style={{ fontSize: 16, fontWeight: 700 }}>收付款记录</span>
-            <span style={{ marginLeft: 4, color: "#888", fontSize: 12 }}>
-              共 {headerSummary.cnt} 笔 · 折 CNY ¥ {headerSummary.total_cny.toFixed(2)}
-              {headerSummary.by_currency.length > 1 && (
-                <span style={{ color: "#aaa", marginLeft: 8 }}>
-                  ({headerSummary.by_currency.map(c => `${c.currency} ${Number(c.total).toFixed(2)}`).join(" / ")})
-                </span>
-              )}
-            </span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setImporting2(true)} style={btn}>
+              导入对账单
+            </button>
             <button onClick={onExportCsv} style={btn}
                     disabled={exporting || headerSummary.cnt === 0}>
               {exporting ? "导出中..." : "导出 CSV"}
@@ -359,6 +361,37 @@ export default function PaymentsList({ user, onBack }) {
                     commitFilters();
                   }}
                   style={btn}>重置</button>
+        </div>
+
+        {/* 搜索结果汇总条：随筛选条件实时更新（全量，不止当前页） */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap",
+          padding: "10px 14px", marginBottom: 12, borderRadius: 4,
+          background: "#f0f5ff", border: "1px solid #d6e4ff", fontSize: 13,
+        }}>
+          <span style={{ color: "#888" }}>筛选结果</span>
+          <span>
+            共 <b style={{ fontSize: 16, color: BRAND }}>{headerSummary.cnt}</b> 笔
+            {direction === "AR" ? "收款" : "付款"}
+          </span>
+          <span style={{ width: 1, height: 16, background: "#c8dcff" }} />
+          {(headerSummary.by_currency.length > 0
+            ? headerSummary.by_currency
+            : [{ currency: "CNY", total: headerSummary.total_cny }]
+          ).map((c) => (
+            <span key={c.currency}>
+              {c.currency} 总额{" "}
+              <b style={{ fontFamily: "Consolas,monospace", color: "#1f3864" }}>
+                {CCY_SYMBOL[c.currency] || ""}{fmtMoney(c.total)}
+              </b>
+            </span>
+          ))}
+          {headerSummary.by_currency.length > 1 && (
+            <span style={{ color: "#1990ff" }}>
+              折 CNY 合计{" "}
+              <b style={{ fontFamily: "Consolas,monospace" }}>¥{fmtMoney(headerSummary.total_cny)}</b>
+            </span>
+          )}
         </div>
 
         {/* 列表 */}
@@ -534,6 +567,13 @@ export default function PaymentsList({ user, onBack }) {
           onSaved={async () => { setEditing(null); await load(); }}
         />
       )}
+
+      <BankStatementImportModal
+        open={importing2}
+        user={user}
+        onClose={() => setImporting2(false)}
+        onImported={async () => { await load(); }}
+      />
     </div>
   );
 }

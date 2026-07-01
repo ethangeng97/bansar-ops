@@ -53,6 +53,12 @@ function getRouteFromHash() {
   return key || "";
 }
 
+// 提单主/分单变体：?bl=mbl → 主单(MBL)，否则默认分单(HBL)
+function getBlVariant() {
+  const qs = new URLSearchParams(window.location.hash.split("?")[1] || "");
+  return qs.get("bl") === "mbl" ? "mbl" : "hbl";
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -288,6 +294,7 @@ export default function App() {
     return (
       <DraftBL
         shipmentId={shipmentId}
+        variant={getBlVariant()}
         onBack={() => { window.history.back(); }}
       />
     );
@@ -299,6 +306,7 @@ export default function App() {
     return (
       <BLCopy
         shipmentId={shipmentId}
+        variant={getBlVariant()}
         onBack={() => { window.history.back(); }}
       />
     );
@@ -310,6 +318,7 @@ export default function App() {
     return (
       <BLOriginal
         shipmentId={shipmentId}
+        variant={getBlVariant()}
         onBack={() => { window.history.back(); }}
       />
     );
@@ -321,6 +330,7 @@ export default function App() {
     return (
       <TelexRelease
         shipmentId={shipmentId}
+        variant={getBlVariant()}
         onBack={() => { window.history.back(); }}
       />
     );

@@ -2001,14 +2001,27 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
       }
 
       // 2) containers：先 shipment_containers，再按 cargo_items 里的 container_no 聚合，再 portal containers，最后 qty_container 解析
-      let containers = sc.map(c => ({
-        container_no: c.container_no || "",
-        seal_no: c.seal_no || "",
-        container_type: [c.container_size, c.container_type].filter(Boolean).join(""),
-        qty: c.cargo_qty,
-        weight: c.cargo_weight,
-        volume: c.cargo_volume,
-      }));
+      // 件/毛/体一律以 cargo_items 按箱号汇总为准（与集装箱编辑器、对账单口径统一），
+      // 不再读 shipment_containers.cargo_weight/cargo_volume 这些可能过时的手填值。
+      const ciAggByBox = {};  // container_no -> { qty, weight, volume }
+      for (const l of cargoLines) {
+        if (!l.container_no) continue;
+        const a = ciAggByBox[l.container_no] || (ciAggByBox[l.container_no] = { qty: 0, weight: 0, volume: 0 });
+        a.qty    += Number(l.qty) || 0;
+        a.weight += Number(l.gross_weight) || 0;
+        a.volume += Number(l.volume) || 0;
+      }
+      let containers = sc.map(c => {
+        const a = ciAggByBox[c.container_no] || {};
+        return {
+          container_no: c.container_no || "",
+          seal_no: c.seal_no || "",
+          container_type: [c.container_size, c.container_type].filter(Boolean).join(""),
+          qty: a.qty ?? c.cargo_qty,
+          weight: a.weight || null,
+          volume: a.volume || null,
+        };
+      });
 
       if (containers.length === 0 && cargoLines.length > 0) {
         // 按 container_no 聚合 cargo_items 自动出箱列表
@@ -2692,14 +2705,18 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
     return m;
   }, [isMaster, order.shipment_type, order.id, order.customer, subTickets]);
 
-  // 按箱合计：cargo_items.qty group by container_no
-  // 给 ContainerEditor 的"件数"列只读用
-  const cargoQtyByContainerNo = useMemo(() => {
+  // 按箱合计：cargo_items 的 件数/货重/体积 group by container_no
+  // 给 ContainerEditor 的"件数/货重/体积"三列只读汇总用——口径统一以货物明细为准，
+  // 避免集装箱手填体积与对账单(取 cargo_items 合计)对不上。
+  const cargoAggByContainerNo = useMemo(() => {
     const src = (isMaster && order.shipment_type === "Console") ? masterAggCargoLines : cargoLines;
-    const map = {};
+    const map = {};  // container_no -> { qty, weight, volume }
     (src || []).forEach(l => {
       if (!l.container_no) return;
-      map[l.container_no] = (map[l.container_no] || 0) + (parseInt(l.qty) || 0);
+      const a = map[l.container_no] || (map[l.container_no] = { qty: 0, weight: 0, volume: 0 });
+      a.qty += parseInt(l.qty) || 0;
+      a.weight += parseFloat(l.gross_weight) || 0;
+      a.volume += parseFloat(l.volume) || 0;
     });
     return map;
   }, [cargoLines, masterAggCargoLines, isMaster, order.shipment_type]);
@@ -2884,11 +2901,18 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
             <Mi disabled={!order.id} onClick={() => setProfitOpen(true)}>内部利润分析</Mi>
             <MiDropdown disabled={!order.id} options={[
               { label: "委托书",           onClick: () => window.open(`#/docs/booking/${order.id}`, "_blank") },
-              { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}`, "_blank") },
+              { header: "分单 House B/L (HBL)" },
+              { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}?bl=hbl`, "_blank") },
+              { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}?bl=hbl`, "_blank") },
+              { label: "提单正本 (Original)", onClick: () => window.open(`#/docs/bl_original/${order.id}?bl=hbl`, "_blank") },
+              { label: "电放件 (Telex)",     onClick: () => window.open(`#/docs/telex/${order.id}?bl=hbl`, "_blank") },
+              { header: "主单 Master B/L (MBL)" },
+              { label: "提单确认件 (Draft)", onClick: () => window.open(`#/docs/draft_bl/${order.id}?bl=mbl`, "_blank") },
+              { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}?bl=mbl`, "_blank") },
+              { label: "提单正本 (Original)", onClick: () => window.open(`#/docs/bl_original/${order.id}?bl=mbl`, "_blank") },
+              { label: "电放件 (Telex)",     onClick: () => window.open(`#/docs/telex/${order.id}?bl=mbl`, "_blank") },
+              { header: "其他" },
               { label: "📤 提单确认件 (Excel, 一代版)", onClick: () => exportDraftBLToXlsx(order.id) },
-              { label: "提单副本 (Copy)",    onClick: () => window.open(`#/docs/bl_copy/${order.id}`, "_blank") },
-              { label: "提单正本 (Original)", onClick: () => window.open(`#/docs/bl_original/${order.id}`, "_blank") },
-              { label: "电放件",             onClick: () => window.open(`#/docs/telex/${order.id}`, "_blank") },
               { label: "放舱信息",           onClick: () => window.open(`#/docs/release/${order.id}`, "_blank") },
               { label: "单票对账单",         onClick: () => window.open(`#/docs/stmt/${order.id}`, "_blank") },
               { label: "📤 56 舱单 (.xls)",   onClick: exportSino56Manifest, disabled: isCreating },
@@ -3702,7 +3726,7 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                           <ContainerEditor
                             shipmentId={order?.id}
                             readOnly={!editing && !isCreating}
-                            cargoQtyByContainerNo={cargoQtyByContainerNo}
+                            cargoAggByContainerNo={cargoAggByContainerNo}
                             onChange={(rows) => {
                               const map = {};
                               for (const r of rows) {
@@ -4514,12 +4538,12 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
   const isTelex = blType === "电放";
   const docs = [
     { key: "booking",  name: "订舱委托书",   en: "Booking Confirmation", desc: "发船公司/订舱代理，确认舱位",  ready: true },
-    { key: "draft_bl", name: "提单确认件",   en: "Draft B/L",            desc: "发客户确认提单内容",            ready: true },
+    { key: "draft_bl", name: "提单确认件",   en: "Draft B/L",            desc: "发客户确认提单内容",            ready: true, bl: true },
     { key: "draft_bl_xlsx", name: "提单确认件 Excel", en: "Draft B/L (xlsx)", desc: "一代版，关键字段平铺表格",     ready: true,
       action: () => exportDraftBLToXlsx(shipmentId) },
-    { key: "bl_copy",  name: "提单 Copy",    en: "B/L Copy",             desc: "提单副本，签发后用",            ready: true },
-    { key: "bl_original", name: "提单正本",  en: "Original B/L",         desc: "正本提单，签发后打印",          ready: true },
-    { key: "telex",    name: "电放件",       en: "Telex Release",        desc: "电放票专用，替代正本提单",      ready: true, highlight: isTelex },
+    { key: "bl_copy",  name: "提单 Copy",    en: "B/L Copy",             desc: "提单副本，签发后用",            ready: true, bl: true },
+    { key: "bl_original", name: "提单正本",  en: "Original B/L",         desc: "正本提单，签发后打印",          ready: true, bl: true },
+    { key: "telex",    name: "电放件",       en: "Telex Release",        desc: "电放票专用，替代正本提单",      ready: true, highlight: isTelex, bl: true },
     { key: "release",  name: "放舱信息",     en: "Release Notice",       desc: "舱位确认后通知发货方",          ready: true },
     { key: "stmt",     name: "对账单（单票）", en: "Statement (Single)", desc: "本票的费用对账",                ready: true },
   ];
@@ -4554,6 +4578,28 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
                     borderRadius: 3, fontSize: 12, cursor: "pointer",
                   }}
                 >下载 Excel →</button>
+              ) : d.bl ? (
+                // 提单类：分单(HBL) / 主单(MBL) 两个入口
+                <div style={{ display: "flex", gap: 8 }}>
+                  <a
+                    href={`#/docs/${d.key}/${shipmentId}?bl=hbl`}
+                    target="_blank" rel="noreferrer"
+                    style={{
+                      display: "inline-block", padding: "5px 12px",
+                      background: "#389e0d", color: "#fff",
+                      textDecoration: "none", borderRadius: 3, fontSize: 12,
+                    }}
+                  >分单 HBL →</a>
+                  <a
+                    href={`#/docs/${d.key}/${shipmentId}?bl=mbl`}
+                    target="_blank" rel="noreferrer"
+                    style={{
+                      display: "inline-block", padding: "5px 12px",
+                      background: "#0958d9", color: "#fff",
+                      textDecoration: "none", borderRadius: 3, fontSize: 12,
+                    }}
+                  >主单 MBL →</a>
+                </div>
               ) : (
                 <a
                   href={`#/docs/${d.key}/${shipmentId}`}

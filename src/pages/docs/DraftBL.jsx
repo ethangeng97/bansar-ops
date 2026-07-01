@@ -2,6 +2,6 @@
 // 复用 BLLayout 共享布局，传入 mode="draft"
 import BLLayout from "./BLLayout.jsx";
 
-export default function DraftBL({ shipmentId, onBack }) {
-  return <BLLayout shipmentId={shipmentId} onBack={onBack} mode="draft" />;
+export default function DraftBL({ shipmentId, onBack, variant }) {
+  return <BLLayout shipmentId={shipmentId} onBack={onBack} mode="draft" variant={variant} />;
 }

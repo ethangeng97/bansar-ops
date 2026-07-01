@@ -15,6 +15,12 @@ import { liveUpper } from "../lib/validators.js";
 const SIZE_OPTIONS = ["20", "40", "45", "53"];
 const TYPE_OPTIONS = ["GP", "HQ", "RF", "OT", "FR", "TK", "HC", "BU"];
 
+// 按箱合计的货重/体积只读显示：四舍五入到 dp 位再去掉尾部 0，空/0 显示 "—"
+const fmtAgg = (v, dp) => {
+  if (v == null || !(v > 0)) return "—";
+  return String(Number(v.toFixed(dp)));
+};
+
 const TYPE_LABELS = {
   GP: "GP - 普通箱",
   HQ: "HQ - 高箱",
@@ -26,7 +32,7 @@ const TYPE_LABELS = {
   BU: "BU - 散货箱",
 };
 
-export default function ContainerEditor({ shipmentId, readOnly, onChange, cargoQtyByContainerNo = {} }) {
+export default function ContainerEditor({ shipmentId, readOnly, onChange, cargoAggByContainerNo = {} }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingRows, setSavingRows] = useState(new Set()); // id 集合
@@ -216,21 +222,15 @@ export default function ContainerEditor({ shipmentId, readOnly, onChange, cargoQ
                 </td>
                 <td style={{ ...td, textAlign: "right", color: "#666", fontFamily: "Consolas,monospace" }}
                     title="按箱合计自动算（cargo_items.qty）">
-                  {cargoQtyByContainerNo[r.container_no] || "—"}
+                  {cargoAggByContainerNo[r.container_no]?.qty || "—"}
                 </td>
-                <td style={{ ...td, textAlign: "right" }}>
-                  {readOnly ? (r.cargo_weight || "—") :
-                    <input type="number" step="0.01" value={r.cargo_weight || ""}
-                           onChange={e => setRows(prev => prev.map(x => x.id === r.id ? { ...x, cargo_weight: e.target.value } : x))}
-                           onBlur={e => updateRow(r.id, { cargo_weight: e.target.value === "" ? null : Number(e.target.value) })}
-                           style={{ ...inpStyle, textAlign: "right", width: 80, fontFamily: "Consolas,monospace" }} />}
+                <td style={{ ...td, textAlign: "right", color: "#666", fontFamily: "Consolas,monospace" }}
+                    title="按箱合计自动算（cargo_items.gross_weight），请在「货物明细」里修改">
+                  {fmtAgg(cargoAggByContainerNo[r.container_no]?.weight, 3)}
                 </td>
-                <td style={{ ...td, textAlign: "right" }}>
-                  {readOnly ? (r.cargo_volume || "—") :
-                    <input type="number" step="0.01" value={r.cargo_volume || ""}
-                           onChange={e => setRows(prev => prev.map(x => x.id === r.id ? { ...x, cargo_volume: e.target.value } : x))}
-                           onBlur={e => updateRow(r.id, { cargo_volume: e.target.value === "" ? null : Number(e.target.value) })}
-                           style={{ ...inpStyle, textAlign: "right", width: 80, fontFamily: "Consolas,monospace" }} />}
+                <td style={{ ...td, textAlign: "right", color: "#666", fontFamily: "Consolas,monospace" }}
+                    title="按箱合计自动算（cargo_items.volume），请在「货物明细」里修改">
+                  {fmtAgg(cargoAggByContainerNo[r.container_no]?.volume, 4)}
                 </td>
                 <td style={td}>
                   {readOnly ? (r.remark || "—") :

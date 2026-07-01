@@ -127,18 +127,32 @@ export function MiDropdown({ children, options = [], disabled }) {
       {open && options.length > 0 && (
         <div className="tms-mb-menu" onClick={(e) => e.stopPropagation()}>
           {options.map((o, i) => (
-            <div
-              key={i}
-              className={"tms-mb-mi" + (o.disabled ? " disable" : "")}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (o.disabled) return;
-                close();
-                o.onClick?.();
-              }}
-            >
-              {o.label}
-            </div>
+            o.header ? (
+              <div
+                key={i}
+                style={{
+                  padding: "5px 12px 3px", fontSize: 11, fontWeight: 700,
+                  color: "#999", letterSpacing: 0.3, userSelect: "none",
+                  borderTop: i === 0 ? "none" : "1px solid #f0f0f0",
+                  background: "#fafafa", cursor: "default",
+                }}
+              >
+                {o.header}
+              </div>
+            ) : (
+              <div
+                key={i}
+                className={"tms-mb-mi" + (o.disabled ? " disable" : "")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (o.disabled) return;
+                  close();
+                  o.onClick?.();
+                }}
+              >
+                {o.label}
+              </div>
+            )
           ))}
         </div>
       )}

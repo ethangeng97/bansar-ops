@@ -22,7 +22,9 @@ const BRAND_BORDER = "#cdd9ec";
 const STAMP_RED = "#c00";
 const ROWS_PER_PAGE = 5;
 
-export default function BLLayout({ shipmentId, onBack, mode }) {
+// variant: "hbl"(默认, 分单, 用 hbl_no) | "mbl"(主单, 用 mbl_no) — 只切单号+标题, 抬头字段不变
+export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) {
+  const isMbl = variant === "mbl";
   const [shipment, setShipment] = useState(null);
   const [company, setCompany]   = useState(null);
   const [cargoItems, setCargo]  = useState([]);
@@ -137,15 +139,17 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   }, [shipmentId]);
 
   const print = () => {
-    // 文件名规则: {MBL号}+BL_{DRAFT/COPY/TELEX}
-    // 例如: OOLU2168454750+BL_DRAFT
-    const blNo = shipment?.mbl_no || shipment?.booking_no || shipment?.hbl_no || shipment?.order_no || "BL";
+    // 文件名规则: {单号}+{MBL/HBL}_{DRAFT/COPY/TELEX}
+    // 例如: OOLU2168454750+MBL_DRAFT
+    const blNo = isMbl
+      ? (shipment?.mbl_no || shipment?.booking_no || shipment?.order_no || "BL")
+      : (shipment?.hbl_no || shipment?.order_no || "BL");
     const tag = mode === "draft"    ? "DRAFT"
               : mode === "copy"     ? "COPY"
               : mode === "telex"    ? "TELEX"
               : mode === "original" ? "ORIGINAL"
               : "DRAFT";
-    const filename = `${blNo}+BL_${tag}`;
+    const filename = `${blNo}+${isMbl ? "MBL" : "HBL"}_${tag}`;
     const oldTitle = document.title;
     document.title = filename;
     window.print();
@@ -376,7 +380,13 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
   const totalCargoPages = cargoPages.length;
   const totalPages = totalCargoPages + 1; // +1 是 Terms 页
 
-  const blNo = s.hbl_no || `BSNR${(s.order_no || "").replace(/^BSO/, "")}` || "—";
+  // 主单(MBL)取 mbl_no, 分单(HBL)取 hbl_no(缺省合成 BSNR 号)
+  const blNo = isMbl
+    ? (s.mbl_no || s.booking_no || "—")
+    : (s.hbl_no || `BSNR${(s.order_no || "").replace(/^BSO/, "")}` || "—");
+  const blNoLabel = isMbl ? "MB/L No." : "B/L No.";
+  const designation = isMbl ? "MASTER B/L" : "HOUSE B/L";
+  const formCode = isMbl ? "BNSR-MBL" : "BNSR-HBL";
   const onBoardDate = s.atd ? formatDateLong(s.atd) : (s.etd ? formatDateLong(s.etd) : "—");
   const issueDate = (mode === "copy" || mode === "original")
     ? formatDateLong(s.obl_issued_at || s.atd || s.etd || new Date())
@@ -474,6 +484,13 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
       }}>
         <button onClick={onBack} style={btn}>← 返回</button>
         <span style={{ fontSize: 13, color: "#666" }}>
+          <span style={{
+            display: "inline-block", marginRight: 8, padding: "1px 8px",
+            fontSize: 11, fontWeight: 700, borderRadius: 3,
+            background: isMbl ? "#e6f4ff" : "#f6ffed",
+            color: isMbl ? "#0958d9" : "#389e0d",
+            border: `1px solid ${isMbl ? "#91caff" : "#b7eb8f"}`,
+          }}>{isMbl ? "主单 MBL" : "分单 HBL"}</span>
           {isDraft    ? "提单确认件 Draft B/L" :
            isTelex    ? "电放件 Telex Release" :
            isOriginal ? "提单正本 Original B/L" :
@@ -504,14 +521,15 @@ export default function BLLayout({ shipmentId, onBack, mode }) {
           rows={pageRows} totalPkg={totalPkg} totalWt={totalWt} totalCbm={totalCbm}
           distinctProducts={distinctProducts}
           isDraft={isDraft} isCopy={isCopy} isTelex={isTelex} isOriginal={isOriginal}
-          s={s} co={co} blNo={blNo} onBoardDate={onBoardDate} issueDate={issueDate}
+          s={s} co={co} blNo={blNo} blNoLabel={blNoLabel} designation={designation} formCode={formCode}
+          onBoardDate={onBoardDate} issueDate={issueDate}
           isPrepaid={isPrepaid} isCollect={isCollect}
           numOriginals={numOriginals} blType={blType} carrierName={carrierName}
         />
       ))}
 
       {/* 第二页（最后一页）TERMS AND CONDITIONS */}
-      <TermsPage co={co} blNo={blNo} totalPages={totalPages} />
+      <TermsPage co={co} blNo={blNo} blNoLabel={blNoLabel} formCode={formCode} totalPages={totalPages} />
     </div>
   );
 }
@@ -523,7 +541,8 @@ function CargoPage({
   pageIdx, totalPages, isFirstPage, isLastCargoPage,
   rows, totalPkg, totalWt, totalCbm, distinctProducts = [],
   isDraft, isCopy, isTelex, isOriginal,
-  s, co, blNo, onBoardDate, issueDate,
+  s, co, blNo, blNoLabel = "B/L No.", designation, formCode = "BNSR-HBL",
+  onBoardDate, issueDate,
   isPrepaid, isCollect, numOriginals, blType, carrierName,
 }) {
   return (
@@ -550,7 +569,7 @@ function CargoPage({
           </div>
         </div>
         <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 8 }}>
-          <div style={{ fontSize: 8, color: "#444" }}>B/L No.</div>
+          <div style={{ fontSize: 8, color: "#444" }}>{blNoLabel}</div>
           <div style={{ fontSize: 9.5, fontWeight: 700, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.3 }}>
             {blNo}
           </div>
@@ -577,6 +596,11 @@ function CargoPage({
           padding: "14px 10px 8px", textAlign: "center", borderBottom: "1px solid #555",
           display: "flex", flexDirection: "column", justifyContent: "center",
         }}>
+          {designation && (
+            <div style={{ fontSize: 11, fontWeight: 800, color: STAMP_RED, letterSpacing: 3, marginBottom: 2 }}>
+              {designation}
+            </div>
+          )}
           <div style={{ fontSize: 22, fontWeight: 800, color: BRAND, letterSpacing: 2, lineHeight: 1 }}>
             BILL OF LADING
           </div>
@@ -955,7 +979,7 @@ function CargoPage({
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6,
                     fontSize: 8, color: "#888", position: "relative", zIndex: 2 }}>
         <div>TERMS AND CONDITIONS OVERLEAF</div>
-        <div>Form BNSR-HBL · Page {pageIdx + 1} of {totalPages}</div>
+        <div>Form {formCode} · Page {pageIdx + 1} of {totalPages}</div>
       </div>
     </div>
   );
@@ -964,7 +988,7 @@ function CargoPage({
 // ============================================================================
 // 第二页 TERMS AND CONDITIONS
 // ============================================================================
-function TermsPage({ co, blNo, totalPages }) {
+function TermsPage({ co, blNo, blNoLabel = "B/L No.", formCode = "BNSR-HBL", totalPages }) {
   const terms = TERMS_LIST;
   return (
     <div className="hbl-page">
@@ -986,7 +1010,7 @@ function TermsPage({ co, blNo, totalPages }) {
           </div>
         </div>
         <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 8 }}>
-          <div style={{ fontSize: 8, color: "#444" }}>B/L No.</div>
+          <div style={{ fontSize: 8, color: "#444" }}>{blNoLabel}</div>
           <div style={{ fontSize: 9.5, fontWeight: 700, fontFamily: "'Consolas',monospace", color: "#000", letterSpacing: 0.3 }}>
             {blNo}
           </div>
@@ -1015,7 +1039,7 @@ function TermsPage({ co, blNo, totalPages }) {
                     paddingTop: 6, borderTop: `1px solid ${BRAND}`,
                     fontSize: 8, color: "#666" }}>
         <div>{(co.name_en || "BANSAR").toUpperCase()} — Bill of Lading Terms and Conditions</div>
-        <div>Page {totalPages} of {totalPages} · Form BNSR-HBL</div>
+        <div>Page {totalPages} of {totalPages} · Form {formCode}</div>
       </div>
     </div>
   );

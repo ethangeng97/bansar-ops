@@ -34,6 +34,7 @@ export const SHIPMENT_DB_COLUMNS = new Set([
   "internal_note",
   "lifecycle", "local_payment",
   "marks", "mbl_no", "mbl_status",
+  "mbl_shipper", "mbl_consignee", "mbl_notify_party",
   "notify_party",
   "operator_id", "order_no", "overseas_agent",
   "parent_id", "pickup_depot",

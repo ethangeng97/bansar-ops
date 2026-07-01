@@ -3770,6 +3770,27 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                   <Df label="签发日期"><input type="date" value={v("date_of_issue")} onChange={e => ch("date_of_issue", e.target.value)} disabled={!editing} /></Df>
                   <Df label="电放号"><input value={v("telex_release_no")} onChange={e => ch("telex_release_no", e.target.value)} disabled={!editing} /></Df>
                   <Df label="电放日期"><input type="date" value={v("telex_release_date")} onChange={e => ch("telex_release_date", e.target.value)} disabled={!editing} /></Df>
+
+                  {/* 主单抬头（我司/发货地代理 → 目的港代理）。留空则打印主单时自动取分单(HB/L)那套 */}
+                  <div className="full6" style={{ fontSize: 12, fontWeight: 700, color: "#0958d9", margin: "10px 0 -2px" }}>
+                    主单抬头 Master B/L Parties
+                    <span style={{ fontWeight: 400, color: "#999", marginLeft: 8 }}>· 制作主单用；留空则打印主单时自动套用分单(HB/L)抬头</span>
+                  </div>
+                  <Df label="发货人 Shipper" span={2}>
+                    <textarea value={v("mbl_shipper")} onChange={e => ch("mbl_shipper", e.target.value.toUpperCase())}
+                              disabled={!editing} placeholder="留空 = 用分单发货人"
+                              style={{ height: 88, resize: "vertical", fontFamily: "Consolas,monospace" }} />
+                  </Df>
+                  <Df label="收货人 Consignee" span={2}>
+                    <textarea value={v("mbl_consignee")} onChange={e => ch("mbl_consignee", e.target.value.toUpperCase())}
+                              disabled={!editing} placeholder="留空 = 用分单收货人"
+                              style={{ height: 88, resize: "vertical", fontFamily: "Consolas,monospace" }} />
+                  </Df>
+                  <Df label="通知人 Notify" span={2}>
+                    <textarea value={v("mbl_notify_party")} onChange={e => ch("mbl_notify_party", e.target.value.toUpperCase())}
+                              disabled={!editing} placeholder="留空 = SAME AS CONSIGNEE"
+                              style={{ height: 88, resize: "vertical", fontFamily: "Consolas,monospace" }} />
+                  </Df>
                 </div>
               )}
 
@@ -3783,6 +3804,27 @@ function OrderDetail({ order, role, user, onBack, onReload, onUpdated = null, cr
                   </Df>
                   <Df label="签发地"><input value={v("hbl_place_of_issue")} onChange={e => ch("hbl_place_of_issue", e.target.value)} disabled={!editing} /></Df>
                   <Df label="签发日期"><input type="date" value={v("hbl_date_of_issue")} onChange={e => ch("hbl_date_of_issue", e.target.value)} disabled={!editing} /></Df>
+
+                  {/* 分单抬头（真实发货人 → 真实收货人）。与「托单信息」共用同一套字段，改哪边都同步 */}
+                  <div className="full6" style={{ fontSize: 12, fontWeight: 700, color: "#389e0d", margin: "10px 0 -2px" }}>
+                    分单抬头 House B/L Parties
+                    <span style={{ fontWeight: 400, color: "#999", marginLeft: 8 }}>· 与「托单信息」为同一套发货人/收货人/通知人，改此处即改托单</span>
+                  </div>
+                  <Df label="发货人 Shipper" span={2}>
+                    <textarea value={v("shipper")} onChange={e => ch("shipper", e.target.value.toUpperCase())}
+                              disabled={!editing} placeholder="英文公司名 + 地址（仅半角字符）"
+                              style={{ height: 88, resize: "vertical", fontFamily: "Consolas,monospace" }} />
+                  </Df>
+                  <Df label="收货人 Consignee" span={2}>
+                    <textarea value={v("consignee")} onChange={e => ch("consignee", e.target.value.toUpperCase())}
+                              disabled={!editing} placeholder="英文公司名 + 地址"
+                              style={{ height: 88, resize: "vertical", fontFamily: "Consolas,monospace" }} />
+                  </Df>
+                  <Df label="通知人 Notify" span={2}>
+                    <textarea value={v("notify_party")} onChange={e => ch("notify_party", e.target.value.toUpperCase())}
+                              disabled={!editing} placeholder="留空 = SAME AS CONSIGNEE"
+                              style={{ height: 88, resize: "vertical", fontFamily: "Consolas,monospace" }} />
+                  </Df>
                 </div>
               )}
 

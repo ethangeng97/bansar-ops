@@ -387,6 +387,10 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   const blNoLabel = isMbl ? "MB/L No." : "B/L No.";
   const designation = isMbl ? "MASTER B/L" : "HOUSE B/L";
   const formCode = isMbl ? "BNSR-MBL" : "BNSR-HBL";
+  // 抬头按主/分单各取一套：主单优先 mbl_*，为空回退到分单那套（兼容存量数据）
+  const partyShipper   = isMbl ? (s.mbl_shipper || s.shipper) : s.shipper;
+  const partyConsignee = isMbl ? (s.mbl_consignee || s.consignee) : s.consignee;
+  const partyNotify    = isMbl ? (s.mbl_notify_party || s.notify_party) : s.notify_party;
   const onBoardDate = s.atd ? formatDateLong(s.atd) : (s.etd ? formatDateLong(s.etd) : "—");
   const issueDate = (mode === "copy" || mode === "original")
     ? formatDateLong(s.obl_issued_at || s.atd || s.etd || new Date())
@@ -522,6 +526,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
           distinctProducts={distinctProducts}
           isDraft={isDraft} isCopy={isCopy} isTelex={isTelex} isOriginal={isOriginal}
           s={s} co={co} blNo={blNo} blNoLabel={blNoLabel} designation={designation} formCode={formCode}
+          partyShipper={partyShipper} partyConsignee={partyConsignee} partyNotify={partyNotify}
           onBoardDate={onBoardDate} issueDate={issueDate}
           isPrepaid={isPrepaid} isCollect={isCollect}
           numOriginals={numOriginals} blType={blType} carrierName={carrierName}
@@ -542,6 +547,7 @@ function CargoPage({
   rows, totalPkg, totalWt, totalCbm, distinctProducts = [],
   isDraft, isCopy, isTelex, isOriginal,
   s, co, blNo, blNoLabel = "B/L No.", designation, formCode = "BNSR-HBL",
+  partyShipper, partyConsignee, partyNotify,
   onBoardDate, issueDate,
   isPrepaid, isCollect, numOriginals, blType, carrierName,
 }) {
@@ -590,7 +596,7 @@ function CargoPage({
         {/* Row 1: Shipper | 标题区 */}
         <div className="bl-cell" style={{ minHeight: 110 }}>
           <div className="bl-cell-label">Shipper</div>
-          <div className="bl-cell-val" style={{ fontWeight: 600 }}>{s.shipper || "—"}</div>
+          <div className="bl-cell-val" style={{ fontWeight: 600 }}>{partyShipper || "—"}</div>
         </div>
         <div style={{
           padding: "14px 10px 8px", textAlign: "center", borderBottom: "1px solid #555",
@@ -635,7 +641,7 @@ function CargoPage({
         {/* Row 2: Consignee | For delivery of goods */}
         <div className="bl-cell" style={{ minHeight: 110 }}>
           <div className="bl-cell-label">Consignee (if "To Order" so indicate)</div>
-          <div className="bl-cell-val">{s.consignee || "—"}</div>
+          <div className="bl-cell-val">{partyConsignee || "—"}</div>
         </div>
         <div className="bl-cell" style={{ minHeight: 110 }}>
           <div className="bl-cell-label">For delivery of goods please apply to:</div>
@@ -647,7 +653,7 @@ function CargoPage({
         {/* Row 3: Notify | TELEX RELEASE 印章 */}
         <div className="bl-cell" style={{ minHeight: 90 }}>
           <div className="bl-cell-label">Notify Party (No claim shall attach for failure to notify)</div>
-          <div className="bl-cell-val">{s.notify_party || "SAME AS CONSIGNEE"}</div>
+          <div className="bl-cell-val">{partyNotify || "SAME AS CONSIGNEE"}</div>
         </div>
         <div style={{
           padding: "6px 10px", borderBottom: "1px solid #555",

@@ -125,6 +125,9 @@ export function OrdersPage({ user, onBack }) {
       });
   }, [selectedId]);
   const [checkedIds, setCheckedIds] = useState(new Set());
+  // 箱号搜索时，明细表(shipment_containers/cargo_items)反查出的 shipment_id 集合。
+  // null = 没在按箱号搜；Set = 命中集合（用于放行主表 container_no 为空的自拼柜分票）。
+  const [containerMatchIds, setContainerMatchIds] = useState(null);
   const [search, setSearch] = useState("");
   const [showFilter, setShowFilter] = useState(true);
   const [filters, setFilters] = useState({});
@@ -297,7 +300,26 @@ export function OrdersPage({ user, onBack }) {
       const hblQ = String(fNow.hbl_no || "").trim();
       if (hblQ) query = query.ilike("hbl_no", ilikeArg(hblQ));
       const cntQ = String(fNow.container_no || "").trim();
-      if (cntQ) query = query.ilike("container_no", ilikeArg(cntQ));
+      if (cntQ) {
+        const e = escIlike(cntQ);
+        // 箱号可能录在主表 container_no，也可能只录在 shipment_containers / cargo_items
+        // 明细（自拼柜分票尤其如此，主表 container_no 常为空）。先反查明细拿 shipment_id，
+        // 再把主表 container_no 命中 OR id 命中一起放进查询。
+        const ids = new Set();
+        for (const tbl of ["shipment_containers", "cargo_items"]) {
+          const { data: rows } = await supabase.from(tbl)
+            .select("shipment_id").ilike("container_no", `*${e}*`).limit(1000);
+          (rows || []).forEach(r => r.shipment_id && ids.add(r.shipment_id));
+        }
+        setContainerMatchIds(ids);
+        if (ids.size > 0) {
+          query = query.or(`container_no.ilike.*${e}*,id.in.(${[...ids].join(",")})`);
+        } else {
+          query = query.ilike("container_no", ilikeArg(cntQ));
+        }
+      } else {
+        setContainerMatchIds(null);
+      }
       const ordQ = String(fNow.order_no || "").trim();
       if (ordQ) query = query.ilike("order_no", ilikeArg(ordQ));
       const poQ = String(fNow.po || "").trim();
@@ -399,7 +421,12 @@ export function OrdersPage({ user, onBack }) {
         || (o.e_booking_no || "").toLowerCase().includes(q);
       if (!hit) return false;
     }
-    if (f.container_no && !(o.container_no || "").toLowerCase().includes(String(f.container_no).toLowerCase())) return false;
+    if (f.container_no) {
+      // 主表 container_no 命中，或明细反查(containerMatchIds)命中，都放行
+      const direct = (o.container_no || "").toLowerCase().includes(String(f.container_no).toLowerCase());
+      const viaDetail = containerMatchIds && containerMatchIds.has(o.id);
+      if (!direct && !viaDetail) return false;
+    }
     if (f.order_no && !(o.order_no || "").toLowerCase().includes(String(f.order_no).toLowerCase())) return false;
     if (f.po && !(o.po || "").toLowerCase().includes(String(f.po).toLowerCase())) return false;
     if (f.hbl_no && !(o.hbl_no || "").toLowerCase().includes(String(f.hbl_no).toLowerCase())) return false;
@@ -420,7 +447,7 @@ export function OrdersPage({ user, onBack }) {
       }
     }
     return true;
-  }), [shipments, filters, search, sopNode, aliasMatchedNames]);
+  }), [shipments, filters, search, sopNode, aliasMatchedNames, containerMatchIds]);
 
   useEffect(() => { setPage(0); }, [filters, search]);
 

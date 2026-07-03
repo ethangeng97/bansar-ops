@@ -24,6 +24,7 @@ import {
 } from "../components/ChargesToolbarModals.jsx";
 import { JoinSubTicketModal, RemoveSubTicketModal, SplitCargoToSubsModal, MergeSubTicketsModal } from "../components/SubTicketModals.jsx";
 import MergeOrdersModal from "../components/MergeOrdersModal.jsx";
+import ShipmentBatchEditModal from "../components/BatchEditModal.jsx";
 import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
@@ -508,11 +509,17 @@ export function OrdersPage({ user, onBack }) {
 
   // 合并订单弹窗
   const [showMergeModal, setShowMergeModal] = useState(false);
-  // 勾选的订单（用于合并）— 从 shipments 里挑出来
+  // 批量修改弹窗
+  const [showBatchEdit, setShowBatchEdit] = useState(false);
+  // 勾选的订单（用于合并/批量修改）— 从 shipments 里挑出来
   const checkedOrders = useMemo(
     () => shipments.filter(s => checkedIds.has(s.id)),
     [shipments, checkedIds]
   );
+  const openBatchEdit = () => {
+    if (checkedOrders.length < 1) { alert("请先勾选要修改的订单"); return; }
+    setShowBatchEdit(true);
+  };
   // 合并资格：≥2 个 + 没有 Console（避免母拼/分票二次嵌套）
   const canMerge = checkedOrders.length >= 2
     && checkedOrders.every(s => s.shipment_type !== "Console");
@@ -689,6 +696,18 @@ export function OrdersPage({ user, onBack }) {
         />
       )}
 
+      {/* 批量修改弹窗 */}
+      {showBatchEdit && (
+        <ShipmentBatchEditModal
+          selected={checkedOrders}
+          onClose={() => setShowBatchEdit(false)}
+          onSaved={(rows) => {
+            (rows || []).forEach(applyUpdated);
+            setCheckedIds(new Set());
+          }}
+        />
+      )}
+
       {/* 类型选择对话框（点"新建作业"按钮触发） */}
       {showTypePicker && (() => {
         const pickType = (t) => {
@@ -782,6 +801,10 @@ export function OrdersPage({ user, onBack }) {
         <Mi onClick={openMerge} disabled={!canMerge}
           title={canMerge ? "把已勾选订单合并为自拼柜" : "先勾选 ≥2 个非自拼订单"}>
           合并订单{checkedOrders.length >= 2 ? ` (${checkedOrders.length})` : ""}
+        </Mi>
+        <Mi onClick={openBatchEdit} disabled={checkedOrders.length < 1}
+          title={checkedOrders.length ? "批量修改已勾选订单的实际开航日等字段" : "先勾选要修改的订单"}>
+          批量修改{checkedOrders.length >= 1 ? ` (${checkedOrders.length})` : ""}
         </Mi>
         <Tbl/>
         <Mi disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>上页</Mi>

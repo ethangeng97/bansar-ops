@@ -385,7 +385,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
     ? (s.mbl_no || s.booking_no || "—")
     : (s.hbl_no || `BSNR${(s.order_no || "").replace(/^BSO/, "")}` || "—");
   const blNoLabel = isMbl ? "MB/L No." : "B/L No.";
-  const designation = isMbl ? "MASTER B/L" : "HOUSE B/L";
+  const designation = isMbl ? "FCR" : "HOUSE B/L";
   const formCode = isMbl ? "BNSR-MBL" : "BNSR-HBL";
   // 抬头按主/分单各取一套：主单优先 mbl_*，为空回退到分单那套（兼容存量数据）
   const partyShipper   = isMbl ? (s.mbl_shipper || s.shipper) : s.shipper;

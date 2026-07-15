@@ -514,9 +514,9 @@ function ChargeTable({ charges, chargeItemMap }) {
     <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 0, fontSize: 10 }}>
       <thead>
         <tr style={{ background: "#1f3864", color: "#fff" }}>
-          {["费用名称","单价","数量","单位","币种","金额","汇率","折本币总计","备注"].map((h, i) => (
+          {["费用名称","单价","数量","单位","币种","税率","金额","汇率","折本币总计","备注"].map((h, i) => (
             <th key={i} style={{ padding: "5px 6px", border: "1px solid #555",
-                                  textAlign: i === 0 ? "left" : i === 8 ? "left" : "center",
+                                  textAlign: (h === "费用名称" || h === "备注") ? "left" : "center",
                                   fontSize: 9.5, fontWeight: 700, fontFamily: "inherit" }}>
               {h}
             </th>
@@ -525,7 +525,7 @@ function ChargeTable({ charges, chargeItemMap }) {
       </thead>
       <tbody>
         {charges.length === 0 ? (
-          <tr><td colSpan={9} style={{ padding: 12, textAlign: "center",
+          <tr><td colSpan={10} style={{ padding: 12, textAlign: "center",
                                         color: "#999", border: "1px solid #888" }}>
             无费用明细
           </td></tr>
@@ -552,6 +552,10 @@ function ChargeTable({ charges, chargeItemMap }) {
               <td style={{ padding: "4px 6px", border: "1px solid #888",
                             textAlign: "center", fontFamily: "'Consolas',monospace" }}>
                 {ch.currency || "CNY"}
+              </td>
+              <td style={{ padding: "4px 6px", border: "1px solid #888",
+                            textAlign: "center", fontFamily: "'Consolas',monospace" }}>
+                {Number(ch.tax_rate || 0)}%
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
                             textAlign: "right", fontFamily: "'Consolas',monospace" }}>

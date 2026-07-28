@@ -342,7 +342,11 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
 
     rows = [{
       cnInfo: cnInfoBlock,
-      marks: s.marks || mergedCargo.find(it => it.marks)?.marks || "N/M",
+      // 汇总单行也要保留全部唛头：多明细各带不同唛头时，拼接去重后全部展示
+      //（之前只取第一个有唛头的明细，导致第 2 个唛头丢失）
+      marks: s.marks
+        || [...new Set(mergedCargo.map(it => (it.marks || "").trim()).filter(Boolean))].join("\n\n")
+        || "N/M",
       pkgs: ciSum.qty || parseInt(s.qty_packages) || 0,
       unit,
       desc: [descLine, s.po ? `PO-${s.po}` : null].filter(Boolean).join("\n"),

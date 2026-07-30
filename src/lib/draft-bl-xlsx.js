@@ -6,6 +6,7 @@
 // 单元格映射严格对应模板"Version1.1" sheet 的行列位置。
 // ============================================================================
 import { supabase } from "../supabase.js";
+import { combineMarks } from "./marks.js";
 
 let _exceljsPromise = null;
 async function getExcelJS() {
@@ -60,7 +61,6 @@ export async function exportDraftBLToXlsx(shipmentId) {
   const blType = (s.bl_type || "").toUpperCase() || "ORIGINAL";
   const paymentTerm = (s.payment_terms || "COLLECT").toUpperCase();
   const deliveryTerm = s.service_type || "CY-CY";
-  const carrier = s.carrier || "";
   const distinctProducts = [...new Set(cargoItems.map(it => it.product_name_en).filter(Boolean))];
   const commodityName = distinctProducts.join(" / ") || s.desc_en || s.description || "";
 
@@ -98,7 +98,8 @@ export async function exportDraftBLToXlsx(shipmentId) {
     || (paymentTerm === "COLLECT" ? "DESTINATION" : (s.pol || ""));
 
   // 唛头 + 货名
-  ws.getCell("A32").value = s.marks || "N/M";
+  ws.getCell("A32").value = combineMarks(s.marks, cargoItems);
+  ws.getCell("A32").alignment = { ...(ws.getCell("A32").alignment || {}), wrapText: true };
   ws.getCell("E32").value = commodityName;
 
   // 集装箱 + 货物表（从第 40 行开始）

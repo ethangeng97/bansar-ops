@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../supabase.js";
+import { combineMarks } from "../../lib/marks.js";
 
 const BRAND = "#1f3864";
 const BRAND_BG = "#f5f8fc";
@@ -165,10 +166,10 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   // 货物数据：优先用 shipment_containers 关联表，没有时 fallback 到 shipments 单字段
   const containerNos = containers.length > 0
     ? containers.map(c => c.container_no).filter(Boolean)
-    : (s.container_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+    : (s.container_no || "").split(/[/,;\n]/).map(x => x.trim()).filter(Boolean);
   const sealNos = containers.length > 0
     ? containers.map(c => c.seal_no).filter(Boolean)
-    : (s.seal_no || "").split(/[\/,;\n]/).map(x => x.trim()).filter(Boolean);
+    : (s.seal_no || "").split(/[/,;\n]/).map(x => x.trim()).filter(Boolean);
   // 集装箱箱型箱量汇总（如 "1x40HQ"）
   const qtyContainerStr = (() => {
     if (containers.length === 0) return s.qty_container || "";
@@ -340,27 +341,25 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
       cnInfoBlock = lines.join("\n");
     }
 
+    const poLine = formatPoLine(s.po);
     rows = [{
       cnInfo: cnInfoBlock,
-      // 汇总单行也要保留全部唛头：多明细各带不同唛头时，拼接去重后全部展示
-      //（之前只取第一个有唛头的明细，导致第 2 个唛头丢失）
-      marks: s.marks
-        || [...new Set(mergedCargo.map(it => (it.marks || "").trim()).filter(Boolean))].join("\n\n")
-        || "N/M",
+      // 汇总单行也要保留全部唛头：票级唛头 + 明细唛头一起去重展示。
+      marks: combineMarks(s.marks, mergedCargo),
       pkgs: ciSum.qty || parseInt(s.qty_packages) || 0,
       unit,
-      desc: [descLine, s.po ? `PO-${s.po}` : null].filter(Boolean).join("\n"),
+      desc: [descLine, poLine].filter(Boolean).join("\n"),
       gw:  ciSum.gw  || parseFloat(s.weight) || 0,
       cbm: ciSum.cbm || parseFloat(s.volume) || 0,
     }];
   } else {
     rows = mergedCargo.map((it, i) => ({
       cnInfo: buildSingleCtnBlock(it.container_no, i === mergedCargo.length - 1),
-      marks: it.marks || s.marks || "N/M",
+      marks: combineMarks(it.marks || s.marks),
       pkgs: it.qty || 0,
       unit: it.package_unit || "CARTONS",
       desc: [it.product_name_en || s.desc_en || s.cargo_type || "GENERAL CARGO",
-             s.po ? `PO-${s.po}` : null,
+             formatPoLine(s.po),
             ].filter(Boolean).join("\n"),
       gw: parseFloat(it.gross_weight) || 0,
       cbm: parseFloat(it.volume) || 0,
@@ -1134,6 +1133,12 @@ function formatDateLong(d) {
   if (isNaN(date.getTime())) return "—";
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
   return `${date.getDate().toString().padStart(2, "0")} ${months[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatPoLine(po) {
+  const text = String(po || "").trim();
+  if (!text) return null;
+  return /^PO[-\s]/i.test(text) ? text : `PO-${text}`;
 }
 
 function chineseNum(n) {

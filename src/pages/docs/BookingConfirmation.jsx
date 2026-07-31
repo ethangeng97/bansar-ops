@@ -3,17 +3,24 @@
 // 路由：#/docs/booking/<shipment_id>
 // 用途：发给船公司或订舱代理，确认订舱细节
 // 排版：A4 纵向
-// 打印：浏览器原生 window.print() + tms.css 的 @media print 规则
+// 下载：浏览器直接生成 PDF；系统打印保留为兜底
 // ============================================================================
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../supabase.js";
+import {
+  downloadDocumentHtml,
+  downloadDocumentPdf,
+  printDocument,
+  sanitizeFileStem,
+} from "../../lib/document-download.js";
 
 export default function BookingConfirmation({ shipmentId, onBack }) {
   const [shipment, setShipment] = useState(null);
   const [company, setCompany]   = useState(null);
   const [cargoItems, setCargo]  = useState([]);
   const [loading, setLoading]   = useState(true);
+  const [pdfBusy, setPdfBusy]   = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -36,13 +43,27 @@ export default function BookingConfirmation({ shipmentId, onBack }) {
     })();
   }, [shipmentId]);
 
-  const print = () => window.print();
-
   if (loading) return <div style={{ padding: 24 }}>加载中...</div>;
   if (!shipment) return <div style={{ padding: 24 }}>票号不存在</div>;
 
   const s = shipment;
   const co = company || {};
+  const fileStem = sanitizeFileStem(`${s.order_no || s.booking_no || "文件"}-订舱委托书`);
+  const print = () => printDocument(fileStem);
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadDocumentPdf({
+        filename: fileStem,
+        pageSelector: ".doc-a4",
+      });
+    } catch (e) {
+      console.error(e);
+      alert("PDF 导出失败：" + (e?.message || e));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   // 计算货物合计
   const totalPkg = cargoItems.reduce((sum, x) => sum + (parseInt(x.qty_packages) || 0), 0);
@@ -87,7 +108,11 @@ export default function BookingConfirmation({ shipmentId, onBack }) {
           委托书 · {s.order_no} · {s.customer || "—"}
         </span>
         <div style={{ flex: 1 }} />
-        <button onClick={print} style={btnPrimary}>🖨 打印 / 另存为 PDF</button>
+        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...btnPrimary, opacity: pdfBusy ? 0.65 : 1 }}>
+          {pdfBusy ? "生成 PDF..." : "下载 PDF"}
+        </button>
+        <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn}>下载 HTML</button>
+        <button onClick={print} style={btn}>🖨 打印</button>
       </div>
 
       {/* A4 单证主体 */}

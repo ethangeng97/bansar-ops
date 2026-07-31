@@ -4642,7 +4642,7 @@ function DocsPanel({ shipmentId, canPrint, blType }) {
   return (
     <div style={{ padding: 16 }}>
       <div style={{ marginBottom: 12, fontSize: 13, color: "#444" }}>
-        点击下方按钮在新标签页打开单证，可直接打印或另存为 PDF。
+        点击下方按钮在新标签页打开单证，可直接下载 PDF，也可使用系统打印。
         {isTelex && <span style={{ marginLeft: 12, color: "#fa541c", fontWeight: 600 }}>· 本票为电放票</span>}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>

@@ -11,6 +11,12 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../supabase.js";
+import {
+  downloadDocumentHtml,
+  downloadDocumentPdf,
+  printDocument,
+  sanitizeFileStem,
+} from "../../lib/document-download.js";
 
 const BRAND = "#1f3864";
 const STAMP_RED = "#c00";
@@ -19,6 +25,7 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
   const [shipment, setShipment] = useState(null);
   const [company, setCompany] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -39,7 +46,22 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
 
   const s = shipment;
   const co = company || {};
-  const print = () => window.print();
+  const fileStem = sanitizeFileStem(`${s.order_no || s.booking_no || "文件"}-放舱信息`);
+  const print = () => printDocument(fileStem);
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadDocumentPdf({
+        filename: fileStem,
+        pageSelector: ".rln-page",
+      });
+    } catch (e) {
+      console.error(e);
+      alert("PDF 导出失败：" + (e?.message || e));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   const issueDate = formatDateLong(new Date());
 
@@ -63,7 +85,11 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
         <button onClick={onBack} style={btn}>← 返回</button>
         <span style={{ fontSize: 13, color: "#666" }}>放舱信息 · {s.order_no}</span>
         <div style={{ flex: 1 }} />
-        <button onClick={print} style={btnPrimary}>🖨 打印 / 另存为 PDF</button>
+        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...btnPrimary, opacity: pdfBusy ? 0.65 : 1 }}>
+          {pdfBusy ? "生成 PDF..." : "下载 PDF"}
+        </button>
+        <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn}>下载 HTML</button>
+        <button onClick={print} style={btn}>🖨 打印</button>
       </div>
 
       <div className="rln-page" style={{
@@ -110,7 +136,7 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
           <div style={{ marginTop: 4 }}>
             <b>日期 / Date:</b> {issueDate}
             {(s.po || s.customer_po) && <>
-              　　<b>客户参考号 / Customer Ref:</b> {s.po || s.customer_po}
+              <span style={{ marginLeft: 16 }}><b>客户参考号 / Customer Ref:</b> {s.po || s.customer_po}</span>
             </>}
           </div>
         </div>

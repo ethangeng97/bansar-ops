@@ -5,6 +5,13 @@
 // ============================================================================
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase.js";
+import {
+  downloadDocumentHtml,
+  downloadDocumentPdf,
+  printDocument,
+  sanitizeFileStem,
+} from "../lib/document-download.js";
+import { exportToXlsx } from "../lib/excel-export.js";
 
 export default function ChargesPrint({ shipmentId, onBack }) {
   const [shipment, setShipment] = useState(null);
@@ -13,11 +20,13 @@ export default function ChargesPrint({ shipmentId, onBack }) {
   const [ciMap, setCiMap] = useState({});
   const [pMap, setPMap] = useState({});
   const [company, setCompany] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(Boolean(shipmentId));
+  const [error, setError] = useState(shipmentId ? null : "缺少 shipmentId");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [excelBusy, setExcelBusy] = useState(false);
 
   useEffect(() => {
-    if (!shipmentId) { setError("缺少 shipmentId"); setLoading(false); return; }
+    if (!shipmentId) return;
     (async () => {
       try {
         const [{ data: ship }, { data: charges }, { data: items }, { data: parts }, { data: comp }] = await Promise.all([
@@ -53,9 +62,70 @@ export default function ChargesPrint({ shipmentId, onBack }) {
   const arSum = ar.reduce((s, c) => s + (parseFloat(c.amount_cny) || 0), 0);
   const apSum = ap.reduce((s, c) => s + (parseFloat(c.amount_cny) || 0), 0);
   const gross = arSum - apSum;
+  const fileStem = sanitizeFileStem(`${shipment.order_no || shipmentId}-费用清单`);
+
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadDocumentPdf({
+        filename: fileStem,
+        pageSelector: ".print-page",
+      });
+    } catch (e) {
+      console.error(e);
+      alert("PDF 导出失败：" + (e?.message || e));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const downloadExcel = async () => {
+    setExcelBusy(true);
+    try {
+      const rows = [
+        ...ar.map(charge => ({ ...charge, export_direction: "应收" })),
+        ...ap.map(charge => ({ ...charge, export_direction: "应付" })),
+      ].map(charge => ({
+        direction: charge.export_direction,
+        charge_name: ciMap[charge.charge_item_id] || "",
+        partner: pMap[charge.partner_id] || charge.partner_name || "",
+        unit: charge.unit || "",
+        quantity: Number(charge.quantity || 0),
+        unit_price: Number(charge.unit_price || 0),
+        currency: charge.currency || "CNY",
+        amount_total: Number(charge.amount_total || 0),
+        exchange_rate: Number(charge.exchange_rate || 1),
+        amount_cny: Number(charge.amount_cny || 0),
+        remark: charge.remark || "",
+      }));
+      await exportToXlsx({
+        filename: `${fileStem}.xlsx`,
+        sheetName: "费用明细",
+        columns: [
+          { key: "direction", label: "收付方向", width: 10 },
+          { key: "charge_name", label: "费用名称", width: 20 },
+          { key: "partner", label: "结算单位", width: 24 },
+          { key: "unit", label: "单位", width: 10 },
+          { key: "quantity", label: "数量", width: 10 },
+          { key: "unit_price", label: "单价", width: 12 },
+          { key: "currency", label: "币种", width: 10 },
+          { key: "amount_total", label: "原币合计", width: 14 },
+          { key: "exchange_rate", label: "汇率", width: 10 },
+          { key: "amount_cny", label: "折 CNY", width: 14 },
+          { key: "remark", label: "备注", width: 24 },
+        ],
+        rows,
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Excel 导出失败：" + (e?.message || e));
+    } finally {
+      setExcelBusy(false);
+    }
+  };
 
   return (
-    <div style={{ background: "#f4f5f7", minHeight: "100vh", paddingBottom: 40 }}>
+    <div className="doc-page" style={{ background: "#f4f5f7", minHeight: "100vh", paddingBottom: 40 }}>
       <style>{`
         @media print {
           .no-print { display: none !important; }
@@ -65,8 +135,15 @@ export default function ChargesPrint({ shipmentId, onBack }) {
       `}</style>
       <div className="no-print" style={{ background: "#fff", borderBottom: "1px solid #e0e0e0", padding: "10px 20px", display: "flex", gap: 10, alignItems: "center" }}>
         <button onClick={() => onBack ? onBack() : window.close()} style={btn("#e2e8f0", "#475569")}>关闭</button>
-        <button onClick={() => window.print()} style={btn("#0ea5e9", "#fff")}>🖨️ 打印</button>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>提示：浏览器打印对话框中可选「另存为 PDF」</span>
+        <span style={{ marginRight: "auto", fontSize: 12, color: "#666" }}>费用清单 · {shipment.order_no}</span>
+        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...btn("#1990ff", "#fff"), opacity: pdfBusy ? 0.65 : 1 }}>
+          {pdfBusy ? "生成 PDF..." : "下载 PDF"}
+        </button>
+        <button onClick={downloadExcel} disabled={excelBusy} style={{ ...btn("#eef2f7", "#475569"), opacity: excelBusy ? 0.65 : 1 }}>
+          {excelBusy ? "生成 Excel..." : "下载 Excel"}
+        </button>
+        <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn("#eef2f7", "#475569")}>下载 HTML</button>
+        <button onClick={() => printDocument(fileStem)} style={btn("#eef2f7", "#475569")}>🖨️ 打印</button>
       </div>
       <div className="print-page" style={{ background: "#fff", maxWidth: 900, margin: "20px auto", padding: 40, boxShadow: "0 2px 10px rgba(0,0,0,.06)", fontFamily: "'Microsoft YaHei', Arial, sans-serif" }}>
         <div style={{ textAlign: "center", marginBottom: 16 }}>

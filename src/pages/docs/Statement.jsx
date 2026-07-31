@@ -9,6 +9,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../supabase.js";
+import {
+  downloadDocumentHtml,
+  downloadDocumentPdf,
+  printDocument,
+  sanitizeFileStem,
+} from "../../lib/document-download.js";
+import { exportToXlsx } from "../../lib/excel-export.js";
 
 const BRAND = "#1f3864";
 const STAMP_RED = "#c00";
@@ -27,6 +34,8 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
   const [company, setCompany] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [excelBusy, setExcelBusy] = useState(false);
 
   const isSingle = mode === "single";
   const isBatch = mode === "batch";
@@ -43,8 +52,6 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         ]);
 
         let shipIds = [];
-        let stmt = null;
-
         if (isSingle) {
           if (!shipmentId) throw new Error("缺少 shipmentId");
           shipIds = [shipmentId];
@@ -56,7 +63,6 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
             supabase.from("bills").select("shipment_id").eq("statement_id", statementId),
           ]);
           if (e1) throw new Error("加载对账单失败: " + e1.message);
-          stmt = st;
           setStatement(st);
           shipIds = [...new Set((bs || []).map(b => b.shipment_id))];
         } else {
@@ -197,7 +203,7 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
       }
       setLoading(false);
     })();
-  }, [shipmentId, statementId, mode]);
+  }, [shipmentId, statementId, mode, isSingle, isBatch]);
 
   // autoPrint：独立页数据 + 图片(logo/公章)就绪后自动调起打印，避免章/抬头还没解码就出 PDF
   const printedRef = useRef(false);
@@ -206,8 +212,8 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
     printedRef.current = true;
     const imgs = [...document.images].filter(i => !i.complete);
     Promise.all(imgs.map(i => new Promise(res => { i.onload = i.onerror = res; })))
-      .then(() => window.print());
-  }, [autoPrint, embedded, loading, shipments]);
+      .then(() => printDocument(makeStatementFileStem(shipments, statement, isBatch)));
+  }, [autoPrint, embedded, loading, shipments, statement, isBatch]);
 
   // 把浏览器 tab/打印另存为的默认文件名设成「主单号-对账单」
   useEffect(() => {
@@ -235,7 +241,7 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         : `#/docs/stmt/${shipmentId}?print=1`;
       window.open(url, "_blank");
     } else {
-      window.print();
+      printDocument(makeStatementFileStem(shipments, statement, isBatch));
     }
   };
   const issueDate = formatDate(new Date());
@@ -247,16 +253,13 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
   // 单票模式：所有 charges 必须是同一个 partner（应收方），用第一个 charge 的 partner_id
   const allCharges = Object.values(chargesByShip).flat();
   let toPartnerName = "";
-  let currency = "CNY";
   if (isBatch && statement) {
     toPartnerName = statement.partner_name || "—";
-    currency = statement.currency || "CNY";
   } else {
     // 单票：取应收方的 charges（partner_id 就是收款对象）
     const firstCharge = allCharges[0];
     if (firstCharge) {
       toPartnerName = partnerMap[firstCharge.partner_id] || "—";
-      currency = firstCharge.currency || "CNY";
     }
   }
 
@@ -271,6 +274,80 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
     totalsByCcy[ch.currency] += amt;
     totalCny += cny;
   });
+  const fileStem = makeStatementFileStem(shipments, statement, isBatch);
+
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadDocumentPdf({
+        filename: fileStem,
+        pageSelector: ".stm-page",
+      });
+    } catch (e) {
+      console.error(e);
+      alert("PDF 导出失败：" + (e?.message || e));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const downloadExcel = async () => {
+    setExcelBusy(true);
+    try {
+      const rows = shipments.flatMap(ship =>
+        (chargesByShip[ship.id] || []).map(ch => {
+          const amount = Number(ch.quantity || 0) * Number(ch.unit_price || 0)
+            * (1 + Number(ch.tax_rate || 0) / 100);
+          return {
+            order_no: ship.order_no || "",
+            mbl_no: ship.mbl_no || ship.booking_no || "",
+            hbl_no: ship.hbl_no || "",
+            customer: ship.customer || "",
+            charge_name: chargeItemMap[ch.charge_item_id] || ch.notes_charge || "",
+            partner: partnerMap[ch.partner_id] || "",
+            direction: ch.direction || "",
+            unit_price: Number(ch.unit_price || 0),
+            quantity: Number(ch.quantity || 0),
+            unit: ch.unit || "票",
+            currency: ch.currency || "CNY",
+            tax_rate: Number(ch.tax_rate || 0),
+            amount,
+            exchange_rate: Number(ch.exchange_rate || 1),
+            amount_cny: amount * Number(ch.exchange_rate || 1),
+            remark: ch.remark || "",
+          };
+        })
+      );
+      await exportToXlsx({
+        filename: `${fileStem}.xlsx`,
+        sheetName: "对账明细",
+        columns: [
+          { key: "order_no", label: "订单编号", width: 18 },
+          { key: "mbl_no", label: "主单号", width: 18 },
+          { key: "hbl_no", label: "分单号", width: 18 },
+          { key: "customer", label: "客户名", width: 24 },
+          { key: "charge_name", label: "费用名称", width: 20 },
+          { key: "partner", label: "结算单位", width: 24 },
+          { key: "direction", label: "收付方向", width: 10 },
+          { key: "unit_price", label: "单价", width: 12 },
+          { key: "quantity", label: "数量", width: 10 },
+          { key: "unit", label: "单位", width: 10 },
+          { key: "currency", label: "币种", width: 10 },
+          { key: "tax_rate", label: "税率(%)", width: 10 },
+          { key: "amount", label: "原币金额", width: 14 },
+          { key: "exchange_rate", label: "汇率", width: 10 },
+          { key: "amount_cny", label: "折本币总计", width: 14 },
+          { key: "remark", label: "备注", width: 24 },
+        ],
+        rows,
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Excel 导出失败：" + (e?.message || e));
+    } finally {
+      setExcelBusy(false);
+    }
+  };
 
   return (
     <div className="doc-page" style={{ background: "#f0f0f0", minHeight: "100vh" }}>
@@ -295,8 +372,15 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
           {isBatch && <span style={{ marginLeft: 8, color: "#999" }}>· 多票合并 ({shipments.length} 票)</span>}
         </span>
         <div style={{ flex: 1 }} />
-        <button onClick={print} style={btnPrimary}>
-          {embedded ? "🖨 打印 / 下载 PDF（独立窗口）" : "🖨 打印 / 另存为 PDF"}
+        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...btnPrimary, opacity: pdfBusy ? 0.65 : 1 }}>
+          {pdfBusy ? "生成 PDF..." : "下载 PDF"}
+        </button>
+        <button onClick={downloadExcel} disabled={excelBusy} style={{ ...btn, opacity: excelBusy ? 0.65 : 1 }}>
+          {excelBusy ? "生成 Excel..." : "下载 Excel"}
+        </button>
+        <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn}>下载 HTML</button>
+        <button onClick={print} style={btn}>
+          {embedded ? "🖨 打印（独立窗口）" : "🖨 打印"}
         </button>
       </div>
 
@@ -596,6 +680,14 @@ function formatDate(d) {
   const date = new Date(d);
   if (isNaN(date.getTime())) return "—";
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function makeStatementFileStem(shipments, statement, isBatch) {
+  const firstShip = shipments[0];
+  const documentNo = isBatch && statement
+    ? statement.statement_no
+    : (firstShip?.mbl_no || firstShip?.booking_no || firstShip?.order_no || "对账单");
+  return sanitizeFileStem(`${documentNo}-对账单`);
 }
 
 const btn = { padding: "5px 14px", background: "#fff", border: "1px solid #d9d9d9",

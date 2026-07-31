@@ -16,12 +16,124 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../supabase.js";
 import { combineMarks } from "../../lib/marks.js";
+import { exportDraftBLToXlsx } from "../../lib/draft-bl-xlsx.js";
 
 const BRAND = "#1f3864";
 const BRAND_BG = "#f5f8fc";
 const BRAND_BORDER = "#cdd9ec";
 const STAMP_RED = "#c00";
 const ROWS_PER_PAGE = 5;
+
+let _pdfDepsPromise = null;
+
+async function getPdfDeps() {
+  if (!_pdfDepsPromise) {
+    _pdfDepsPromise = Promise.all([
+      import("jspdf"),
+      import("html2canvas"),
+    ]).then(([jspdfMod, html2canvasMod]) => ({
+      jsPDF: jspdfMod.jsPDF || jspdfMod.default?.jsPDF,
+      html2canvas: html2canvasMod.default || html2canvasMod,
+    }));
+  }
+  return _pdfDepsPromise;
+}
+
+function sanitizeFileStem(value) {
+  const cleaned = Array.from(String(value || "BL"), ch => {
+    const code = ch.charCodeAt(0);
+    return code < 32 || '<>:"/\\|?*'.includes(ch) ? "-" : ch;
+  }).join("");
+  return cleaned
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .replace(/[. -]+$/g, "")
+    .trim()
+    .slice(0, 160) || "BL";
+}
+
+function blModeTag(mode) {
+  return mode === "draft"    ? "DRAFT"
+       : mode === "copy"     ? "COPY"
+       : mode === "telex"    ? "TELEX"
+       : mode === "original" ? "ORIGINAL"
+       : "DRAFT";
+}
+
+function makeBlFileStem(shipment, isMbl, mode) {
+  const blNo = isMbl
+    ? (shipment?.mbl_no || shipment?.booking_no || shipment?.order_no || "BL")
+    : (shipment?.hbl_no || shipment?.order_no || "BL");
+  return sanitizeFileStem(`${blNo}+${isMbl ? "MBL" : "HBL"}_${blModeTag(mode)}`);
+}
+
+function downloadCurrentBlHtml(filename) {
+  const page = document.querySelector(".doc-page");
+  if (!page) {
+    alert("提单页面还没渲染完成，请稍后再试");
+    return;
+  }
+
+  const clone = page.cloneNode(true);
+  clone.querySelectorAll(".no-print").forEach(el => el.remove());
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(filename)}</title>
+  <style>
+    html, body { margin: 0; background: #fff; }
+  </style>
+</head>
+<body>
+${clone.outerHTML}
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filename}.html`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadCurrentBlPdf(filename) {
+  const pages = Array.from(document.querySelectorAll(".hbl-page"));
+  if (pages.length === 0) {
+    alert("提单页面还没渲染完成，请稍后再试");
+    return;
+  }
+
+  const { jsPDF, html2canvas } = await getPdfDeps();
+  if (!jsPDF || !html2canvas) throw new Error("PDF 生成组件加载失败");
+
+  const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4", compress: true });
+  for (let i = 0; i < pages.length; i += 1) {
+    const canvas = await html2canvas(pages[i], {
+      scale: Math.max(2, window.devicePixelRatio || 1),
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+    });
+    const img = canvas.toDataURL("image/jpeg", 0.95);
+    if (i > 0) pdf.addPage("a4", "p");
+    pdf.addImage(img, "JPEG", 0, 0, 210, 297, undefined, "FAST");
+  }
+  pdf.save(`${filename}.pdf`);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 // variant: "hbl"(默认, 分单, 用 hbl_no) | "mbl"(主单, 用 mbl_no) — 只切单号+标题, 抬头字段不变
 export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) {
@@ -33,6 +145,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   const [loading, setLoading]   = useState(true);
   // 合并明细：自拼分票默认开（货代典型场景：多 SKU 拼一只柜，提单只显示汇总一行）
   const [consolidate, setConsolidate] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -140,21 +253,23 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   }, [shipmentId]);
 
   const print = () => {
-    // 文件名规则: {单号}+{MBL/HBL}_{DRAFT/COPY/TELEX}
-    // 例如: OOLU2168454750+MBL_DRAFT
-    const blNo = isMbl
-      ? (shipment?.mbl_no || shipment?.booking_no || shipment?.order_no || "BL")
-      : (shipment?.hbl_no || shipment?.order_no || "BL");
-    const tag = mode === "draft"    ? "DRAFT"
-              : mode === "copy"     ? "COPY"
-              : mode === "telex"    ? "TELEX"
-              : mode === "original" ? "ORIGINAL"
-              : "DRAFT";
-    const filename = `${blNo}+${isMbl ? "MBL" : "HBL"}_${tag}`;
+    const filename = makeBlFileStem(shipment, isMbl, mode);
     const oldTitle = document.title;
     document.title = filename;
-    window.print();
+    setTimeout(() => window.print(), 50);
     setTimeout(() => { document.title = oldTitle; }, 1000);
+  };
+
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadCurrentBlPdf(makeBlFileStem(shipment, isMbl, mode));
+    } catch (e) {
+      console.error(e);
+      alert("PDF 导出失败：" + (e?.message || e));
+    } finally {
+      setPdfBusy(false);
+    }
   };
 
   if (loading) return <div style={{ padding: 24 }}>加载中...</div>;
@@ -382,6 +497,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   if (cargoPages.length === 0) cargoPages.push([]);
   const totalCargoPages = cargoPages.length;
   const totalPages = totalCargoPages + 1; // +1 是 Terms 页
+  const fileStem = makeBlFileStem(s, isMbl, mode);
 
   // 主单(MBL)取 mbl_no, 分单(HBL)取 hbl_no(缺省合成 BSNR 号)
   const blNo = isMbl
@@ -514,9 +630,11 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
           />
           合并明细到一行
         </label>
-        <span style={{ fontSize: 12, color: "#999" }}>
-          点 🖨 → "目标"选 <b>"另存为 PDF"</b>
-        </span>
+        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...btn, opacity: pdfBusy ? 0.65 : 1 }}>
+          {pdfBusy ? "生成 PDF..." : "下载 PDF"}
+        </button>
+        <button onClick={() => exportDraftBLToXlsx(shipmentId)} style={btn}>下载 Excel</button>
+        <button onClick={() => downloadCurrentBlHtml(fileStem)} style={btn}>下载 HTML</button>
         <button onClick={print} style={btnPrimary}>🖨 打印 / 另存为 PDF</button>
       </div>
 

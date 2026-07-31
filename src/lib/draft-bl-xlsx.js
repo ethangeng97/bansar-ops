@@ -24,6 +24,18 @@ const intOr = (v, fallback = "") => {
   if (!isFinite(n) || n === 0) return fallback;
   return n;
 };
+const safeFileStem = (value) => {
+  const cleaned = Array.from(String(value || "BL"), ch => {
+    const code = ch.charCodeAt(0);
+    return code < 32 || '<>:"/\\|?*'.includes(ch) ? "-" : ch;
+  }).join("");
+  return cleaned
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .replace(/[. -]+$/g, "")
+    .trim()
+    .slice(0, 160) || "BL";
+};
 
 export async function exportDraftBLToXlsx(shipmentId) {
   if (!shipmentId) { alert("请先保存作业再导出"); return; }
@@ -204,7 +216,7 @@ export async function exportDraftBLToXlsx(shipmentId) {
   const blob = new Blob([outBuf], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
-  const filename = `SI Format-${blNo || s.order_no || "BL"}.xlsx`;
+  const filename = `${safeFileStem(`SI Format-${blNo || s.order_no || "BL"}`)}.xlsx`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

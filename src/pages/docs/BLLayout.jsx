@@ -45,6 +45,28 @@ function makeBlFileStem(shipment, isMbl, mode) {
   return sanitizeFileStem(`${blNo}+${isMbl ? "MBL" : "HBL"}_${blModeTag(mode)}`);
 }
 
+function firstValidDate(...values) {
+  for (const v of values) {
+    if (!v) continue;
+    const date = new Date(v);
+    if (!isNaN(date.getTime())) return v;
+  }
+  return null;
+}
+
+function pickIssueDate(shipment, mode, isMbl) {
+  const telexDate = firstValidDate(
+    shipment.swb_date,
+    shipment.telex_release_date
+  );
+  if (mode === "telex") return telexDate;
+
+  // 兼容新字段 issue_date，也兼容旧 MBL/HBL 页签里曾经使用过的字段名。
+  return isMbl
+    ? firstValidDate(shipment.issue_date, shipment.date_of_issue, shipment.hbl_date_of_issue)
+    : firstValidDate(shipment.issue_date, shipment.hbl_date_of_issue, shipment.date_of_issue);
+}
+
 // variant: "hbl"(默认, 分单, 用 hbl_no) | "mbl"(主单, 用 mbl_no) — 只切单号+标题, 抬头字段不变
 export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) {
   const isMbl = variant === "mbl";
@@ -420,9 +442,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   const partyConsignee = isMbl ? (s.mbl_consignee || s.consignee) : s.consignee;
   const partyNotify    = isMbl ? (s.mbl_notify_party || s.notify_party) : s.notify_party;
   const onBoardDate = s.atd ? formatDateLong(s.atd) : (s.etd ? formatDateLong(s.etd) : "—");
-  const issueDate = (mode === "copy" || mode === "original")
-    ? formatDateLong(s.obl_issued_at || s.atd || s.etd || new Date())
-    : formatDateLong(new Date());
+  const issueDate = formatDateLong(pickIssueDate(s, mode, isMbl));
 
   const isDraft    = mode === "draft";
   const isCopy     = mode === "copy";

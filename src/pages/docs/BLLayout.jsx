@@ -466,14 +466,17 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
         .doc-page { background: #f0f0f0; min-height: 100vh; }
         .hbl-page {
           width: 210mm; min-height: 297mm; padding: 12mm 12mm;
+          box-sizing: border-box;
           margin: 16px auto; background: #fff;
           box-shadow: 0 2px 12px rgba(0,0,0,0.12);
           font-family: 'Segoe UI','Microsoft YaHei',sans-serif;
           color: #000; font-size: 10px; line-height: 1.4;
           position: relative;
           page-break-after: always;
+          break-after: page;
+          break-inside: avoid;
         }
-        .hbl-page:last-child { page-break-after: auto; }
+        .hbl-page:last-child { page-break-after: auto; break-after: auto; }
 
         .hbl-watermark {
           position: absolute; top: 38%; left: 50%;
@@ -521,10 +524,19 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
 
         @media print {
           @page { size: A4; margin: 0; }
-          body { background: #fff !important; }
+          html, body, #root { margin: 0 !important; padding: 0 !important; background: #fff !important; }
           .no-print { display: none !important; }
-          .doc-page { background: #fff; }
-          .hbl-page { margin: 0; box-shadow: none; }
+          .doc-page { background: #fff; margin: 0 !important; padding: 0 !important; }
+          .hbl-page {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 !important;
+            box-shadow: none;
+            page-break-after: always;
+            break-after: page;
+            break-inside: avoid;
+          }
+          .hbl-page:last-child { page-break-after: auto; break-after: auto; }
         }
       `}</style>
 

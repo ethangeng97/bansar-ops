@@ -82,10 +82,11 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [{ data: s, error: e1 }, { data: c }, { data: ctn }] = await Promise.all([
+      const [{ data: s, error: e1 }, { data: c }, { data: ctn }, { data: cargo }] = await Promise.all([
         supabase.from("shipments").select("*").eq("id", shipmentId).single(),
         supabase.from("company_settings").select("*").eq("id", 1).single(),
         supabase.from("shipment_containers").select("*").eq("shipment_id", shipmentId).order("sort_order"),
+        supabase.from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order"),
       ]);
       if (e1) { alert("加载票号失败: " + e1.message); setLoading(false); return; }
       // 自拼分票（Console + -N 后缀）：atd/etd 没填时借母单的（实际开船日 ops 一般只在母单填）
@@ -105,9 +106,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
       }
       setShipment(s);
       setCompany(c || {});
-      let { data: ci } = await supabase
-        .from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order");
-      ci = ci || [];
+      let ci = cargo || [];
       let ctns = ctn || [];
 
       // 自拼母拼：cargo_items 和 shipment_containers 都从所有分票聚合

@@ -4,40 +4,41 @@
 // 顶层结构：登录 → 门户首页 → 点模块开新 tab → 全屏页面
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { supabase } from "./supabase.js";
-import { OrdersPage } from "./pages/Orders.jsx";
-import { PartnersPage } from "./pages/Partners.jsx";
-import Portal from "./pages/Portal.jsx";
-import BillDetail from "./pages/BillDetail.jsx";
-import BillsList from "./pages/BillsList.jsx";
-import BookingConfirmation from "./pages/docs/BookingConfirmation.jsx";
-import DraftBL from "./pages/docs/DraftBL.jsx";
-import BLCopy from "./pages/docs/BLCopy.jsx";
-import BLOriginal from "./pages/docs/BLOriginal.jsx";
-import TelexRelease from "./pages/docs/TelexRelease.jsx";
-import ReleaseNotice from "./pages/docs/ReleaseNotice.jsx";
-import Statement from "./pages/docs/Statement.jsx";
-import StatementsList from "./pages/StatementsList.jsx";
-import StatementNew from "./pages/StatementNew.jsx";
-import StatementDetail from "./pages/StatementDetail.jsx";
-import StatementImport from "./pages/StatementImport.jsx";
-import InvoicesList from "./pages/InvoicesList.jsx";
-import InvoiceRequestsList from "./pages/InvoiceRequestsList.jsx";
-import PaymentsList from "./pages/PaymentsList.jsx";
-import ChargesList from "./pages/ChargesList.jsx";
-import ChargesPrint from "./pages/ChargesPrint.jsx";
-import ProfitAnalysis from "./pages/ProfitAnalysis.jsx";
-import SettlementsList from "./pages/SettlementsList.jsx";
-import ChargeTypesList from "./pages/ChargeTypesList.jsx";
-import ExchangeRatesList from "./pages/ExchangeRatesList.jsx";
-import { SpotBookingsPage } from "./pages/SpotBookings.jsx";
-import UserRolesList from "./pages/UserRolesList.jsx";
 import { canAccessPage } from "./lib/permissions.js";
 import { setLang } from "./lib/i18n.js";
 import { Spinner } from "./components/ui.jsx";
 import { TmsPlaceholder } from "./components/tms.jsx";
 import "./styles/tms.css";
+
+const OrdersPage = lazy(() => import("./pages/Orders.jsx").then(m => ({ default: m.OrdersPage })));
+const SpotBookingsPage = lazy(() => import("./pages/SpotBookings.jsx").then(m => ({ default: m.SpotBookingsPage })));
+const PartnersPage = lazy(() => import("./pages/Partners.jsx"));
+const Portal = lazy(() => import("./pages/Portal.jsx"));
+const BillDetail = lazy(() => import("./pages/BillDetail.jsx"));
+const BillsList = lazy(() => import("./pages/BillsList.jsx"));
+const BookingConfirmation = lazy(() => import("./pages/docs/BookingConfirmation.jsx"));
+const DraftBL = lazy(() => import("./pages/docs/DraftBL.jsx"));
+const BLCopy = lazy(() => import("./pages/docs/BLCopy.jsx"));
+const BLOriginal = lazy(() => import("./pages/docs/BLOriginal.jsx"));
+const TelexRelease = lazy(() => import("./pages/docs/TelexRelease.jsx"));
+const ReleaseNotice = lazy(() => import("./pages/docs/ReleaseNotice.jsx"));
+const Statement = lazy(() => import("./pages/docs/Statement.jsx"));
+const StatementsList = lazy(() => import("./pages/StatementsList.jsx"));
+const StatementNew = lazy(() => import("./pages/StatementNew.jsx"));
+const StatementDetail = lazy(() => import("./pages/StatementDetail.jsx"));
+const StatementImport = lazy(() => import("./pages/StatementImport.jsx"));
+const InvoicesList = lazy(() => import("./pages/InvoicesList.jsx"));
+const InvoiceRequestsList = lazy(() => import("./pages/InvoiceRequestsList.jsx"));
+const PaymentsList = lazy(() => import("./pages/PaymentsList.jsx"));
+const ChargesList = lazy(() => import("./pages/ChargesList.jsx"));
+const ChargesPrint = lazy(() => import("./pages/ChargesPrint.jsx"));
+const ProfitAnalysis = lazy(() => import("./pages/ProfitAnalysis.jsx"));
+const SettlementsList = lazy(() => import("./pages/SettlementsList.jsx"));
+const ChargeTypesList = lazy(() => import("./pages/ChargeTypesList.jsx"));
+const ExchangeRatesList = lazy(() => import("./pages/ExchangeRatesList.jsx"));
+const UserRolesList = lazy(() => import("./pages/UserRolesList.jsx"));
 
 // ── 路由表（hash → 页面组件） ──
 const ROUTES = {
@@ -191,7 +192,14 @@ export default function App() {
 
   // 内部分发逻辑保持不变，套一层 Fragment 让横幅在所有子页面都能浮出来
   const page = renderRoute();
-  return <>{expiredBanner}{page}</>;
+  return (
+    <>
+      {expiredBanner}
+      <Suspense fallback={<PageLoading />}>
+        {page}
+      </Suspense>
+    </>
+  );
 
   function renderRoute() {
 
@@ -425,6 +433,14 @@ export default function App() {
     />
   );
   }
+}
+
+function PageLoading() {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+      <Spinner />
+    </div>
+  );
 }
 
 // 无权访问提示页

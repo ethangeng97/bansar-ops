@@ -4,6 +4,15 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
+    modulePreload: {
+      resolveDependencies(filename, deps, context) {
+        if (context.hostType !== 'html') return deps;
+        return deps.filter(dep =>
+          dep.includes('vendor-react') ||
+          dep.includes('rolldown-runtime')
+        );
+      },
+    },
     rollupOptions: {
       output: {
         manualChunks(id) {

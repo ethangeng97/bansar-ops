@@ -35,6 +35,8 @@ const FIELDS = [
   { key: "vgm_cutoff",     label: "VGM 截止", type: "date" },
   { key: "cy_cutoff",      label: "进港截止", type: "date" },
   { key: "customs_cutoff", label: "报关截止", type: "date" },
+  { key: "issue_date",     label: "签单日期", type: "date" },
+  { key: "swb_date",       label: "电放日期", type: "date" },
 ];
 
 export default function BatchEditModal({ selected, onClose, onSaved }) {

@@ -62,6 +62,7 @@ export default function BatchDocsExportModal({ filteredRows = [], checkedRows = 
         const blob = await createDocumentPdfBlob({
           pageSelector: ".hbl-page",
           root: renderRootRef.current,
+          singlePagePerElement: true,
         });
         zip.file(makePdfFilename(info.shipment || row, variant, modeMeta), blob);
       } catch (e) {
@@ -246,7 +247,7 @@ const offscreenStyle = {
   position: "fixed",
   left: 0,
   top: 0,
-  width: "230mm",
+  width: "210mm",
   background: "#fff",
   pointerEvents: "none",
   zIndex: -1,

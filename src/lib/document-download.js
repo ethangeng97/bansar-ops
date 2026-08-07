@@ -118,8 +118,8 @@ function addCanvasPages(pdf, canvas, breakpoints, hasPdfPage) {
   return pageAdded;
 }
 
-export async function downloadDocumentPdf({ filename, pageSelector }) {
-  const pages = Array.from(document.querySelectorAll(pageSelector));
+export async function createDocumentPdfBlob({ pageSelector, root = document }) {
+  const pages = Array.from(root.querySelectorAll(pageSelector));
   if (pages.length === 0) throw new Error("文件页面还没渲染完成，请稍后再试");
 
   await waitForAssets(pages);
@@ -140,7 +140,23 @@ export async function downloadDocumentPdf({ filename, pageSelector }) {
     hasPdfPage = addCanvasPages(pdf, canvas, collectBreakpoints(page, canvas), hasPdfPage);
   }
 
-  pdf.save(`${sanitizeFileStem(filename)}.pdf`);
+  return pdf.output("blob");
+}
+
+export function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function downloadDocumentPdf({ filename, pageSelector, root = document }) {
+  const blob = await createDocumentPdfBlob({ pageSelector, root });
+  downloadBlob(blob, `${sanitizeFileStem(filename)}.pdf`);
 }
 
 export function downloadDocumentHtml({ filename, rootSelector = ".doc-page" }) {

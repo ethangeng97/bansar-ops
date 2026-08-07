@@ -13,7 +13,7 @@
 // 多页支持：货物 >5 行自动分页（continuation sheet）
 // ============================================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../supabase.js";
 import { combineMarks } from "../../lib/marks.js";
 import { exportDraftBLToXlsx } from "../../lib/draft-bl-xlsx.js";
@@ -68,8 +68,10 @@ function pickIssueDate(shipment, mode, isMbl) {
 }
 
 // variant: "hbl"(默认, 分单, 用 hbl_no) | "mbl"(主单, 用 mbl_no) — 只切单号+标题, 抬头字段不变
-export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) {
+export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl", embedded = false, onReady, onLoadError }) {
   const isMbl = variant === "mbl";
+  const onReadyRef = useRef(onReady);
+  const onLoadErrorRef = useRef(onLoadError);
   const [shipment, setShipment] = useState(null);
   const [company, setCompany]   = useState(null);
   const [cargoItems, setCargo]  = useState([]);
@@ -78,6 +80,9 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
   // 合并明细：自拼分票默认开（货代典型场景：多 SKU 拼一只柜，提单只显示汇总一行）
   const [consolidate, setConsolidate] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
+  useEffect(() => { onLoadErrorRef.current = onLoadError; }, [onLoadError]);
 
   useEffect(() => {
     (async () => {
@@ -88,7 +93,12 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
         supabase.from("shipment_containers").select("*").eq("shipment_id", shipmentId).order("sort_order"),
         supabase.from("cargo_items").select("*").eq("shipment_id", shipmentId).order("sort_order"),
       ]);
-      if (e1) { alert("加载票号失败: " + e1.message); setLoading(false); return; }
+      if (e1) {
+        onLoadErrorRef.current?.(e1);
+        if (!embedded) alert("加载票号失败: " + e1.message);
+        setLoading(false);
+        return;
+      }
       // 自拼分票（Console + -N 后缀）：atd/etd 没填时借母单的（实际开船日 ops 一般只在母单填）
       const isSubBill = s.shipment_type === "Console" && /-\d+$/.test(s.order_no || "");
       // 自拼母拼（Console + 不带 -N 后缀）：货物 / 集装箱 全部从分票聚合
@@ -181,7 +191,18 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
       setConsolidate(true);
       setLoading(false);
     })();
-  }, [shipmentId]);
+  }, [shipmentId, embedded]);
+
+  useEffect(() => {
+    if (loading || !shipment || !onReadyRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      onReadyRef.current?.({
+        shipment,
+        fileStem: makeBlFileStem(shipment, isMbl, mode),
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loading, shipment, isMbl, mode]);
 
   const print = () => {
     printDocument(makeBlFileStem(shipment, isMbl, mode));
@@ -540,7 +561,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
       `}</style>
 
       {/* 工具条 */}
-      <div className="no-print" style={{
+      {!embedded && <div className="no-print" style={{
         position: "sticky", top: 0, zIndex: 100,
         padding: "10px 16px", background: "#f5f5f5", borderBottom: "1px solid #ddd",
         display: "flex", alignItems: "center", gap: 12,
@@ -576,7 +597,7 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl" }) 
         <button onClick={() => exportDraftBLToXlsx(shipmentId)} style={btn}>下载 Excel</button>
         <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn}>下载 HTML</button>
         <button onClick={print} style={btn}>🖨 打印</button>
-      </div>
+      </div>}
 
       {/* 渲染所有货物页 */}
       {cargoPages.map((pageRows, pageIdx) => (

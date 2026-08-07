@@ -25,6 +25,7 @@ import {
 import { JoinSubTicketModal, RemoveSubTicketModal, SplitCargoToSubsModal, MergeSubTicketsModal } from "../components/SubTicketModals.jsx";
 import MergeOrdersModal from "../components/MergeOrdersModal.jsx";
 import ShipmentBatchEditModal from "../components/BatchEditModal.jsx";
+import BatchDocsExportModal from "../components/BatchDocsExportModal.jsx";
 import { exportToXlsx } from "../lib/excel-export.js";
 import { validateAsciiOnly, validateNoFullWidthSymbols, liveUpper } from "../lib/validators.js";
 import { getCachedRef, invalidate as invalidateRef } from "../lib/ref-cache.js";
@@ -538,6 +539,8 @@ export function OrdersPage({ user, onBack }) {
   const [showMergeModal, setShowMergeModal] = useState(false);
   // 批量修改弹窗
   const [showBatchEdit, setShowBatchEdit] = useState(false);
+  // 批量导出单证弹窗
+  const [showBatchDocsExport, setShowBatchDocsExport] = useState(false);
   // 勾选的订单（用于合并/批量修改）— 从 shipments 里挑出来
   const checkedOrders = useMemo(
     () => shipments.filter(s => checkedIds.has(s.id)),
@@ -735,6 +738,15 @@ export function OrdersPage({ user, onBack }) {
         />
       )}
 
+      {/* 批量导出单证弹窗 */}
+      {showBatchDocsExport && (
+        <BatchDocsExportModal
+          filteredRows={filtered}
+          checkedRows={checkedOrders}
+          onClose={() => setShowBatchDocsExport(false)}
+        />
+      )}
+
       {/* 类型选择对话框（点"新建作业"按钮触发） */}
       {showTypePicker && (() => {
         const pickType = (t) => {
@@ -832,6 +844,11 @@ export function OrdersPage({ user, onBack }) {
         <Mi onClick={openBatchEdit} disabled={checkedOrders.length < 1}
           title={checkedOrders.length ? "批量修改已勾选订单的实际开航日等字段" : "先勾选要修改的订单"}>
           批量修改{checkedOrders.length >= 1 ? ` (${checkedOrders.length})` : ""}
+        </Mi>
+        <Mi onClick={() => setShowBatchDocsExport(true)}
+          disabled={filtered.length < 1 && checkedOrders.length < 1}
+          title="把当前筛选结果或已勾选订单批量导出为 ZIP，每票一个 PDF">
+          批量单证
         </Mi>
         <Tbl/>
         <Mi disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>上页</Mi>

@@ -62,6 +62,8 @@ export default function BatchDocsExportModal({ filteredRows = [], checkedRows = 
         const blob = await createDocumentPdfBlob({
           pageSelector: ".hbl-page",
           root: renderRootRef.current,
+          scale: 1.5,
+          singlePagePerElement: true,
         });
         zip.file(makePdfFilename(info.shipment || row, variant, modeMeta), blob);
       } catch (e) {
@@ -78,7 +80,7 @@ export default function BatchDocsExportModal({ filteredRows = [], checkedRows = 
     setCurrent(null);
     if (zip.files && Object.keys(zip.files).length > 0) {
       const zipBlob = await zip.generateAsync(
-        { type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } },
+        { type: "blob", compression: "STORE" },
         meta => setZipPct(Math.round(meta.percent || 0))
       );
       downloadBlob(zipBlob, `${makeZipStem(rows, variant, modeMeta)}.zip`);
@@ -244,10 +246,11 @@ const inputStyle = {
 
 const offscreenStyle = {
   position: "fixed",
-  left: "-10000px",
+  left: 0,
   top: 0,
   width: "230mm",
   background: "#fff",
+  opacity: 0,
   pointerEvents: "none",
-  zIndex: -1,
+  zIndex: 0,
 };

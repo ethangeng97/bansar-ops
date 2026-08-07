@@ -118,7 +118,29 @@ function addCanvasPages(pdf, canvas, breakpoints, hasPdfPage) {
   return pageAdded;
 }
 
-export async function createDocumentPdfBlob({ pageSelector, root = document }) {
+function addCanvasSinglePage(pdf, canvas, hasPdfPage) {
+  const pageWidthMm = 210;
+  const pageHeightMm = 297;
+  if (hasPdfPage) pdf.addPage("a4", "p");
+  const image = canvas.toDataURL("image/jpeg", 0.92);
+  const imageWidthMm = pageWidthMm;
+  const imageHeightMm = pageWidthMm * canvas.height / canvas.width;
+  if (imageHeightMm <= pageHeightMm) {
+    pdf.addImage(image, "JPEG", 0, 0, imageWidthMm, imageHeightMm, undefined, "FAST");
+  } else {
+    const fittedWidthMm = pageHeightMm * canvas.width / canvas.height;
+    const x = Math.max(0, (pageWidthMm - fittedWidthMm) / 2);
+    pdf.addImage(image, "JPEG", x, 0, fittedWidthMm, pageHeightMm, undefined, "FAST");
+  }
+  return true;
+}
+
+export async function createDocumentPdfBlob({
+  pageSelector,
+  root = document,
+  scale,
+  singlePagePerElement = false,
+}) {
   const pages = Array.from(root.querySelectorAll(pageSelector));
   if (pages.length === 0) throw new Error("文件页面还没渲染完成，请稍后再试");
 
@@ -130,14 +152,16 @@ export async function createDocumentPdfBlob({ pageSelector, root = document }) {
   let hasPdfPage = false;
   for (const page of pages) {
     const canvas = await html2canvas(page, {
-      scale: Math.max(2, window.devicePixelRatio || 1),
+      scale: scale || Math.max(2, window.devicePixelRatio || 1),
       backgroundColor: "#ffffff",
       useCORS: true,
       allowTaint: false,
       logging: false,
       ignoreElements: element => element.classList?.contains("no-print"),
     });
-    hasPdfPage = addCanvasPages(pdf, canvas, collectBreakpoints(page, canvas), hasPdfPage);
+    hasPdfPage = singlePagePerElement
+      ? addCanvasSinglePage(pdf, canvas, hasPdfPage)
+      : addCanvasPages(pdf, canvas, collectBreakpoints(page, canvas), hasPdfPage);
   }
 
   return pdf.output("blob");

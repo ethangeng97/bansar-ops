@@ -541,10 +541,12 @@ export function OrdersPage({ user, onBack }) {
   const [showBatchEdit, setShowBatchEdit] = useState(false);
   // 批量导出单证弹窗
   const [showBatchDocsExport, setShowBatchDocsExport] = useState(false);
-  // 勾选的订单（用于合并/批量修改）— 从 shipments 里挑出来
+  // 勾选的订单（用于合并/批量修改）只取当前筛选结果。
+  // checkedIds 会跨筛选保留；若从 shipments 全量中取，会把已被筛选隐藏的旧勾选
+  // 也计入批量操作，造成列表显示 9 行但批量修改显示 10 个，并有误改隐藏订单的风险。
   const checkedOrders = useMemo(
-    () => shipments.filter(s => checkedIds.has(s.id)),
-    [shipments, checkedIds]
+    () => filtered.filter(s => checkedIds.has(s.id)),
+    [filtered, checkedIds]
   );
   const openBatchEdit = () => {
     if (checkedOrders.length < 1) { alert("请先勾选要修改的订单"); return; }

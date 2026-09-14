@@ -83,7 +83,9 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         if (isSingle) chargeQuery = chargeQuery.eq("direction", "应收");
         const [{ data: ships }, { data: ciRows }, { data: chargesAll }] = await Promise.all([
           supabase.from("shipments").select("*").in("id", shipIds),
-          supabase.from("cargo_items").select("shipment_id, container_no, qty, gross_weight, volume").in("shipment_id", shipIds),
+          supabase.from("cargo_items")
+            .select("shipment_id, container_no, seal_no, container_type, qty, gross_weight, volume")
+            .in("shipment_id", shipIds),
           chargeQuery,
         ]);
         setShipments(ships || []);
@@ -148,12 +150,41 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
           if (!ctnByShip[c.shipment_id]) ctnByShip[c.shipment_id] = [];
           ctnByShip[c.shipment_id].push(c);
         });
+        // 箱封号也可能只录在 cargo_items（货物明细）里，尤其是自拼分票。
+        // 按 shipment + container_no 去重，供 shipment_containers 缺行/缺字段时兜底。
+        const cargoCtnByShip = {};
+        (ciRows || []).forEach(r => {
+          if (!r.container_no) return;
+          if (!cargoCtnByShip[r.shipment_id]) cargoCtnByShip[r.shipment_id] = [];
+          const rows = cargoCtnByShip[r.shipment_id];
+          const existing = rows.find(c => c.container_no === r.container_no);
+          if (existing) {
+            if (!existing.seal_no && r.seal_no) existing.seal_no = r.seal_no;
+            if (!existing.container_type && r.container_type) {
+              Object.assign(existing, splitContainerType(r.container_type));
+            }
+            return;
+          }
+          rows.push({
+            shipment_id: r.shipment_id,
+            container_no: r.container_no,
+            seal_no: r.seal_no || null,
+            ...splitContainerType(r.container_type),
+            qty: 1,
+          });
+        });
         // 分票：取「自己」占用的箱，而不是整借母单的全部箱。
         // 母单 4 个箱全挂在母单上，分票自己的 shipment_containers 是空的，但分票
         // cargo_items 里记了它装在哪几个箱号(container_no)。据此从母单 shipment_containers
         // 里筛出本票自己的那几个箱 → 拿到 size/type/seal → 算出本票自己的「箱型箱量」(如 2x40HC)
         // 与箱号，不再回退显示母单的 4x40HC。
-        const ctnMap = { ...ctnByShip };
+        const ctnMap = {};
+        for (const shipId of shipIds) {
+          ctnMap[shipId] = mergeContainerRows(
+            ctnByShip[shipId] || [],
+            cargoCtnByShip[shipId] || []
+          );
+        }
         // 每张分票自己 cargo_items 引用到的箱号集合
         const subCtnNos = {};  // sub.id -> Set(container_no)
         (ciRows || []).forEach(r => {
@@ -162,13 +193,26 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         });
         for (const sub of subShips) {
           const masterId = subToMasterId[sub.id];
-          if (!masterId) continue;
-          const masterCtns = ctnByShip[masterId] || [];
+          const ownCargoCtns = cargoCtnByShip[sub.id] || [];
+          if (!masterId) {
+            ctnMap[sub.id] = mergeContainerRows(ctnByShip[sub.id] || [], ownCargoCtns);
+            continue;
+          }
+          const masterCtns = mergeContainerRows(
+            ctnByShip[masterId] || [],
+            cargoCtnByShip[masterId] || []
+          );
           const myNos = subCtnNos[sub.id];
           // 本票已有自己的箱行就用自己的；否则按 cargo_items 的箱号从母单里筛
-          let ownCtns = (ctnByShip[sub.id] && ctnByShip[sub.id].length > 0)
-            ? ctnByShip[sub.id]
-            : (myNos ? masterCtns.filter(c => myNos.has(c.container_no)) : []);
+          const ownDbCtns = ctnByShip[sub.id] || [];
+          const matchedMasterCtns = myNos
+            ? masterCtns.filter(c => myNos.has(c.container_no))
+            : [];
+          let ownCtns = ownDbCtns.length > 0
+            ? mergeContainerRows(ownDbCtns, ownCargoCtns)
+            : matchedMasterCtns.length > 0
+              ? mergeContainerRows(matchedMasterCtns, ownCargoCtns)
+              : ownCargoCtns;
           // 老数据 cargo_items 没填箱号、实在筛不出 → 整借母单，保持旧行为不回归
           if (ownCtns.length === 0) ownCtns = masterCtns;
           ctnMap[sub.id] = ownCtns;
@@ -178,6 +222,12 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
           else if (!sub.qty_container && masterById[masterId]?.qty_container) {
             sub.qty_container = masterById[masterId].qty_container;
           }
+        }
+        // 非自拼票若 qty_container 为空，也可由箱明细推导，避免箱号有值而箱型箱量仍空。
+        for (const ship of (ships || [])) {
+          if (ship.qty_container) continue;
+          const computed = formatQtyContainer(ctnMap[ship.id] || []);
+          if (computed) ship.qty_container = computed;
         }
         setContainersByShip(ctnMap);
 
@@ -565,7 +615,7 @@ function ShipHeader({ ship, containers = [] }) {
     [["毛重", `${ship.weight || "0"} KGS`], ["船名航次", `${ship.vessel || ""}${ship.voyage ? "/" + ship.voyage : ""}`]],
     [["体积", `${ship.volume || "0"} CBM`], ["ETD", ship.etd ? formatDate(ship.etd) : ""]],
     [["箱型箱量", ship.qty_container || ""], ["箱号", containerNos || ship.container_no || ""]],
-    [["封号", sealNos || ""], ["客户名", ship.customer || ""]],
+    [["封号", sealNos || ship.seal_no || ""], ["客户名", ship.customer || ""]],
   ];
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 8, fontSize: 10.5 }}>
@@ -673,6 +723,37 @@ function formatQtyContainer(ctns) {
     counts[key] = (counts[key] || 0) + (Number(c.qty) || 1);
   });
   return Object.entries(counts).map(([k, n]) => `${n}x${k}`).join("+");
+}
+
+// cargo_items.container_type 常把尺寸和类型合在一起存（如 40HC），
+// shipment_containers 则拆成 container_size=40 / container_type=HC。
+function splitContainerType(value) {
+  const raw = String(value || "").replace(/\s+/g, "").toUpperCase();
+  const match = raw.match(/^(20|40|45|53)(.*)$/);
+  return match
+    ? { container_size: match[1], container_type: match[2] || null }
+    : { container_size: null, container_type: raw || null };
+}
+
+// shipment_containers 为主数据；cargo_items 用于补缺失字段，并补入主表里缺少的箱号。
+function mergeContainerRows(primaryRows, fallbackRows) {
+  const merged = (primaryRows || []).map(row => ({ ...row }));
+  const byNo = new Map(
+    merged.filter(row => row.container_no).map(row => [row.container_no, row])
+  );
+  for (const fallback of (fallbackRows || [])) {
+    const existing = fallback.container_no ? byNo.get(fallback.container_no) : null;
+    if (!existing) {
+      const copy = { ...fallback };
+      merged.push(copy);
+      if (copy.container_no) byNo.set(copy.container_no, copy);
+      continue;
+    }
+    if (!existing.seal_no && fallback.seal_no) existing.seal_no = fallback.seal_no;
+    if (!existing.container_size && fallback.container_size) existing.container_size = fallback.container_size;
+    if (!existing.container_type && fallback.container_type) existing.container_type = fallback.container_type;
+  }
+  return merged;
 }
 
 function formatDate(d) {

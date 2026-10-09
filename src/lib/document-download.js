@@ -1,5 +1,13 @@
 let _pdfDepsPromise = null;
 
+const PDF_TEXT_LAYER_ATTRIBUTE = "data-pdf-editable-text";
+const PDF_TEXT_LAYER_SELECTOR = `[${PDF_TEXT_LAYER_ATTRIBUTE}]`;
+
+// jsPDF's built-in Helvetica/Courier fonts use the WinAnsi character set.
+// Keep unsupported text (most notably CJK) in the background image so it never
+// turns into mojibake, while normal B/L English and numbers remain true PDF text.
+const WIN_ANSI_TEXT = /^[\t\n\r\x20-\x7e\u00a0-\u00ff\u0152\u0153\u0160\u0161\u0178\u017D\u017E\u0192\u02C6\u02DC\u2013\u2014\u2018\u2019\u201A\u201C\u201D\u201E\u2020\u2021\u2022\u2026\u2030\u2039\u203A\u20AC\u2122]*$/;
+
 async function getPdfDeps() {
   if (!_pdfDepsPromise) {
     _pdfDepsPromise = Promise.all([
@@ -24,6 +32,15 @@ export function sanitizeFileStem(value) {
     .replace(/[. -]+$/g, "")
     .trim()
     .slice(0, 160) || "document";
+}
+
+export function validatePdfEditPassword(password, confirmation = password) {
+  if (!password) return "请输入编辑密码";
+  if (password.length < 6) return "编辑密码至少需要 6 位";
+  if (password.length > 32) return "编辑密码最多支持 32 位";
+  if (!/^[\x20-\x7e]+$/.test(password)) return "编辑密码只支持英文、数字和英文符号";
+  if (password !== confirmation) return "两次输入的密码不一致";
+  return "";
 }
 
 async function waitForAssets(elements) {
@@ -119,20 +136,184 @@ function addCanvasPages(pdf, canvas, breakpoints, hasPdfPage) {
 }
 
 function addCanvasSinglePage(pdf, canvas, hasPdfPage) {
+  return addCanvasSinglePageWithPlacement(pdf, canvas, hasPdfPage).hasPdfPage;
+}
+
+function addCanvasSinglePageWithPlacement(pdf, canvas, hasPdfPage) {
   const pageWidthMm = 210;
   const pageHeightMm = 297;
   if (hasPdfPage) pdf.addPage("a4", "p");
   const image = canvas.toDataURL("image/jpeg", 0.92);
   const imageWidthMm = pageWidthMm;
   const imageHeightMm = pageWidthMm * canvas.height / canvas.width;
+  let placement;
   if (imageHeightMm <= pageHeightMm) {
     pdf.addImage(image, "JPEG", 0, 0, imageWidthMm, imageHeightMm, undefined, "FAST");
+    placement = { x: 0, y: 0, width: imageWidthMm, height: imageHeightMm };
   } else {
     const fittedWidthMm = pageHeightMm * canvas.width / canvas.height;
     const x = Math.max(0, (pageWidthMm - fittedWidthMm) / 2);
     pdf.addImage(image, "JPEG", x, 0, fittedWidthMm, pageHeightMm, undefined, "FAST");
+    placement = { x, y: 0, width: fittedWidthMm, height: pageHeightMm };
   }
-  return true;
+  return { hasPdfPage: true, placement };
+}
+
+function shouldKeepTextInRaster(textNode, page) {
+  const text = textNode.nodeValue || "";
+  if (!text.trim() || !WIN_ANSI_TEXT.test(text)) return true;
+
+  for (let element = textNode.parentElement; element && element !== page; element = element.parentElement) {
+    if (element.matches?.(".hbl-watermark, [data-pdf-raster-text]")) return true;
+    const style = window.getComputedStyle(element);
+    if (style.transform && style.transform !== "none") return true;
+    if (Number.parseFloat(style.opacity || "1") < 0.98) return true;
+  }
+  return false;
+}
+
+function wrapEditableText(page) {
+  const view = page.ownerDocument.defaultView || window;
+  const filter = view.NodeFilter || NodeFilter;
+  const walker = page.ownerDocument.createTreeWalker(page, filter.SHOW_TEXT);
+  const nodes = [];
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const tag = node.parentElement?.tagName;
+    if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") continue;
+    if (!shouldKeepTextInRaster(node, page)) nodes.push(node);
+  }
+
+  return nodes.map(node => {
+    const wrapper = page.ownerDocument.createElement("span");
+    wrapper.setAttribute(PDF_TEXT_LAYER_ATTRIBUTE, "");
+    node.parentNode.replaceChild(wrapper, node);
+    wrapper.appendChild(node);
+    return wrapper;
+  });
+}
+
+function restoreEditableText(wrappers) {
+  for (const wrapper of wrappers) {
+    const parent = wrapper.parentNode;
+    if (!parent) continue;
+    while (wrapper.firstChild) parent.insertBefore(wrapper.firstChild, wrapper);
+    parent.removeChild(wrapper);
+  }
+}
+
+function parseRgb(color) {
+  const values = String(color || "").match(/[\d.]+/g)?.map(Number) || [];
+  return values.length >= 3
+    ? values.slice(0, 3).map(value => Math.max(0, Math.min(255, Math.round(value))))
+    : [0, 0, 0];
+}
+
+function collectEditableTextRuns(page, wrappers) {
+  const pageRect = page.getBoundingClientRect();
+  const runs = [];
+
+  for (const wrapper of wrappers) {
+    const textNode = wrapper.firstChild;
+    const value = textNode?.nodeValue || "";
+    if (!value) continue;
+
+    const style = window.getComputedStyle(wrapper);
+    const fontSizePx = Number.parseFloat(style.fontSize) || 10;
+    const lines = [];
+    let current = null;
+
+    for (let index = 0; index < value.length; index += 1) {
+      if (value[index] === "\n" || value[index] === "\r") {
+        current = null;
+        continue;
+      }
+      const range = page.ownerDocument.createRange();
+      range.setStart(textNode, index);
+      range.setEnd(textNode, index + 1);
+      const rect = range.getBoundingClientRect();
+      range.detach?.();
+      if (!rect.width && !rect.height) continue;
+
+      if (!current || Math.abs(current.top - rect.top) > 1.5) {
+        current = { start: index, end: index + 1, top: rect.top };
+        lines.push(current);
+      } else {
+        current.end = index + 1;
+      }
+    }
+
+    for (const line of lines) {
+      let start = line.start;
+      let end = line.end;
+      while (start < end && /[\t \u00a0]/.test(value[start])) start += 1;
+      while (end > start && /[\t \u00a0]/.test(value[end - 1])) end -= 1;
+      if (start >= end) continue;
+
+      const text = value.slice(start, end).replace(/\u00a0/g, " ");
+      const range = page.ownerDocument.createRange();
+      range.setStart(textNode, start);
+      range.setEnd(textNode, end);
+      const rect = range.getBoundingClientRect();
+      range.detach?.();
+      if (!rect.width || !rect.height) continue;
+
+      const weight = Number.parseInt(style.fontWeight, 10);
+      const bold = style.fontWeight === "bold" || (!Number.isNaN(weight) && weight >= 600);
+      const italic = style.fontStyle === "italic" || style.fontStyle === "oblique";
+      const family = /consolas|courier|monospace/i.test(style.fontFamily) ? "courier" : "helvetica";
+
+      runs.push({
+        text,
+        x: rect.left - pageRect.left,
+        baseline: rect.bottom - fontSizePx * 0.18 - pageRect.top,
+        width: rect.width,
+        fontSizePx,
+        family,
+        fontStyle: bold ? (italic ? "bolditalic" : "bold") : (italic ? "italic" : "normal"),
+        color: parseRgb(style.color),
+      });
+    }
+  }
+
+  return { pageRect, runs };
+}
+
+function hideEditableTextInClone(clonedDocument) {
+  clonedDocument.querySelectorAll(PDF_TEXT_LAYER_SELECTOR).forEach(element => {
+    element.style.setProperty("color", "transparent", "important");
+    element.style.setProperty("-webkit-text-fill-color", "transparent", "important");
+    element.style.setProperty("-webkit-text-stroke-color", "transparent", "important");
+    element.style.setProperty("text-decoration-color", "transparent", "important");
+    element.style.setProperty("text-shadow", "none", "important");
+  });
+}
+
+function addEditableTextLayer(pdf, textLayer, placement) {
+  const { pageRect, runs } = textLayer;
+  const mmPerCssPxX = placement.width / Math.max(pageRect.width, 1);
+  const mmPerCssPxY = placement.height / Math.max(pageRect.height, 1);
+  const pointsPerMm = 72 / 25.4;
+
+  for (const run of runs) {
+    pdf.setFont(run.family, run.fontStyle);
+    pdf.setFontSize(Math.max(1, run.fontSizePx * mmPerCssPxY * pointsPerMm));
+    pdf.setTextColor(...run.color);
+
+    const targetWidth = run.width * mmPerCssPxX;
+    const naturalWidth = pdf.getTextWidth(run.text);
+    const horizontalScale = naturalWidth > 0
+      ? Math.max(0.35, Math.min(3, targetWidth / naturalWidth))
+      : 1;
+
+    pdf.text(
+      run.text,
+      placement.x + run.x * mmPerCssPxX,
+      placement.y + run.baseline * mmPerCssPxY,
+      { baseline: "alphabetic", horizontalScale }
+    );
+  }
 }
 
 export async function createDocumentPdfBlob({
@@ -140,6 +321,8 @@ export async function createDocumentPdfBlob({
   root = document,
   scale,
   singlePagePerElement = false,
+  editableText = false,
+  editPassword = "",
 }) {
   const pages = Array.from(root.querySelectorAll(pageSelector));
   if (pages.length === 0) throw new Error("文件页面还没渲染完成，请稍后再试");
@@ -148,20 +331,43 @@ export async function createDocumentPdfBlob({
   const { jsPDF, html2canvas } = await getPdfDeps();
   if (!jsPDF || !html2canvas) throw new Error("PDF 生成组件加载失败");
 
-  const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4", compress: true });
+  const pdfOptions = { orientation: "p", unit: "mm", format: "a4", compress: true };
+  if (editPassword) {
+    pdfOptions.encryption = {
+      userPassword: "",
+      ownerPassword: editPassword,
+      userPermissions: ["print", "copy"],
+    };
+  }
+  const pdf = new jsPDF(pdfOptions);
   let hasPdfPage = false;
   for (const page of pages) {
-    const canvas = await html2canvas(page, {
-      scale: scale || Math.max(2, window.devicePixelRatio || 1),
-      backgroundColor: "#ffffff",
-      useCORS: true,
-      allowTaint: false,
-      logging: false,
-      ignoreElements: element => element.classList?.contains("no-print"),
-    });
-    hasPdfPage = singlePagePerElement
-      ? addCanvasSinglePage(pdf, canvas, hasPdfPage)
-      : addCanvasPages(pdf, canvas, collectBreakpoints(page, canvas), hasPdfPage);
+    const wrappers = editableText ? wrapEditableText(page) : [];
+    const textLayer = editableText ? collectEditableTextRuns(page, wrappers) : null;
+    let canvas;
+    try {
+      canvas = await html2canvas(page, {
+        scale: scale || Math.max(2, window.devicePixelRatio || 1),
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        ignoreElements: element => element.classList?.contains("no-print"),
+        onclone: editableText ? hideEditableTextInClone : undefined,
+      });
+    } finally {
+      restoreEditableText(wrappers);
+    }
+
+    if (editableText) {
+      const result = addCanvasSinglePageWithPlacement(pdf, canvas, hasPdfPage);
+      hasPdfPage = result.hasPdfPage;
+      addEditableTextLayer(pdf, textLayer, result.placement);
+    } else {
+      hasPdfPage = singlePagePerElement
+        ? addCanvasSinglePage(pdf, canvas, hasPdfPage)
+        : addCanvasPages(pdf, canvas, collectBreakpoints(page, canvas), hasPdfPage);
+    }
   }
 
   return pdf.output("blob");
@@ -178,8 +384,21 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export async function downloadDocumentPdf({ filename, pageSelector, root = document }) {
-  const blob = await createDocumentPdfBlob({ pageSelector, root });
+export async function downloadDocumentPdf({
+  filename,
+  pageSelector,
+  root = document,
+  singlePagePerElement = false,
+  editableText = false,
+  editPassword = "",
+}) {
+  const blob = await createDocumentPdfBlob({
+    pageSelector,
+    root,
+    singlePagePerElement,
+    editableText,
+    editPassword,
+  });
   downloadBlob(blob, `${sanitizeFileStem(filename)}.pdf`);
 }
 
@@ -217,6 +436,92 @@ ${clone.outerHTML}
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// 导出 .doc（Word 能打开的 HTML）。Word 的 HTML 排版很弱：不认 flex / max-width / 绝对定位，
+// 没有分节信息时还会用“Web 版式”打开、纸张跟着默认设置走。这里把这些都补上，
+// 让 Word 里的样子尽量和网页 / PDF 一致：A4 纵向、固定页边距、图片按网页上显示的大小写死。
+export function downloadDocumentWord({ filename, rootSelector = ".doc-page", pageSelector, pageMargin = "14mm" }) {
+  const root = document.querySelector(rootSelector);
+  if (!root) throw new Error("文件页面还没渲染完成，请稍后再试");
+
+  const clone = root.cloneNode(true);
+  // Word 里表格单元格不继承 table / div 上的字号、字体，按网页实际算出的样式逐格写死
+  const sourceNodes = root.querySelectorAll("*");
+  clone.querySelectorAll("*").forEach((element, idx) => {
+    const source = sourceNodes[idx];
+    if (!source || !/^(TD|TH|DIV|SPAN|P|B|STRONG)$/.test(element.tagName)) return;
+    const computed = getComputedStyle(source);
+    element.style.fontSize = `${+(parseFloat(computed.fontSize) * 0.75).toFixed(2)}pt`;
+    element.style.fontFamily = computed.fontFamily;
+    element.style.fontWeight = computed.fontWeight;
+    element.style.color = computed.color;
+    // 含图片（公章 / logo）的格子不能锁死行高，否则 Word / WPS 只露出图片顶部一条
+    if (computed.lineHeight.endsWith("px") && !source.querySelector("img")) {
+      element.style.lineHeight = `${+(parseFloat(computed.lineHeight) * 0.75).toFixed(2)}pt`;
+      element.setAttribute("style", `${element.getAttribute("style")};mso-line-height-rule:exactly`);
+    }
+  });
+  // Word / WPS 会把表格往左移“单元格左内边距”那么多，好让文字和正文对齐；
+  // 各表格内边距不同（6 / 10 / 12px）就会导致左右边缘错开，这里统一成同一个左右内边距
+  clone.querySelectorAll("td, th").forEach(cell => {
+    cell.style.paddingLeft = "6px";
+    cell.style.paddingRight = "6px";
+  });
+  const sourceImages = Array.from(root.querySelectorAll("img"));
+  Array.from(clone.querySelectorAll("img")).forEach((img, idx) => {
+    const source = sourceImages[idx];
+    if (!source) return;
+    const rect = source.getBoundingClientRect();
+    if (rect.width && rect.height) {
+      img.setAttribute("width", String(Math.round(rect.width)));
+      img.setAttribute("height", String(Math.round(rect.height)));
+      img.style.width = `${Math.round(rect.width)}px`;
+      img.style.height = `${Math.round(rect.height)}px`;
+    }
+    img.src = source.currentSrc || source.src;
+    if (getComputedStyle(source).position === "absolute") {
+      // 公章：网页上是绝对定位在格子右上角，Word 里改成靠右浮动
+      img.style.position = "static";
+      img.setAttribute("align", "right");
+    }
+  });
+  clone.querySelectorAll(".no-print").forEach(element => element.remove());
+  clone.style.background = "#fff";
+  clone.style.minHeight = "0";
+  if (pageSelector) {
+    // 网页上的“纸张”是 210mm 宽 + 内边距；Word 里由分节的纸张和页边距负责
+    clone.querySelectorAll(pageSelector).forEach(page => {
+      Object.assign(page.style, { width: "auto", minHeight: "0", padding: "0", margin: "0", boxShadow: "none" });
+    });
+  }
+  // Word 按 pt 排版，网页样式里的 px 换成 pt（1px = 0.75pt），字号和间距才和网页一致
+  clone.querySelectorAll("[style]").forEach(element => {
+    const style = element.getAttribute("style");
+    if (style.includes("px")) {
+      element.setAttribute("style", style.replace(/(-?\d*\.?\d+)px/g, (_, n) => `${+(Number(n) * 0.75).toFixed(2)}pt`));
+    }
+  });
+  clone.querySelectorAll("table").forEach(table => {
+    if (table.style.width === "100%") table.setAttribute("width", "100%");
+    table.setAttribute("cellspacing", "0");
+  });
+
+  const headStyles = Array.from(
+    document.head.querySelectorAll('style, link[rel="stylesheet"]')
+  ).map(element => element.outerHTML).join("\n");
+  const safeFilename = sanitizeFileStem(filename);
+  const doc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+    <head><meta charset="utf-8" /><base href="${location.origin}/" /><title>${escapeHtml(safeFilename)}</title>
+    <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
+    ${headStyles}
+    <style>
+      @page WordSection1{size:21cm 29.7cm;margin:${pageMargin};mso-page-orientation:portrait}
+      div.WordSection1{page:WordSection1}
+      html,body{margin:0;background:#fff}
+    </style>
+    </head><body><div class="WordSection1">${clone.outerHTML}</div></body></html>`;
+  downloadBlob(new Blob(["\ufeff", doc], { type: "application/msword;charset=utf-8" }), `${safeFilename}.doc`);
 }
 
 export function printDocument(filename) {

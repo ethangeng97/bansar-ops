@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase.js";
+import { exportBillToXlsx } from "../lib/bill-xlsx.js";
 
 const BRAND = "#1f3864";
 
@@ -30,6 +31,9 @@ const formatDate = (d) => {
   const date = new Date(d);
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[ch]));
 const formatDateTime = (d) => {
   if (!d) return "—";
   const date = new Date(d);
@@ -156,6 +160,97 @@ export default function BillDetail({ billId, onBack }) {
   const total = Number(bill.amount_total || 0);
   const remain = total - settled;
 
+  // 打印 / Word / Excel 共用同一份数据，保证三个版本字段、顺序、合计一致
+  const buildBillDoc = () => ({
+    title: "账 单",
+    meta: [
+      ["账单编号", bill.bill_no || "—"],
+      ["账单日期", formatDate(bill.created_at)],
+      ["结算单位", `${partner?.code || ""} ${partner?.name || "—"}`.trim()],
+      ["账单属性", bill.direction === "AR" ? "应收" : "应付"],
+      ["作业号", shipment?.order_no || "—"],
+      ["提单号", blNo],
+      ["分提单号", hblNo || "—"],
+      ["船名 / 航次", [shipment?.vessel, shipment?.voyage].filter(Boolean).join(" / ") || "—"],
+      ["起运港 / 目的港", [shipment?.pol, shipment?.pod].filter(Boolean).join(" → ") || "—"],
+      ["发票号", bill.invoice_no || "—"],
+    ],
+    columns: ["费用项目", "单位", "数量", "币种", "单价", "金额", "折 CNY", "备注"],
+    rows: charges.map(c => {
+      const it = itemMap[c.charge_item_id];
+      return {
+        charge: it ? `${it.code || ""} ${it.name_zh || ""}`.trim() : "—",
+        unit: c.unit || "—",
+        quantity: c.quantity ?? "",
+        currency: c.currency || "",
+        unitPrice: Number(c.unit_price || 0),
+        amount: Number(c.amount_total || 0),
+        amountCny: Number(c.amount_cny || 0),
+        remark: c.remark || "—",
+      };
+    }),
+    totalText: `账单合计：${bill.currency || ""} ${total.toFixed(2)} / 折合 CNY：¥ ${Number(bill.amount_cny || 0).toFixed(2)}`,
+  });
+
+  // 只用 table + 行内样式排版（Word 不认 grid / flex，也常忽略 class 选择器），打印和 Word 用同一份 HTML
+  const renderBillHtml = (doc, { forWord = false } = {}) => {
+    const numIdx = new Set([2, 4, 5, 6]);
+    const cell = "border:1px solid #bbb;padding:4pt;font-size:9pt;vertical-align:middle;";
+    const td = (v, i) => `<td style="${cell}text-align:${numIdx.has(i) ? "right" : "left"}">${v}</td>`;
+    const head = doc.columns.map((label, i) => `<th style="${cell}background:#f2f4f7;font-weight:bold;text-align:${numIdx.has(i) ? "right" : "left"}">${escapeHtml(label)}</th>`).join("");
+    const body = doc.rows.map(r => `<tr>${[
+      escapeHtml(r.charge), escapeHtml(r.unit), escapeHtml(r.quantity), escapeHtml(r.currency),
+      r.unitPrice.toFixed(2), r.amount.toFixed(2), r.amountCny.toFixed(2), escapeHtml(r.remark),
+    ].map(td).join("")}</tr>`).join("")
+      || `<tr><td colspan="8" style="${cell}text-align:center">无费用明细</td></tr>`;
+    const ml = "border:none;border-bottom:1px dotted #ddd;padding:4pt 0;font-size:9pt;font-weight:bold;color:#666;width:16%;";
+    const mv = "border:none;border-bottom:1px dotted #ddd;padding:4pt 0;font-size:9pt;width:31%;";
+    const meta = [];
+    for (let i = 0; i < doc.meta.length; i += 2) {
+      const [l1, v1] = doc.meta[i];
+      const [l2, v2] = doc.meta[i + 1] || ["", ""];
+      meta.push(`<tr><td style="${ml}">${escapeHtml(l1)}</td><td style="${mv}">${escapeHtml(v1)}</td><td style="border:none;width:6%"></td><td style="${ml}">${escapeHtml(l2)}</td><td style="${mv}">${escapeHtml(v2)}</td></tr>`);
+    }
+    const css = `@page{size:21cm 29.7cm;margin:16mm}${forWord ? "@page Section1{size:21cm 29.7cm;margin:16mm;mso-page-orientation:portrait}div.Section1{page:Section1}" : ""}@media print{button{display:none}}`;
+    const tbl = 'width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse"';
+    const bodyHtml = `<p style="text-align:center;font-size:16pt;font-weight:bold;margin:0 0 15pt">${escapeHtml(doc.title)}</p>
+      <table ${tbl}>${meta.join("")}</table>
+      <p style="font-size:10.5pt;font-weight:bold;margin:16pt 0 6pt;padding-bottom:4pt;border-bottom:1px solid #bbb">费用明细</p>
+      <table ${tbl}><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+      <p style="text-align:right;font-weight:bold;font-size:9pt;margin:9pt 0 0">${escapeHtml(doc.totalText)}</p>
+      <p style="margin:36pt 0 0;font-size:1pt">&nbsp;</p><table ${tbl}><tr><td style="border:none;font-size:9pt;width:50%">制单：________________</td><td style="border:none;font-size:9pt;text-align:right;width:50%">确认/盖章：________________</td></tr></table>`;
+    const htmlOpen = forWord
+      ? '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">'
+      : "<!doctype html><html>";
+    const wordView = forWord ? "<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->" : "";
+    const bodyStyle = 'style="font-family:Arial,\'Microsoft YaHei\',sans-serif;font-size:9pt;color:#222"';
+    return `${htmlOpen}<head><meta charset="utf-8"><title>账单 ${escapeHtml(bill.bill_no)}</title>${wordView}<style>${css}</style></head><body ${bodyStyle}>${forWord ? `<div class="Section1">${bodyHtml}</div>` : bodyHtml}${forWord ? "" : "<script>window.onload=()=>window.print()</script>"}</body></html>`;
+  };
+
+  const printBill = () => {
+    const html = renderBillHtml(buildBillDoc());
+    const w = window.open("", "_blank");
+    if (!w) { alert("浏览器阻止了打印窗口，请允许本站打开弹窗后重试"); return; }
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const exportWord = () => {
+    const doc = renderBillHtml(buildBillDoc(), { forWord: true });
+    const blob = new Blob(["﻿", doc], { type: "application/msword;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `账单_${bill.bill_no || bill.id}.doc`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportExcel = async () => {
+    try {
+      await exportBillToXlsx({ filename: `账单_${bill.bill_no || bill.id}`, doc: buildBillDoc() });
+    } catch (err) {
+      alert("Excel 导出失败：" + (err.message || err));
+    }
+  };
+
   return (
     <div style={{ padding: 16, background: "#f0f2f5", minHeight: "100vh" }}>
       <div style={{ background: "#fff", borderRadius: 4, padding: 16,
@@ -183,6 +278,9 @@ export default function BillDetail({ billId, onBack }) {
             }}>{st.label}</span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={printBill} style={btn}>打印账单 / PDF</button>
+            <button onClick={exportWord} style={btn}>导出 Word</button>
+            <button onClick={exportExcel} style={btn}>导出 Excel（同版式）</button>
             {bill.status !== "void" && bill.status !== "settled" && (
               <button onClick={onSettle} style={btnPrimary}>核销</button>
             )}

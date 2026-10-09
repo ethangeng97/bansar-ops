@@ -12,13 +12,16 @@ import { supabase } from "../../supabase.js";
 import {
   downloadDocumentHtml,
   downloadDocumentPdf,
+  downloadDocumentWord,
   printDocument,
   sanitizeFileStem,
 } from "../../lib/document-download.js";
-import { exportToXlsx } from "../../lib/excel-export.js";
+import { exportStatementToXlsx } from "../../lib/statement-xlsx.js";
 
 const BRAND = "#1f3864";
 const STAMP_RED = "#c00";
+// 费用明细 10 列的宽度比例，与 statement-xlsx.js 的 Excel 列宽保持一致
+const CHARGE_COL_WIDTHS = ["15%", "8.5%", "8.5%", "7.5%", "7.5%", "7.5%", "10.5%", "7.5%", "11.5%", "16%"];
 
 // embedded：在订单详情「代理对账单」tab 内嵌渲染时为 true。
 //   此时不能直接 window.print()——会把整个订单详情大页面一起送去打印排版，非常卡，
@@ -344,52 +347,10 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
   const downloadExcel = async () => {
     setExcelBusy(true);
     try {
-      const rows = shipments.flatMap(ship =>
-        (chargesByShip[ship.id] || []).map(ch => {
-          const amount = Number(ch.quantity || 0) * Number(ch.unit_price || 0)
-            * (1 + Number(ch.tax_rate || 0) / 100);
-          return {
-            order_no: ship.order_no || "",
-            mbl_no: ship.mbl_no || ship.booking_no || "",
-            hbl_no: ship.hbl_no || "",
-            customer: ship.customer || "",
-            charge_name: chargeItemMap[ch.charge_item_id] || ch.notes_charge || "",
-            partner: partnerMap[ch.partner_id] || "",
-            direction: ch.direction || "",
-            unit_price: Number(ch.unit_price || 0),
-            quantity: Number(ch.quantity || 0),
-            unit: ch.unit || "票",
-            currency: ch.currency || "CNY",
-            tax_rate: Number(ch.tax_rate || 0),
-            amount,
-            exchange_rate: Number(ch.exchange_rate || 1),
-            amount_cny: amount * Number(ch.exchange_rate || 1),
-            remark: ch.remark || "",
-          };
-        })
-      );
-      await exportToXlsx({
-        filename: `${fileStem}.xlsx`,
-        sheetName: "对账明细",
-        columns: [
-          { key: "order_no", label: "订单编号", width: 18 },
-          { key: "mbl_no", label: "主单号", width: 18 },
-          { key: "hbl_no", label: "分单号", width: 18 },
-          { key: "customer", label: "客户名", width: 24 },
-          { key: "charge_name", label: "费用名称", width: 20 },
-          { key: "partner", label: "结算单位", width: 24 },
-          { key: "direction", label: "收付方向", width: 10 },
-          { key: "unit_price", label: "单价", width: 12 },
-          { key: "quantity", label: "数量", width: 10 },
-          { key: "unit", label: "单位", width: 10 },
-          { key: "currency", label: "币种", width: 10 },
-          { key: "tax_rate", label: "税率(%)", width: 10 },
-          { key: "amount", label: "原币金额", width: 14 },
-          { key: "exchange_rate", label: "汇率", width: 10 },
-          { key: "amount_cny", label: "折本币总计", width: 14 },
-          { key: "remark", label: "备注", width: 24 },
-        ],
-        rows,
+      await exportStatementToXlsx({
+        filename: fileStem,
+        company, statement, isBatch, shipments, chargesByShip, containersByShip,
+        chargeItemMap, toPartnerName, issueDate, totalsByCcy, totalCny,
       });
     } catch (e) {
       console.error(e);
@@ -428,6 +389,7 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         <button onClick={downloadExcel} disabled={excelBusy} style={{ ...btn, opacity: excelBusy ? 0.65 : 1 }}>
           {excelBusy ? "生成 Excel..." : "下载 Excel"}
         </button>
+        <button onClick={() => downloadDocumentWord({ filename: fileStem, pageSelector: ".stm-page", pageMargin: "14mm" })} style={btn}>下载 Word</button>
         <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn}>下载 HTML</button>
         <button onClick={print} style={btn}>
           {embedded ? "🖨 打印（独立窗口）" : "🖨 打印"}
@@ -438,26 +400,30 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         width: "210mm", minHeight: "297mm", padding: "14mm 14mm",
         margin: "16px auto", background: "#fff",
         boxShadow: "0 2px 12px rgba(0,0,0,0.12)",
-        fontFamily: "'Segoe UI','Microsoft YaHei',sans-serif",
+        fontFamily: "'Microsoft YaHei','PingFang SC',Arial,sans-serif",
         color: "#000", fontSize: 11, lineHeight: 1.5,
       }}>
         {/* 顶部抬头 */}
-        <header style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 10,
-                          borderBottom: `2px solid ${BRAND}`, marginBottom: 16 }}>
-          <div style={{ flex: "0 0 auto", width: 80 }}>
-            {co.logo_url
-              ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 80, maxHeight: 64 }} />
-              : <div style={{ width: 80, height: 64, border: "1px dashed #ccc",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              color: "#999", fontSize: 9 }}>LOGO</div>}
-          </div>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 17, fontWeight: 800, color: BRAND, letterSpacing: 4 }}>
-              {co.name_zh || "班萨（宁波）国际货运代理有限公司"}
-            </div>
-          </div>
-          <div style={{ width: 80 }}></div>
-        </header>
+        {/* 用 table 而不是 flex：Word 打开 .doc 时不认 flex，会把 logo 和公司名挤成上下两行 */}
+        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16,
+                        borderBottom: `2px solid ${BRAND}` }}>
+          <tbody>
+            <tr>
+              <td style={{ width: 80, padding: "0 0 10px", verticalAlign: "middle" }}>
+                {co.logo_url
+                  ? <img src={co.logo_url} alt="logo" style={{ maxWidth: 80, maxHeight: 64 }} />
+                  : <div style={{ width: 80, height: 64, border: "1px dashed #ccc",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  color: "#999", fontSize: 9 }}>LOGO</div>}
+              </td>
+              <td style={{ padding: "0 0 10px", textAlign: "center", verticalAlign: "middle",
+                            fontSize: 17, fontWeight: 800, color: BRAND, letterSpacing: 4 }}>
+                {co.name_zh || "班萨（宁波）国际货运代理有限公司"}
+              </td>
+              <td style={{ width: 80, padding: "0 0 10px" }}></td>
+            </tr>
+          </tbody>
+        </table>
 
         {/* 大标题 */}
         <div style={{ textAlign: "center", margin: "0 0 18px" }}>
@@ -467,17 +433,21 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
         </div>
 
         {/* TO + 日期 + 对账单号 */}
-        <div style={{ display: "flex", justifyContent: "space-between",
-                      marginBottom: 12, fontSize: 11, fontWeight: 700 }}>
-          <div>TO: {toPartnerName}</div>
-          <div>日期: {issueDate}
-            {isBatch && statement && (
-              <span style={{ marginLeft: 16, fontFamily: "'Consolas',monospace", color: BRAND }}>
-                对账单号: {statement.statement_no}
-              </span>
-            )}
-          </div>
-        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12,
+                        fontSize: 11, fontWeight: 700 }}>
+          <tbody>
+            <tr>
+              <td style={{ padding: 0, textAlign: "left" }}>TO: {toPartnerName}</td>
+              <td style={{ padding: 0, textAlign: "right" }}>日期: {issueDate}
+                {isBatch && statement && (
+                  <span style={{ marginLeft: 16, color: BRAND }}>
+                    对账单号: {statement.statement_no}
+                  </span>
+                )}
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
         {/* 渲染每一票 */}
         {shipments.map((ship, shipIdx) => {
@@ -504,7 +474,7 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
                   合计:
                 </td>
                 <td style={{ padding: "8px 12px", border: "1px solid #888",
-                              fontWeight: 700, fontFamily: "'Consolas',monospace" }}>
+                              fontWeight: 700 }}>
                   {Object.entries(totalsByCcy).map(([ccy, amt]) =>
                     `${ccy} ${amt.toFixed(2)}`
                   ).join(" ; ")}
@@ -518,7 +488,7 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
                 </td>
                 <td style={{ padding: "8px 12px", border: "1px solid #888",
                               fontWeight: 800, color: STAMP_RED,
-                              fontFamily: "'Consolas',monospace", fontSize: 12 }}>
+                              fontSize: 12 }}>
                   CNY {totalCny.toFixed(2)}
                 </td>
               </tr>
@@ -581,13 +551,16 @@ export default function Statement({ shipmentId, statementId, mode, embedded, aut
           </tbody>
         </table>
 
-        {/* 页脚 */}
-        <div style={{ display: "flex", justifyContent: "space-between",
-                      marginTop: 8, paddingTop: 4, borderTop: "1px solid #ddd",
-                      fontSize: 8, color: "#888" }}>
-          <div>{co.name_zh || "班萨（宁波）国际货运代理有限公司"}</div>
-          <div>Form BNSR-STM</div>
-        </div>
+        {/* 页脚（table 排版，Word 里也能左右分开） */}
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8,
+                        borderTop: "1px solid #ddd", fontSize: 8, color: "#888" }}>
+          <tbody>
+            <tr>
+              <td style={{ padding: "4px 0 0", textAlign: "left" }}>{co.name_zh || "班萨（宁波）国际货运代理有限公司"}</td>
+              <td style={{ padding: "4px 0 0", textAlign: "right" }}>Form BNSR-STM</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -649,7 +622,7 @@ function ChargeTable({ charges, chargeItemMap }) {
       <thead>
         <tr style={{ background: "#1f3864", color: "#fff" }}>
           {["费用名称","单价","数量","单位","币种","税率","金额","汇率","折本币总计","备注"].map((h, i) => (
-            <th key={i} style={{ padding: "5px 6px", border: "1px solid #555",
+            <th key={i} style={{ padding: "5px 6px", border: "1px solid #555", width: CHARGE_COL_WIDTHS[i],
                                   textAlign: (h === "费用名称" || h === "备注") ? "left" : "center",
                                   fontSize: 9.5, fontWeight: 700, fontFamily: "inherit" }}>
               {h}
@@ -673,34 +646,34 @@ function ChargeTable({ charges, chargeItemMap }) {
                 {chargeItemMap[ch.charge_item_id] || ch.notes_charge || "—"}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
-                            textAlign: "right", fontFamily: "'Consolas',monospace" }}>
+                            textAlign: "right" }}>
                 {Number(ch.unit_price || 0).toFixed(2)}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
-                            textAlign: "center", fontFamily: "'Consolas',monospace" }}>
+                            textAlign: "center" }}>
                 {ch.quantity || 0}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888", textAlign: "center" }}>
                 {ch.unit || "票"}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
-                            textAlign: "center", fontFamily: "'Consolas',monospace" }}>
+                            textAlign: "center" }}>
                 {ch.currency || "CNY"}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
-                            textAlign: "center", fontFamily: "'Consolas',monospace" }}>
+                            textAlign: "center" }}>
                 {Number(ch.tax_rate || 0)}%
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
-                            textAlign: "right", fontFamily: "'Consolas',monospace" }}>
+                            textAlign: "right" }}>
                 {amt.toFixed(2)}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
-                            textAlign: "center", fontFamily: "'Consolas',monospace" }}>
+                            textAlign: "center" }}>
                 {Number(ch.exchange_rate || 1)}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888",
-                            textAlign: "right", fontFamily: "'Consolas',monospace" }}>
+                            textAlign: "right" }}>
                 {cny.toFixed(2)}
               </td>
               <td style={{ padding: "4px 6px", border: "1px solid #888", fontSize: 9 }}>

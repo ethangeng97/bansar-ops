@@ -14,9 +14,11 @@ import { supabase } from "../../supabase.js";
 import {
   downloadDocumentHtml,
   downloadDocumentPdf,
+  downloadDocumentWord,
   printDocument,
   sanitizeFileStem,
 } from "../../lib/document-download.js";
+import { exportReleaseNoticeToXlsx } from "../../lib/release-notice-xlsx.js";
 
 const BRAND = "#1f3864";
 const STAMP_RED = "#c00";
@@ -26,6 +28,7 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
   const [company, setCompany] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [excelBusy, setExcelBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -64,6 +67,72 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
   };
 
   const issueDate = formatDateLong(new Date());
+  const companyEn = (co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase();
+  // 网页 / Word / Excel 三种版本共用同一份分组数据
+  const sections = [
+    { title: "船 期 信 息 / Vessel Schedule", headBg: BRAND, rows: [
+      ["船名/航次 Vessel/Voy", `${s.vessel || "—"}${s.voyage ? " / " + s.voyage : ""}`],
+      ["船公司 Carrier", s.carrier_name || s.shipping_line || "—"],
+      ["订舱号 Booking No.", s.booking_no || "—", { bold: true, mono: true }],
+      ["装港 / 卸港 POL/POD", `${s.pol || "—"} → ${s.pod || "—"}`],
+      ["预计开航 ETD", s.etd ? formatDateLong(s.etd) : "—"],
+      ["预计到港 ETA", s.eta ? formatDateLong(s.eta) : "—"],
+    ] },
+    { title: "关 键 截 止 时 间 / Critical Cut-off Times", headBg: STAMP_RED, cellBg: "#fff5f5", labelColor: STAMP_RED, rows: [
+      ["截关时间 Customs Cut-off", s.customs_cutoff ? formatDateTime(s.customs_cutoff) : "—", { bold: true }],
+      ["截单时间 SI Cut-off", s.si_cutoff ? formatDateTime(s.si_cutoff) : "—", { bold: true }],
+      ["截 VGM 时间 VGM Cut-off", s.vgm_cutoff ? formatDateTime(s.vgm_cutoff) : "—", { bold: true }],
+      ["还箱期限 Equipment Return", s.equipment_return ? formatDateTime(s.equipment_return) : "—", { bold: true }],
+    ] },
+    { title: "港 口 操 作 信 息 / Port Operation", headBg: BRAND, rows: [
+      ["结算代码 Settlement Code", s.settlement_code || "—", { mono: true }],
+      ["进港代码 Port Entry Code", s.port_entry_code || "—", { mono: true, bold: true }],
+      ["条码有效期 Barcode Expiry", s.barcode_expiry ? formatDateTime(s.barcode_expiry) : "—"],
+    ] },
+    { title: "提 箱 信 息 / Container Pickup", headBg: BRAND, rows: [
+      ["提箱地点 Pickup Depot", s.pickup_depot || "—"],
+      ["起运港免用箱 Free Demurrage", s.free_demurrage_days || "—", { bold: true }],
+      ["免用箱计算方式 Free Demurrage Calc", s.free_demurrage_calc || "—"],
+    ] },
+  ];
+  const argb = color => {
+    const hex = color.replace("#", "").toUpperCase();
+    return `FF${hex.length === 3 ? hex.split("").map(ch => ch + ch).join("") : hex}`;
+  };
+  const downloadExcel = async () => {
+    setExcelBusy(true);
+    try {
+      await exportReleaseNoticeToXlsx({
+        filename: fileStem,
+        doc: {
+          companyEn,
+          logoUrl: co.logo_url,
+          referenceNo: s.order_no || "—",
+          title: "RELEASE NOTICE",
+          subtitle: "放 舱 信 息",
+          infoLines: [
+            [["致 / To:", s.shipper_name || "—"]],
+            [["日期 / Date:", issueDate], ...((s.po || s.customer_po) ? [["客户参考号 / Customer Ref:", s.po || s.customer_po]] : [])],
+          ],
+          sections: sections.map(section => ({
+            title: section.title,
+            headArgb: argb(section.headBg),
+            cellArgb: argb(section.cellBg || "#f5f8fc"),
+            labelArgb: argb(section.labelColor || section.headBg),
+            rows: section.rows.map(([label, value, opts]) => ({ label, value, bold: !!opts?.bold })),
+          })),
+          notice: NOTICE,
+          footerLeft: (co.name_en || "BANSAR").toUpperCase(),
+          formCode: "Form BNSR-RLN",
+        },
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Excel 导出失败：" + (e?.message || e));
+    } finally {
+      setExcelBusy(false);
+    }
+  };
 
   return (
     <div className="doc-page" style={{ background: "#f0f0f0", minHeight: "100vh" }}>
@@ -88,6 +157,10 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
         <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...btnPrimary, opacity: pdfBusy ? 0.65 : 1 }}>
           {pdfBusy ? "生成 PDF..." : "下载 PDF"}
         </button>
+        <button onClick={downloadExcel} disabled={excelBusy} style={{ ...btn, opacity: excelBusy ? 0.65 : 1 }}>
+          {excelBusy ? "生成 Excel..." : "下载 Excel"}
+        </button>
+        <button onClick={() => downloadDocumentWord({ filename: fileStem, pageSelector: ".rln-page", pageMargin: "14mm" })} style={btn}>下载 Word</button>
         <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn}>下载 HTML</button>
         <button onClick={print} style={btn}>🖨 打印</button>
       </div>
@@ -96,7 +169,7 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
         width: "210mm", minHeight: "297mm", padding: "14mm 14mm",
         margin: "16px auto", background: "#fff",
         boxShadow: "0 2px 12px rgba(0,0,0,0.12)",
-        fontFamily: "'Segoe UI','Microsoft YaHei',sans-serif",
+        fontFamily: "'Microsoft YaHei','PingFang SC',Arial,sans-serif",
         color: "#000", fontSize: 11, lineHeight: 1.5,
       }}>
         {/* 顶部抬头 */}
@@ -117,7 +190,7 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
           </div>
           <div style={{ flex: "0 0 auto", textAlign: "right", paddingLeft: 8 }}>
             <div style={{ fontSize: 8, color: "#444" }}>Reference No.</div>
-            <div style={{ fontSize: 9.5, fontWeight: 700, fontFamily: "'Consolas',monospace", color: "#000" }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: "#000" }}>
               {s.order_no || "—"}
             </div>
           </div>
@@ -141,48 +214,17 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
           </div>
         </div>
 
-        {/* 船期信息 */}
-        <Section title="船 期 信 息 / Vessel Schedule" headBg={BRAND} rows={[
-            ["船名/航次 Vessel/Voy", `${s.vessel || "—"}${s.voyage ? " / " + s.voyage : ""}`],
-            ["船公司 Carrier", s.carrier_name || s.shipping_line || "—"],
-            ["订舱号 Booking No.", s.booking_no || "—", { bold: true, mono: true }],
-            ["装港 / 卸港 POL/POD", `${s.pol || "—"} → ${s.pod || "—"}`],
-            ["预计开航 ETD", s.etd ? formatDateLong(s.etd) : "—"],
-            ["预计到港 ETA", s.eta ? formatDateLong(s.eta) : "—"],
-        ]} />
-
-        {/* 关键截止时间 */}
-        <Section title="关 键 截 止 时 间 / Critical Cut-off Times" headBg={STAMP_RED} cellBg="#fff5f5" labelColor={STAMP_RED} rows={[
-            ["截关时间 Customs Cut-off", s.customs_cutoff ? formatDateTime(s.customs_cutoff) : "—", { bold: true }],
-            ["截单时间 SI Cut-off", s.si_cutoff ? formatDateTime(s.si_cutoff) : "—", { bold: true }],
-            ["截 VGM 时间 VGM Cut-off", s.vgm_cutoff ? formatDateTime(s.vgm_cutoff) : "—", { bold: true }],
-            ["还箱期限 Equipment Return", s.equipment_return ? formatDateTime(s.equipment_return) : "—", { bold: true }],
-        ]} />
-
-        {/* 港口操作信息 */}
-        <Section title="港 口 操 作 信 息 / Port Operation" headBg={BRAND} rows={[
-            ["结算代码 Settlement Code", s.settlement_code || "—", { mono: true }],
-            ["进港代码 Port Entry Code", s.port_entry_code || "—", { mono: true, bold: true }],
-            ["条码有效期 Barcode Expiry", s.barcode_expiry ? formatDateTime(s.barcode_expiry) : "—"],
-        ]} />
-
-        {/* 提箱信息 */}
-        <Section title="提 箱 信 息 / Container Pickup" headBg={BRAND} rows={[
-            ["提箱地点 Pickup Depot", s.pickup_depot || "—"],
-            ["起运港免用箱 Free Demurrage", s.free_demurrage_days || "—", { bold: true }],
-            ["免用箱计算方式 Free Demurrage Calc", s.free_demurrage_calc || "—"],
-        ]} />
+        {sections.map(section => (
+          <Section key={section.title} title={section.title} headBg={section.headBg}
+                   cellBg={section.cellBg} labelColor={section.labelColor} rows={section.rows} />
+        ))}
 
         {/* 警示框 */}
         <div style={{ fontSize: 10, lineHeight: 1.6, color: "#555",
                       padding: "8px 10px", background: "#fffbe6",
                       borderLeft: "3px solid #faad14", marginBottom: 16 }}>
-          <b>请发货人务必：</b><br/>
-          1. 在<b>截关时间</b>前完成报关申报<br/>
-          2. 在<b>截单时间</b>前提供完整提单信息（Shipping Instruction）<br/>
-          3. 装柜后及时提供箱号、封号、件数、重量、体积<br/>
-          4. 在<b>还箱期限</b>前完成进港，逾期产生的滞箱/堆存费由发货人承担<br/>
-          5. 注意条码有效期，过期需重新申请
+          <b>{NOTICE.title}</b><br/>
+          {NOTICE.lines.map((line, i) => <span key={i}>{line}<br/></span>)}
         </div>
 
         {/* 签章区 (放舱信息属于内部操作通知，不需要章) */}
@@ -203,6 +245,17 @@ export default function ReleaseNotice({ shipmentId, onBack }) {
     </div>
   );
 }
+
+const NOTICE = {
+  title: "请发货人务必：",
+  lines: [
+    "1. 在截关时间前完成报关申报",
+    "2. 在截单时间前提供完整提单信息（Shipping Instruction）",
+    "3. 装柜后及时提供箱号、封号、件数、重量、体积",
+    "4. 在还箱期限前完成进港，逾期产生的滞箱/堆存费由发货人承担",
+    "5. 注意条码有效期，过期需重新申请",
+  ],
+};
 
 function Section({ title, headBg, cellBg, labelColor, rows }) {
   return (
@@ -230,7 +283,6 @@ function Section({ title, headBg, cellBg, labelColor, rows }) {
               </td>
               <td style={{ padding: "6px 10px", border: "1px solid #888",
                             fontWeight: o.bold ? 700 : 400,
-                            fontFamily: o.mono ? "'Consolas',monospace" : "inherit",
                             whiteSpace: "pre-wrap" }}>
                 {val}
               </td>

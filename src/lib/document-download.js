@@ -438,6 +438,187 @@ ${clone.outerHTML}
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// ---------------------------------------------------------------------------
+// Word / WPS 只认 table 排版：网页里用 CSS grid / flex / 多栏 / 绝对定位排出来的版面，
+// 打开 .doc 时会全部变成上下堆叠。下面按网页上“实际算出来”的样式，把这些容器
+// 换成等效的表格，让 Word 版和网页 / PDF 版保持同一个版面。
+// ---------------------------------------------------------------------------
+const BOX_PROPS = ["Top", "Right", "Bottom", "Left"];
+
+function isTransparent(color) {
+  return !color || color === "transparent" || /rgba\(.*,\s*0\)$/.test(color);
+}
+
+// 把子元素的边框 / 底色 / 内边距搬到表格单元格上（Word 里 div 的边框会变成段落线）
+// 格子只写内容区高度：LibreOffice / WPS 会在 height 之外再加上下内边距，写整格高度会越变越高
+function contentHeight(source, computed) {
+  const extra = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"]
+    .reduce((sum, key) => sum + (parseFloat(computed[key]) || 0), 0);
+  return Math.max(0, Math.round(source.getBoundingClientRect().height - extra));
+}
+
+function moveBoxToCell(cell, element, computed) {
+  for (const side of BOX_PROPS) {
+    const width = computed[`border${side}Width`];
+    const style = computed[`border${side}Style`];
+    if (style !== "none" && parseFloat(width) > 0) {
+      cell.style[`border${side}`] = `${width} ${style} ${computed[`border${side}Color`]}`;
+    }
+    cell.style[`padding${side}`] = computed[`padding${side}`];
+  }
+  if (!isTransparent(computed.backgroundColor)) cell.style.background = computed.backgroundColor;
+  cell.style.textAlign = computed.textAlign === "start" ? "left" : computed.textAlign;
+  Object.assign(element.style, { border: "none", padding: "0", background: "transparent", minHeight: "0" });
+}
+
+function makeLayoutTable(source, computed) {
+  const table = document.createElement("table");
+  const width = Math.round(source.getBoundingClientRect().width);
+  table.setAttribute("width", String(width));
+  table.setAttribute("cellspacing", "0");
+  table.setAttribute("cellpadding", "0");
+  table.style.width = `${width}px`;
+  table.style.borderCollapse = "collapse";
+  table.style.tableLayout = "fixed";  // 按设定的列宽排，不让内容撑宽某一列
+  if (!isTransparent(computed.backgroundColor)) table.style.background = computed.backgroundColor;
+  table.style.marginTop = computed.marginTop;
+  table.style.marginBottom = computed.marginBottom;
+  return table;
+}
+
+function gridSpan(childComputed, columnCount) {
+  const end = childComputed.gridColumnEnd;
+  const start = childComputed.gridColumnStart;
+  if (end === "-1") return columnCount - (parseInt(start) || 1) + 1;
+  const spanMatch = /span\s+(\d+)/.exec(end) || /span\s+(\d+)/.exec(start);
+  if (spanMatch) return Math.min(columnCount, parseInt(spanMatch[1]));
+  if (parseInt(end) && parseInt(start)) return Math.max(1, parseInt(end) - parseInt(start));
+  return 1;
+}
+
+function convertLayoutForWord(pairs, isPage = () => false) {
+  const movedIntoCell = new Set();  // 已经搬进表格单元格的子元素，边框已由单元格负责
+  for (const { source, element } of pairs) {
+    if (!element.isConnected && !element.parentNode) continue;
+    const computed = getComputedStyle(source);
+    const sourceChildren = Array.from(source.children);
+    const children = Array.from(element.children);
+    if (children.length !== sourceChildren.length) continue;
+
+    if (computed.display === "grid" && children.length > 0) {
+      const columns = computed.gridTemplateColumns.split(/\s+/).map(parseFloat).filter(n => n > 0);
+      if (columns.length === 0) continue;
+      const table = makeLayoutTable(source, computed);
+      const colgroup = document.createElement("colgroup");
+      columns.forEach(c => {
+        const col = document.createElement("col");
+        col.setAttribute("width", String(Math.round(c)));
+        colgroup.appendChild(col);
+      });
+      table.appendChild(colgroup);
+      let row = null;
+      let used = columns.length;
+      const cells = [];
+      children.forEach((child, i) => {
+        const childComputed = getComputedStyle(sourceChildren[i]);
+        const span = gridSpan(childComputed, columns.length);
+        if (used + span > columns.length) {
+          row = table.insertRow();
+          used = 0;
+        }
+        const cell = row.insertCell();
+        if (span > 1) cell.colSpan = span;
+        // 用网页上实际的像素宽度（Word 的纸张可用宽度和网页“纸张”内容区一样），比百分比稳定
+        const share = columns.slice(used, used + span).reduce((a, b) => a + b, 0);
+        cell.setAttribute("width", String(Math.round(share)));
+        cell.style.width = `${Math.round(share)}px`;
+        cell.style.verticalAlign = childComputed.display === "flex" && childComputed.justifyContent === "center" ? "middle" : "top";
+        cell.style.height = `${contentHeight(sourceChildren[i], childComputed)}px`;
+        moveBoxToCell(cell, child, childComputed);
+        movedIntoCell.add(child);
+        cell.appendChild(child);
+        cells.push({ cell, row: table.rows.length - 1, start: used, end: used + span });
+        used += span;
+      });
+      // 网格外框画在四周的格子上（Word 对表格本身的边框支持不稳定）
+      const lastRow = table.rows.length - 1;
+      for (const { cell, row: r, start, end } of cells) {
+        const edge = side => `${computed[`border${side}Width`]} ${computed[`border${side}Style`]} ${computed[`border${side}Color`]}`;
+        const has = side => computed[`border${side}Style`] !== "none" && parseFloat(computed[`border${side}Width`]) > 0;
+        if (r === 0 && has("Top")) cell.style.borderTop = edge("Top");
+        if (r === lastRow && has("Bottom")) cell.style.borderBottom = edge("Bottom");
+        if (start === 0 && has("Left")) cell.style.borderLeft = edge("Left");
+        if (end === columns.length && has("Right")) cell.style.borderRight = edge("Right");
+      }
+      Object.assign(element.style, { display: "block", border: "none", padding: "0" });
+      element.appendChild(table);
+      continue;
+    }
+
+    const isRowFlex = (computed.display === "flex" || computed.display === "inline-flex")
+      && !computed.flexDirection.startsWith("column");
+    if (isRowFlex && children.length > 1) {
+      const table = makeLayoutTable(source, { ...computed, borderTopStyle: "none", borderRightStyle: "none", borderBottomStyle: "none", borderLeftStyle: "none", backgroundColor: "transparent" });
+      const row = table.insertRow();
+      const lastIdx = children.length - 1;
+      children.forEach((child, i) => {
+        const rect = sourceChildren[i].getBoundingClientRect();
+        const cell = row.insertCell();
+        cell.setAttribute("width", String(Math.round(rect.width)));
+        cell.style.width = `${Math.round(rect.width)}px`;
+        cell.style.padding = "0";
+        cell.style.border = "none";
+        cell.style.verticalAlign = computed.alignItems === "center" ? "middle"
+          : computed.alignItems === "flex-end" ? "bottom" : "top";
+        if (i === lastIdx && lastIdx > 0 && /space-between|flex-end|end/.test(computed.justifyContent)) {
+          cell.style.textAlign = "right";
+        } else if (computed.justifyContent === "center") {
+          cell.style.textAlign = "center";
+        }
+        movedIntoCell.add(child);
+        cell.appendChild(child);
+      });
+      element.style.display = "block";
+      element.appendChild(table);
+      continue;
+    }
+
+    // 带边框 / 底色的块（提示框、抬头信息框）：Word 会把每一行文字各画一个框，包成单格表格
+    const hasBorder = BOX_PROPS.some(side => computed[`border${side}Style`] !== "none" && parseFloat(computed[`border${side}Width`]) > 0);
+    if (element.tagName === "DIV" && computed.display === "block" && !movedIntoCell.has(element) && !isPage(element)
+        && (hasBorder || !isTransparent(computed.backgroundColor)) && !parseInt(computed.columnCount)) {
+      const table = makeLayoutTable(source, { ...computed, marginTop: "0", marginBottom: "0" });
+      const cell = table.insertRow().insertCell();
+      cell.style.verticalAlign = "top";
+      while (element.firstChild) cell.appendChild(element.firstChild);
+      moveBoxToCell(cell, element, computed);
+      // 块里直接的文字没有自己的标签，字号 / 字体要写到格子上，否则 Word 用默认的宋体 / Times
+      for (const prop of ["fontSize", "fontFamily", "fontWeight", "color", "lineHeight"]) cell.style[prop] = computed[prop];
+      element.appendChild(table);
+      continue;
+    }
+
+    // 两栏排版（column-count）：按条目对半分到左右两个格子
+    const columnCount = parseInt(computed.columnCount);
+    if (columnCount > 1) {
+      const table = makeLayoutTable(source, { ...computed, borderTopStyle: "none", borderRightStyle: "none", borderBottomStyle: "none", borderLeftStyle: "none", backgroundColor: "transparent" });
+      const row = table.insertRow();
+      const perColumn = Math.ceil(children.length / columnCount);
+      for (let c = 0; c < columnCount; c++) {
+        const cell = row.insertCell();
+        cell.setAttribute("width", `${(100 / columnCount).toFixed(2)}%`);
+        cell.style.verticalAlign = "top";
+        cell.style.padding = "0 6px";
+        cell.style.textAlign = computed.textAlign;
+        children.slice(c * perColumn, (c + 1) * perColumn).forEach(child => cell.appendChild(child));
+      }
+      element.style.columnCount = "auto";
+      element.removeAttribute("class");  // 页面 <style> 里的 column-count 规则也不能再生效
+      element.appendChild(table);
+    }
+  }
+}
+
 // 导出 .doc（Word 能打开的 HTML）。Word 的 HTML 排版很弱：不认 flex / max-width / 绝对定位，
 // 没有分节信息时还会用“Web 版式”打开、纸张跟着默认设置走。这里把这些都补上，
 // 让 Word 里的样子尽量和网页 / PDF 一致：A4 纵向、固定页边距、图片按网页上显示的大小写死。
@@ -446,11 +627,14 @@ export function downloadDocumentWord({ filename, rootSelector = ".doc-page", pag
   if (!root) throw new Error("文件页面还没渲染完成，请稍后再试");
 
   const clone = root.cloneNode(true);
+  // 原页面和克隆里的元素一一对应，后面按原页面实际算出的样式改写克隆
+  const sourceNodes = Array.from(root.querySelectorAll("*"));
+  const pairs = Array.from(clone.querySelectorAll("*")).map((element, idx) => ({ element, source: sourceNodes[idx] }))
+    .filter(pair => pair.source);
+  clone.querySelectorAll(".no-print").forEach(element => element.remove());
   // Word 里表格单元格不继承 table / div 上的字号、字体，按网页实际算出的样式逐格写死
-  const sourceNodes = root.querySelectorAll("*");
-  clone.querySelectorAll("*").forEach((element, idx) => {
-    const source = sourceNodes[idx];
-    if (!source || !/^(TD|TH|DIV|SPAN|P|B|STRONG)$/.test(element.tagName)) return;
+  pairs.forEach(({ element, source }) => {
+    if (!/^(TD|TH|DIV|SPAN|P|B|STRONG)$/.test(element.tagName)) return;
     const computed = getComputedStyle(source);
     element.style.fontSize = `${+(parseFloat(computed.fontSize) * 0.75).toFixed(2)}pt`;
     element.style.fontFamily = computed.fontFamily;
@@ -458,15 +642,8 @@ export function downloadDocumentWord({ filename, rootSelector = ".doc-page", pag
     element.style.color = computed.color;
     // 含图片（公章 / logo）的格子不能锁死行高，否则 Word / WPS 只露出图片顶部一条
     if (computed.lineHeight.endsWith("px") && !source.querySelector("img")) {
-      element.style.lineHeight = `${+(parseFloat(computed.lineHeight) * 0.75).toFixed(2)}pt`;
-      element.setAttribute("style", `${element.getAttribute("style")};mso-line-height-rule:exactly`);
+      element.style.lineHeight = computed.lineHeight;
     }
-  });
-  // Word / WPS 会把表格往左移“单元格左内边距”那么多，好让文字和正文对齐；
-  // 各表格内边距不同（6 / 10 / 12px）就会导致左右边缘错开，这里统一成同一个左右内边距
-  clone.querySelectorAll("td, th").forEach(cell => {
-    cell.style.paddingLeft = "6px";
-    cell.style.paddingRight = "6px";
   });
   const sourceImages = Array.from(root.querySelectorAll("img"));
   Array.from(clone.querySelectorAll("img")).forEach((img, idx) => {
@@ -483,16 +660,90 @@ export function downloadDocumentWord({ filename, rootSelector = ".doc-page", pag
     if (getComputedStyle(source).position === "absolute") {
       // 公章：网页上是绝对定位在格子右上角，Word 里改成靠右浮动
       img.style.position = "static";
-      img.setAttribute("align", "right");
+      img.setAttribute("align", getComputedStyle(source).left !== "auto" && getComputedStyle(source).right === "auto" ? "left" : "right");
     }
   });
-  clone.querySelectorAll(".no-print").forEach(element => element.remove());
+
+  // 水印（斜着的大字）Word 里没法叠在正文下面，去掉；其余绝对定位的元素（签名线等）改回正常排版
+  pairs.forEach(({ element, source }) => {
+    if (/watermark/.test(source.className)) { element.remove(); return; }
+    if (element.tagName !== "IMG" && getComputedStyle(source).position === "absolute") {
+      Object.assign(element.style, { position: "static", left: "", right: "", top: "", bottom: "" });
+    }
+  });
+  // 复选框：网页上是 CSS 画的方框 + ::after 对勾，Word 里换成 ☑ / ☐ 字符
+  pairs.forEach(({ element, source }) => {
+    if (!source.classList.contains("chk")) return;
+    element.textContent = source.classList.contains("checked") ? "☑" : "☐";
+    Object.assign(element.style, { border: "none", width: "auto", height: "auto", fontSize: "11pt" });
+  });
+  // 网页里靠 white-space: pre-wrap 显示的换行（地址、品名等），Word 不认，换成 <br>
+  pairs.forEach(({ element, source }) => {
+    if (!/^pre/.test(getComputedStyle(source).whiteSpace)) return;
+    Array.from(element.childNodes).forEach(node => {
+      if (node.nodeType !== Node.TEXT_NODE || !node.nodeValue.includes("\n")) return;
+      const fragment = document.createDocumentFragment();
+      node.nodeValue.split("\n").forEach((line, i) => {
+        if (i > 0) fragment.appendChild(document.createElement("br"));
+        fragment.appendChild(document.createTextNode(line.replace(/ {2,}/g, m => "\u00a0".repeat(m.length))));
+      });
+      node.replaceWith(fragment);
+    });
+  });
+  // 原有的 <table>：列宽、行高都按网页实际尺寸写死（Word 里行高是“最小值”，内容多时仍会撑开）
+  pairs.forEach(({ element, source }) => {
+    if (element.tagName === "TABLE") {
+      const width = Math.round(source.getBoundingClientRect().width);
+      element.setAttribute("width", String(width));
+      element.style.width = `${width}px`;
+      element.style.tableLayout = "fixed";
+    } else if (element.tagName === "TD" || element.tagName === "TH") {
+      const rect = source.getBoundingClientRect();
+      element.style.height = `${contentHeight(source, getComputedStyle(source))}px`;
+      if (!source.colSpan || source.colSpan === 1) {
+        element.setAttribute("width", String(Math.round(rect.width)));
+        element.style.width = `${Math.round(rect.width)}px`;
+      }
+    }
+  });
+  // “纸张”本身的白底 / 阴影不用包成表格，后面会整个重置
+  convertLayoutForWord(pairs.filter(({ element }) => clone.contains(element)),
+    element => !!pageSelector && element.matches(pageSelector));
+  // Word / WPS 会把表格往左移“单元格左内边距”那么多，好让文字和正文对齐；
+  // 各表格内边距不同（6 / 10 / 12px）就会导致左右边缘错开，这里统一成同一个左右内边距
+  // 里面套着整张表格的格子（如提单的货物表）不加内边距，否则里面的表格会被挤出右边
+  clone.querySelectorAll("td, th").forEach(cell => {
+    const pad = cell.querySelector("table") ? "0" : "6px";
+    cell.style.paddingLeft = pad;
+    cell.style.paddingRight = pad;
+  });
   clone.style.background = "#fff";
   clone.style.minHeight = "0";
   if (pageSelector) {
     // 网页上的“纸张”是 210mm 宽 + 内边距；Word 里由分节的纸张和页边距负责
-    clone.querySelectorAll(pageSelector).forEach(page => {
+    clone.querySelectorAll(pageSelector).forEach((page, idx) => {
       Object.assign(page.style, { width: "auto", minHeight: "0", padding: "0", margin: "0", boxShadow: "none" });
+      // 多页文件（如提单正面 + 背面条款）：每张纸之间插分页符
+      if (idx > 0) {
+        const pageBreak = document.createElement("br");
+        pageBreak.setAttribute("clear", "all");
+        pageBreak.setAttribute("style", "page-break-before:always;mso-break-type:page-break");
+        page.parentNode.insertBefore(pageBreak, page);
+      }
+    });
+  }
+  // 网页“纸张”的内容区和 Word 页面（A4 减页边距）不一定一样宽（比如纸张是 content-box，
+  // 210mm 再加内边距）；表格宽度都是按网页像素写死的，这里按比例缩到 Word 页面里，避免右边被裁掉
+  const pageSource = (pageSelector && root.querySelector(pageSelector)) || root;
+  const pageStyle = getComputedStyle(pageSource);
+  const pageInner = pageSource.clientWidth - parseFloat(pageStyle.paddingLeft || 0) - parseFloat(pageStyle.paddingRight || 0);
+  const wordInner = (210 - 2 * (parseFloat(pageMargin) || 14)) * 96 / 25.4;
+  const widthScale = pageInner > 0 ? Math.min(1, wordInner / pageInner) : 1;
+  if (widthScale < 0.995) {
+    clone.querySelectorAll("table, td, th, col").forEach(element => {
+      const attr = element.getAttribute("width");
+      if (attr && /^\d+(\.\d+)?$/.test(attr)) element.setAttribute("width", String(Math.round(Number(attr) * widthScale)));
+      if (element.style.width.endsWith("px")) element.style.width = `${Math.round(parseFloat(element.style.width) * widthScale)}px`;
     });
   }
   // Word 按 pt 排版，网页样式里的 px 换成 pt（1px = 0.75pt），字号和间距才和网页一致
@@ -500,6 +751,10 @@ export function downloadDocumentWord({ filename, rootSelector = ".doc-page", pag
     const style = element.getAttribute("style");
     if (style.includes("px")) {
       element.setAttribute("style", style.replace(/(-?\d*\.?\d+)px/g, (_, n) => `${+(Number(n) * 0.75).toFixed(2)}pt`));
+    }
+    // 行高按网页锁死（含图片的格子前面已跳过 line-height）
+    if (/line-height:\s*[\d.]+pt/.test(element.getAttribute("style"))) {
+      element.setAttribute("style", `${element.getAttribute("style")};mso-line-height-rule:exactly`);
     }
   });
   clone.querySelectorAll("table").forEach(table => {

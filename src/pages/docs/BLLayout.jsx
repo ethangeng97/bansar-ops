@@ -17,11 +17,14 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../supabase.js";
 import { combineMarks } from "../../lib/marks.js";
 import { exportDraftBLToXlsx } from "../../lib/draft-bl-xlsx.js";
+import { exportBlToXlsx } from "../../lib/bl-xlsx.js";
 import {
   downloadDocumentHtml,
   downloadDocumentPdf,
+  downloadDocumentWord,
   printDocument,
   sanitizeFileStem,
+  validatePdfEditPassword,
 } from "../../lib/document-download.js";
 
 const BRAND = "#1f3864";
@@ -80,6 +83,11 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl", em
   // 合并明细：自拼分票默认开（货代典型场景：多 SKU 拼一只柜，提单只显示汇总一行）
   const [consolidate, setConsolidate] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [excelBusy, setExcelBusy] = useState(false);
+  const [showPdfPassword, setShowPdfPassword] = useState(false);
+  const [pdfPassword, setPdfPassword] = useState("");
+  const [pdfPasswordConfirm, setPdfPasswordConfirm] = useState("");
+  const [pdfPasswordError, setPdfPasswordError] = useState("");
 
   useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
   useEffect(() => { onLoadErrorRef.current = onLoadError; }, [onLoadError]);
@@ -208,13 +216,33 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl", em
     printDocument(makeBlFileStem(shipment, isMbl, mode));
   };
 
-  const downloadPdf = async () => {
+  const closePdfPassword = () => {
+    if (pdfBusy) return;
+    setShowPdfPassword(false);
+    setPdfPassword("");
+    setPdfPasswordConfirm("");
+    setPdfPasswordError("");
+  };
+
+  const downloadPdf = async (editPassword) => {
+    const passwordError = validatePdfEditPassword(editPassword, pdfPasswordConfirm);
+    if (passwordError) {
+      setPdfPasswordError(passwordError);
+      return;
+    }
     setPdfBusy(true);
+    setPdfPasswordError("");
     try {
       await downloadDocumentPdf({
         filename: makeBlFileStem(shipment, isMbl, mode),
         pageSelector: ".hbl-page",
+        singlePagePerElement: true,
+        editableText: true,
+        editPassword,
       });
+      setShowPdfPassword(false);
+      setPdfPassword("");
+      setPdfPasswordConfirm("");
     } catch (e) {
       console.error(e);
       alert("PDF 导出失败：" + (e?.message || e));
@@ -479,6 +507,55 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl", em
                      : "THREE (3)";
 
   const carrierName = s.carrier_name || s.carrier || s.shipping_line || "";
+  const companyEn = (co.name_en || "BANSAR (NINGBO) INT'L TRANSPORTATION CO., LTD.").toUpperCase();
+
+  // Excel 版：用和网页完全相同的数据，按同一版面排
+  const downloadExcel = async () => {
+    setExcelBusy(true);
+    try {
+      await exportBlToXlsx({
+        filename: fileStem,
+        doc: {
+          companyEn, logoUrl: co.logo_url, stampUrl: co.stamp_url, signatureUrl: co.signature_url,
+          blNo, blNoLabel, bookingNo: s.booking_no || "", designation, formCode, totalPages,
+          badge: isDraft ? "DRAFT — Subject to Confirmation" : isCopy ? "COPY NON-NEGOTIABLE" : isTelex ? "TELEX RELEASE" : "",
+          shipper: partyShipper || "—",
+          consignee: partyConsignee || "—",
+          notify: partyNotify || "SAME AS CONSIGNEE",
+          deliveryAgent: s.destination_agent || s.overseas_agent || "—",
+          telexStamp: blType === "电放" && !isTelex,
+          placeOfReceipt: s.pol || "—",
+          vesselVoyage: `${s.vessel || "—"}${s.voyage ? `    ${s.voyage}` : ""}`,
+          pol: s.pol || "—",
+          pod: s.pod || "—",
+          placeOfDelivery: s.pod || "—",
+          finalDestination: s.pod || "—",
+          rows, totalPkg, totalWt, totalCbm, distinctProducts,
+          unit: rows[0]?.unit || "CARTONS",
+          showSummary: rows.length > 1 && totalPkg > 0,
+          showTotal: rows.length > 1,
+          containerInfo: rows.map(r => r.cnInfo).filter(Boolean).join("\n"),
+          freightTerms: (s.freight_terms || "FREIGHT AS ARRANGED").toUpperCase(),
+          onBoardDate,
+          totalInWords: `SAY ${chineseNum(totalPkg)} (${totalPkg}) ${rows[0]?.unit || "PACKAGES"} ONLY`,
+          isPrepaid, isCollect,
+          payableAt: isCollect ? "DESTINATION" : isPrepaid ? "ORIGIN" : "",
+          placeAndDate: `${s.pol || "NINGBO"}    ${issueDate}`,
+          numOriginals,
+          legalText: LEGAL_TEXT,
+          carrierName: carrierName.toUpperCase(),
+          termsIntro: TERMS_INTRO,
+          terms: TERMS_LIST,
+          termsFooter: `${(co.name_en || "BANSAR").toUpperCase()} — Bill of Lading Terms and Conditions`,
+        },
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Excel 导出失败：" + (e?.message || e));
+    } finally {
+      setExcelBusy(false);
+    }
+  };
 
   return (
     <div className="doc-page">
@@ -591,13 +668,87 @@ export default function BLLayout({ shipmentId, onBack, mode, variant = "hbl", em
           />
           合并明细到一行
         </label>
-        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...btnPrimary, opacity: pdfBusy ? 0.65 : 1 }}>
-          {pdfBusy ? "生成 PDF..." : "下载 PDF"}
+        <button
+          onClick={() => setShowPdfPassword(true)}
+          disabled={pdfBusy}
+          style={{ ...btnPrimary, opacity: pdfBusy ? 0.65 : 1 }}
+        >
+          {pdfBusy ? "生成 PDF..." : "下载可编辑 PDF"}
         </button>
-        <button onClick={() => exportDraftBLToXlsx(shipmentId)} style={btn}>下载 Excel</button>
+        <button onClick={() => downloadDocumentWord({ filename: fileStem, pageSelector: ".hbl-page", pageMargin: "12mm" })} style={btn}>下载 Word</button>
+        <button onClick={downloadExcel} disabled={excelBusy} style={{ ...btn, opacity: excelBusy ? 0.65 : 1 }}>
+          {excelBusy ? "生成 Excel..." : "下载 Excel"}
+        </button>
+        <button onClick={() => exportDraftBLToXlsx(shipmentId)} style={btn} title="船公司 SI 补料模板格式">下载 SI 格式 Excel</button>
         <button onClick={() => downloadDocumentHtml({ filename: fileStem })} style={btn}>下载 HTML</button>
         <button onClick={print} style={btn}>🖨 打印</button>
       </div>}
+
+      {!embedded && showPdfPassword && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="设置 PDF 编辑密码"
+          className="no-print"
+          onKeyDown={event => {
+            if (event.key === "Escape") closePdfPassword();
+          }}
+          style={passwordMaskStyle}
+        >
+          <form
+            onSubmit={event => {
+              event.preventDefault();
+              downloadPdf(pdfPassword);
+            }}
+            style={passwordDialogStyle}
+          >
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#222" }}>设置 PDF 编辑密码</div>
+            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, color: "#666" }}>
+              PDF 可直接打开、查看和打印；使用 PDF 编辑器修改内容时，需要输入下面的密码。
+            </div>
+            <label style={passwordLabelStyle}>
+              编辑密码
+              <input
+                autoFocus
+                type="password"
+                autoComplete="new-password"
+                value={pdfPassword}
+                disabled={pdfBusy}
+                onChange={event => {
+                  setPdfPassword(event.target.value);
+                  setPdfPasswordError("");
+                }}
+                placeholder="6-32 位英文、数字或英文符号"
+                style={passwordInputStyle}
+              />
+            </label>
+            <label style={passwordLabelStyle}>
+              再输一次
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={pdfPasswordConfirm}
+                disabled={pdfBusy}
+                onChange={event => {
+                  setPdfPasswordConfirm(event.target.value);
+                  setPdfPasswordError("");
+                }}
+                placeholder="请再次输入编辑密码"
+                style={passwordInputStyle}
+              />
+            </label>
+            {pdfPasswordError && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#cf1322" }}>{pdfPasswordError}</div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+              <button type="button" onClick={closePdfPassword} disabled={pdfBusy} style={btn}>取消</button>
+              <button type="submit" disabled={pdfBusy} style={{ ...btnPrimary, opacity: pdfBusy ? 0.65 : 1 }}>
+                {pdfBusy ? "生成中..." : "生成并下载"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* 渲染所有货物页 */}
       {cargoPages.map((pageRows, pageIdx) => (
@@ -1008,11 +1159,9 @@ function CargoPage({
             {/* 法律条款 | 签章区 */}
             <div style={{ padding: "6px 10px", borderRight: "1px solid #555",
                           fontSize: 7.5, color: "#555", lineHeight: 1.45, textAlign: "justify" }}>
-              <p style={{ margin: "0 0 4px" }}>RECEIVED in apparent good order and condition except as otherwise noted the total number of containers or other packages or units enumerated below for transportation from the place of receipt of delivery subject to the terms hereof.</p>
-              <p style={{ margin: "0 0 4px" }}>One of the original Bill of Lading must be surrendered duly endorsed in exchange for the Goods Delivery Order.</p>
-              <p style={{ margin: "0 0 4px" }}>On presentation of this document (duly endorsed) to the Carrier by or on behalf of the holders the rights and liabilities arising in according with the terms hereof shall (without prejudice to any rule of common law or statute rendering them binding on the Merchant) become binding all respects between the Carrier and the Holder as thought the contract evidenced hereby had been made between them.</p>
-              <p style={{ margin: "0 0 4px" }}>IN WITNESS whereof the number of original Bill of Lading stated below have been signed, one of which being accomplished, the other(s) to be void.</p>
-              <p style={{ margin: 0 }}>(Terms of Bill of Lading continued on the back hereof).</p>
+              {LEGAL_TEXT.map((text, i) => (
+                <p key={i} style={{ margin: i === LEGAL_TEXT.length - 1 ? 0 : "0 0 4px" }}>{text}</p>
+              ))}
             </div>
             <div style={{ padding: "6px 10px", position: "relative", minHeight: 170 }}>
               <div style={{ fontSize: 9, color: "#000", marginBottom: 4 }}>For and on behalf of</div>
@@ -1111,7 +1260,7 @@ function TermsPage({ co, blNo, blNoLabel = "B/L No.", formCode = "BNSR-HBL", tot
       <div style={{ fontSize: 9, lineHeight: 1.5, color: "#444",
                     padding: "6px 10px", background: BRAND_BG,
                     border: `0.5px solid ${BRAND_BORDER}`, marginBottom: 10 }}>
-        This Bill of Lading is issued subject to the terms and conditions on the face and reverse side hereof, the Company's Standard Trading Conditions, and the actual Carrier's applicable bill of lading, tariff and service terms, all of which are incorporated herein.
+        {TERMS_INTRO}
       </div>
 
       <div className="terms-col" style={{ fontSize: 8.5, lineHeight: 1.45, color: "#000" }}>
@@ -1132,6 +1281,17 @@ function TermsPage({ co, blNo, blNoLabel = "B/L No.", formCode = "BNSR-HBL", tot
     </div>
   );
 }
+
+// 提单正面左下角的法律条款（网页 / Word / Excel 共用）
+const LEGAL_TEXT = [
+  `RECEIVED in apparent good order and condition except as otherwise noted the total number of containers or other packages or units enumerated below for transportation from the place of receipt of delivery subject to the terms hereof.`,
+  `One of the original Bill of Lading must be surrendered duly endorsed in exchange for the Goods Delivery Order.`,
+  `On presentation of this document (duly endorsed) to the Carrier by or on behalf of the holders the rights and liabilities arising in according with the terms hereof shall (without prejudice to any rule of common law or statute rendering them binding on the Merchant) become binding all respects between the Carrier and the Holder as thought the contract evidenced hereby had been made between them.`,
+  `IN WITNESS whereof the number of original Bill of Lading stated below have been signed, one of which being accomplished, the other(s) to be void.`,
+  `(Terms of Bill of Lading continued on the back hereof).`,
+];
+
+const TERMS_INTRO = "This Bill of Lading is issued subject to the terms and conditions on the face and reverse side hereof, the Company's Standard Trading Conditions, and the actual Carrier's applicable bill of lading, tariff and service terms, all of which are incorporated herein.";
 
 // ============================================================================
 // 23 条款数据
@@ -1270,3 +1430,23 @@ const btn = {
   fontSize: 12, cursor: "pointer",
 };
 const btnPrimary = { ...btn, background: "#1890ff", color: "#fff", border: "1px solid #1890ff" };
+const passwordMaskStyle = {
+  position: "fixed", inset: 0, zIndex: 1000,
+  display: "flex", alignItems: "center", justifyContent: "center",
+  padding: 20, background: "rgba(0,0,0,0.42)",
+};
+const passwordDialogStyle = {
+  width: 380, maxWidth: "100%", padding: 22,
+  background: "#fff", borderRadius: 8,
+  boxShadow: "0 12px 36px rgba(0,0,0,0.24)",
+};
+const passwordLabelStyle = {
+  display: "block", marginTop: 14,
+  fontSize: 12, fontWeight: 600, color: "#444",
+};
+const passwordInputStyle = {
+  display: "block", width: "100%", boxSizing: "border-box",
+  marginTop: 5, padding: "8px 10px",
+  border: "1px solid #d9d9d9", borderRadius: 4,
+  fontSize: 13, outline: "none",
+};

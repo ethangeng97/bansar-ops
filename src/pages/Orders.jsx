@@ -5268,7 +5268,7 @@ function ChargesPanel({ ref, order, role, user, isLocked }) {
     // 应收过滤：客户 + 海外代理（部分应收来自代理）；应付过滤：供应商类
     const partnerFilter = direction === "应收"
       ? ["客户", "海外代理"]
-      : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"];
+      : ["供应商", "船东", "订舱代理", "海外代理", "车队", "报关行", "仓库"];
     const partnerOptions = partners.filter(p => partnerFilter.includes(p.partner_type));
     // 默认新增的 partner_type
     const defaultPartnerType = direction === "应收" ? "客户" : "供应商";
@@ -5753,7 +5753,7 @@ function BatchEditModal({ direction, action, rowIds, partners, rates, onCreatePa
 
   const partnerFilter = direction === "应收"
     ? ["客户", "海外代理"]
-    : ["供应商", "船东", "海外代理", "车队", "报关行", "仓库"];
+    : ["供应商", "船东", "订舱代理", "海外代理", "车队", "报关行", "仓库"];
   const partnerOptions = partners.filter(p => partnerFilter.includes(p.partner_type));
   const defaultPartnerType = direction === "应收" ? "客户" : "供应商";
 
